@@ -1,0 +1,9 @@
+llama-cpp-python
+openai
+torch
+torchaudio
+torchcodec
+omnivoice
+openai-whisper
+faster-whisper
+pydub

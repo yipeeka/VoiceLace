@@ -1,0 +1,258 @@
+from __future__ import annotations
+
+import asyncio
+import time
+import unittest
+import uuid
+import wave
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
+from fastapi.testclient import TestClient
+
+from backend.main import app
+from backend.models import Script, Segment
+from backend.state import app_state
+
+
+class TaskFlowTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.client = TestClient(app)
+
+    def _create_project(self, name_prefix: str = "task-flow") -> str:
+        name = f"{name_prefix}-{uuid.uuid4().hex[:8]}"
+        created = self.client.post("/api/v1/projects", json={"name": name})
+        self.assertEqual(created.status_code, 200)
+        return created.json()["id"]
+
+    def _update_script(self, project_id: str, script_payload: dict) -> None:
+        response = self.client.put(f"/api/v1/projects/{project_id}/script", json=script_payload)
+        self.assertEqual(response.status_code, 200)
+
+    def _wait_for_parse(self, task_id: str, timeout_s: float = 6.0) -> tuple[int, dict]:
+        end = time.time() + timeout_s
+        while time.time() < end:
+            response = self.client.get(f"/api/v1/llm/parse/{task_id}")
+            if response.status_code in {200, 500}:
+                return response.status_code, response.json()
+            time.sleep(0.05)
+        response = self.client.get(f"/api/v1/llm/parse/{task_id}")
+        return response.status_code, response.json()
+
+    def _wait_for_tts(self, task_id: str, timeout_s: float = 8.0) -> tuple[int, dict]:
+        end = time.time() + timeout_s
+        while time.time() < end:
+            response = self.client.get(f"/api/v1/tts/synthesize/{task_id}")
+            body = response.json()
+            if response.status_code == 200 and body.get("status") == "done":
+                return response.status_code, body
+            if response.status_code == 500:
+                return response.status_code, body
+            time.sleep(0.05)
+        response = self.client.get(f"/api/v1/tts/synthesize/{task_id}")
+        return response.status_code, response.json()
+
+    def test_llm_parse_task_completes_and_persists(self) -> None:
+        project_id = self._create_project("parse")
+        parsed_script = Script(
+            title="测试标题",
+            source_text="输入文本",
+            segments=[
+                Segment(id="seg-1", index=0, type="narration", speaker="narrator", text="第一段"),
+                Segment(id="seg-2", index=1, type="dialogue", speaker="A", text="第二段"),
+            ],
+        )
+
+        with (
+            patch.object(app_state.orchestrator, "ensure_llm_ready", new=AsyncMock(return_value=None)),
+            patch.object(app_state.orchestrator, "unload_llm", new=AsyncMock(return_value=None)),
+            patch.object(app_state.llm_engine, "parse_text_chunked_stream", new=AsyncMock(return_value=parsed_script)),
+        ):
+            started = self.client.post(
+                "/api/v1/llm/parse",
+                json={"text": "输入文本", "project_id": project_id},
+            )
+            self.assertEqual(started.status_code, 200)
+            task_id = started.json()["task_id"]
+
+            status_code, body = self._wait_for_parse(task_id)
+            self.assertEqual(status_code, 200)
+            self.assertEqual(len(body["segments"]), 2)
+            self.assertEqual(body["segments"][0]["text"], "第一段")
+
+        fetched_script = self.client.get(f"/api/v1/projects/{project_id}/script")
+        self.assertEqual(fetched_script.status_code, 200)
+        self.assertEqual(len(fetched_script.json()["segments"]), 2)
+
+    def test_llm_parse_cancel(self) -> None:
+        project_id = self._create_project("cancel-parse")
+
+        async def slow_parse(*args, **kwargs):
+            await asyncio.sleep(1.2)
+            return Script(
+                title="slow",
+                source_text="slow",
+                segments=[Segment(id="s-1", index=0, type="narration", speaker="narrator", text="slow")],
+            )
+
+        with (
+            patch.object(app_state.orchestrator, "ensure_llm_ready", new=AsyncMock(return_value=None)),
+            patch.object(app_state.orchestrator, "unload_llm", new=AsyncMock(return_value=None)),
+            patch.object(app_state.llm_engine, "parse_text_chunked_stream", new=AsyncMock(side_effect=slow_parse)),
+        ):
+            started = self.client.post(
+                "/api/v1/llm/parse",
+                json={"text": "will cancel", "project_id": project_id},
+            )
+            self.assertEqual(started.status_code, 200)
+            task_id = started.json()["task_id"]
+
+            canceled = self.client.post(f"/api/v1/llm/parse/{task_id}/cancel", json={})
+            self.assertEqual(canceled.status_code, 200)
+            self.assertIn(canceled.json()["status"], {"cancel_requested", "canceled"})
+
+            time.sleep(0.2)
+            check = self.client.get(f"/api/v1/llm/parse/{task_id}")
+            self.assertEqual(check.status_code, 202)
+            self.assertIn(check.json()["status"], {"cancel_requested", "canceled"})
+
+    def test_tts_synthesis_task_completes(self) -> None:
+        project_id = self._create_project("tts")
+        self._update_script(
+            project_id,
+            {
+                "title": "tts-test",
+                "source_text": "tts",
+                "segments": [
+                    {"id": "seg-a", "index": 0, "type": "narration", "speaker": "narrator", "text": "A"},
+                    {"id": "seg-b", "index": 1, "type": "dialogue", "speaker": "B", "text": "B"},
+                ],
+                "characters": [],
+                "metadata": {},
+            },
+        )
+
+        async def fake_synthesize(text, output_path: Path, preset=None, config=None):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with wave.open(str(output_path), "wb") as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(22050)
+                wav_file.writeframes(b"\x00\x00" * 2205)
+            return output_path
+
+        with (
+            patch.object(app_state.orchestrator, "ensure_tts_ready", new=AsyncMock(return_value=None)),
+            patch.object(app_state.tts_engine, "synthesize_to_file", new=AsyncMock(side_effect=fake_synthesize)),
+        ):
+            started = self.client.post(
+                "/api/v1/tts/synthesize",
+                json={"project_id": project_id},
+            )
+            self.assertEqual(started.status_code, 200)
+            task_id = started.json()["task_id"]
+
+            status_code, body = self._wait_for_tts(task_id)
+            self.assertEqual(status_code, 200)
+            self.assertEqual(body["status"], "done")
+            self.assertEqual(body["progress"]["total"], 2)
+            self.assertEqual(len(body["segments"]), 2)
+            self.assertTrue(body["export_url"])
+
+            export_resp = self.client.get(body["export_url"])
+            self.assertEqual(export_resp.status_code, 200)
+            self.assertIn(export_resp.headers.get("content-type", ""), {"audio/wav", "audio/x-wav"})
+
+            subtitle_resp = self.client.get(f"/api/v1/tts/subtitle?project_id={project_id}&format=srt")
+            self.assertEqual(subtitle_resp.status_code, 200)
+            self.assertIn("text/plain", subtitle_resp.headers.get("content-type", ""))
+
+            archive_resp = self.client.get(f"/api/v1/tts/export/{project_id}/archive")
+            self.assertEqual(archive_resp.status_code, 200)
+            self.assertIn("application/zip", archive_resp.headers.get("content-type", ""))
+
+    def test_transcribe_success_with_mocked_asr(self) -> None:
+        audio_path = app_state.settings.voices_dir / f"asr-{uuid.uuid4().hex[:8]}.wav"
+        with wave.open(str(audio_path), "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(16000)
+            wav_file.writeframes(b"\x00\x00" * 16000)
+
+        with (
+            patch.object(app_state.asr_engine, "transcribe", new=AsyncMock(return_value="hello world")),
+            patch.object(app_state.asr_engine, "backend_name", "test-asr"),
+        ):
+            response = self.client.post(
+                "/api/v1/voices/transcribe",
+                json={"audio_path": str(audio_path)},
+            )
+            self.assertEqual(response.status_code, 200)
+            body = response.json()
+            self.assertEqual(body["text"], "hello world")
+            self.assertEqual(body["backend"], "test-asr")
+
+    def test_delete_project_cleans_outputs_and_logs(self) -> None:
+        project_id = self._create_project("delete-cleanup")
+        self._update_script(
+            project_id,
+            {
+                "title": "cleanup-test",
+                "source_text": "cleanup",
+                "segments": [
+                    {"id": "seg-clean-1", "index": 0, "type": "narration", "speaker": "narrator", "text": "A"},
+                ],
+                "characters": [],
+                "metadata": {},
+            },
+        )
+
+        async def fake_synthesize(text, output_path: Path, preset=None, config=None):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with wave.open(str(output_path), "wb") as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(22050)
+                wav_file.writeframes(b"\x00\x00" * 1102)
+            return output_path
+
+        with (
+            patch.object(app_state.orchestrator, "ensure_tts_ready", new=AsyncMock(return_value=None)),
+            patch.object(app_state.tts_engine, "synthesize_to_file", new=AsyncMock(side_effect=fake_synthesize)),
+        ):
+            started = self.client.post("/api/v1/tts/synthesize", json={"project_id": project_id})
+            self.assertEqual(started.status_code, 200)
+            task_id = started.json()["task_id"]
+            status_code, body = self._wait_for_tts(task_id)
+            self.assertEqual(status_code, 200)
+            self.assertEqual(body["status"], "done")
+
+        project_file = app_state.settings.projects_dir / f"{project_id}.json"
+        event_file = app_state.settings.projects_dir / f"{project_id}.events.jsonl"
+        task_dir = app_state.settings.output_dir / task_id
+        wav_file = app_state.settings.output_dir / f"{project_id}.wav"
+        srt_file = app_state.settings.output_dir / f"{project_id}.srt"
+        lrc_file = app_state.settings.output_dir / f"{project_id}.lrc"
+
+        self.assertTrue(project_file.exists())
+        self.assertTrue(event_file.exists())
+        self.assertTrue(task_dir.exists())
+        self.assertTrue(wav_file.exists())
+        self.assertTrue(srt_file.exists())
+        self.assertTrue(lrc_file.exists())
+
+        deleted = self.client.delete(f"/api/v1/projects/{project_id}")
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(deleted.json()["status"], "deleted")
+
+        self.assertFalse(project_file.exists())
+        self.assertFalse(event_file.exists())
+        self.assertFalse(task_dir.exists())
+        self.assertFalse(wav_file.exists())
+        self.assertFalse(srt_file.exists())
+        self.assertFalse(lrc_file.exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

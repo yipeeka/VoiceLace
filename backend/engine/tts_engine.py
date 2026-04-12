@@ -1,0 +1,222 @@
+from __future__ import annotations
+
+import wave
+from pathlib import Path
+from typing import Any
+
+from backend.config import settings
+from backend.models import SynthesisConfig, VoicePreset
+
+
+SUPPORTED_ENGLISH_INSTRUCTS = {
+    "american accent",
+    "australian accent",
+    "british accent",
+    "canadian accent",
+    "child",
+    "chinese accent",
+    "elderly",
+    "female",
+    "high pitch",
+    "indian accent",
+    "japanese accent",
+    "korean accent",
+    "low pitch",
+    "male",
+    "middle-aged",
+    "moderate pitch",
+    "portuguese accent",
+    "russian accent",
+    "teenager",
+    "very high pitch",
+    "very low pitch",
+    "whisper",
+    "young adult",
+}
+
+
+class TTSEngine:
+    def __init__(self) -> None:
+        self.is_loaded = False
+        self.model_path = "k2-fsa/OmniVoice"
+        self.device = "cpu"
+        self.backend_name = "mock"
+        self.last_error = ""
+        self._model: Any | None = None
+        self._torch: Any | None = None
+        self._audio_patch_applied = False
+
+    async def load_model(self, model_path: str, device: str) -> None:
+        self.model_path = model_path or settings.default_tts_model_path or self.model_path
+        self.device = device or settings.default_tts_device or self.device
+
+        try:
+            import torch
+            from omnivoice import OmniVoice
+            self._install_omnivoice_audio_patch(torch)
+        except ImportError as exc:
+            self._fallback_or_raise(f"未安装 OmniVoice 相关依赖: {exc}")
+            return
+
+        try:
+            dtype = torch.float16 if self.device.startswith("cuda") else torch.float32
+            self._model = OmniVoice.from_pretrained(
+                self.model_path,
+                device_map=self.device,
+                dtype=dtype,
+            )
+            self._torch = torch
+            self._install_sage_attention(torch)
+            self.is_loaded = True
+            self.backend_name = "omnivoice"
+            self.last_error = ""
+        except Exception as exc:
+            self._fallback_or_raise(f"加载 OmniVoice 失败: {exc}")
+
+    async def unload_model(self) -> None:
+        self.is_loaded = False
+        self._model = None
+        self._torch = None
+
+    async def synthesize_to_file(
+        self,
+        text: str,
+        output_path: Path,
+        preset: VoicePreset | None = None,
+        config: SynthesisConfig | None = None,
+    ) -> Path:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        if self.backend_name == "omnivoice" and self._model is not None and self._torch is not None:
+            kwargs: dict[str, Any] = {"text": text}
+            if config is not None:
+                kwargs["num_step"] = int(config.num_step)
+                kwargs["guidance_scale"] = float(config.guidance_scale)
+                kwargs["denoise"] = bool(config.denoise)
+            if preset:
+                if preset.voice_mode == "clone" and preset.ref_audio_path:
+                    kwargs["ref_audio"] = preset.ref_audio_path
+                    if preset.ref_text:
+                        kwargs["ref_text"] = preset.ref_text
+                else:
+                    instruct = self._sanitize_instruct(preset.to_instruct_string())
+                    if instruct:
+                        kwargs["instruct"] = instruct
+                if preset.speed and preset.speed != 1.0:
+                    kwargs["speed"] = preset.speed
+
+            try:
+                audio = self._model.generate(**kwargs)
+                tensor = audio[0].detach().cpu().clamp(-1, 1)
+                waveform = (tensor.squeeze(0).numpy() * 32767).astype("int16").tobytes()
+                with wave.open(str(output_path), "wb") as wav_file:
+                    wav_file.setnchannels(1)
+                    wav_file.setsampwidth(2)
+                    wav_file.setframerate(24000)
+                    wav_file.writeframes(waveform)
+                return output_path
+            except Exception as exc:
+                self._fallback_or_raise(f"OmniVoice 运行失败: {exc}")
+
+        self._write_mock_silence(output_path)
+        return output_path
+
+    def _sanitize_instruct(self, instruct: str) -> str:
+        if not instruct:
+            return ""
+        items = [item.strip() for item in instruct.split(",") if item.strip()]
+        filtered = [item for item in items if item.lower() in SUPPORTED_ENGLISH_INSTRUCTS]
+        return ", ".join(filtered)
+
+    _sage_attention_applied = False
+
+    def _install_sage_attention(self, torch_module: Any) -> None:
+        if TTSEngine._sage_attention_applied:
+            return
+        try:
+            from sageattention import sageattn
+            import torch.nn.functional as F
+            _original_sdpa = F.scaled_dot_product_attention
+
+            def _sage_sdpa(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None, **kwargs):
+                # SageAttention doesn't support attn_mask or dropout; fall back for those cases
+                if attn_mask is not None or dropout_p > 0.0:
+                    return _original_sdpa(query, key, value, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal, scale=scale, **kwargs)
+                try:
+                    return sageattn(query, key, value, is_causal=is_causal, smooth_k=True)
+                except Exception:
+                    return _original_sdpa(query, key, value, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal, scale=scale, **kwargs)
+
+            F.scaled_dot_product_attention = _sage_sdpa
+            TTSEngine._sage_attention_applied = True
+            import logging
+            logging.getLogger(__name__).info("SageAttention 2 已启用，替换 torch SDPA")
+        except ImportError:
+            import logging
+            logging.getLogger(__name__).info("sageattention 未安装，使用默认 SDPA")
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning(f"SageAttention 安装失败: {exc}，使用默认 SDPA")
+
+    def _fallback_or_raise(self, message: str) -> None:
+        self.last_error = message
+        if not settings.allow_mock_fallback:
+            raise RuntimeError(message)
+        self.is_loaded = True
+        self.backend_name = "mock"
+        self._model = None
+
+    def _write_mock_silence(self, output_path: Path) -> None:
+        with wave.open(str(output_path), "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(22050)
+            wav_file.writeframes(b"\x00\x00" * 22050)
+
+    def _install_omnivoice_audio_patch(self, torch_module: Any) -> None:
+        if self._audio_patch_applied:
+            return
+        try:
+            import numpy as np
+            import torchaudio
+            from omnivoice.models import omnivoice as omnivoice_model_module
+            from omnivoice.utils import audio as omnivoice_audio_module
+            from pydub import AudioSegment
+            import soundfile as sf
+        except Exception:
+            return
+
+        def _load_audio_compat(audio_path: str, sampling_rate: int):
+            waveform = None
+            prompt_sampling_rate = None
+            try:
+                waveform, prompt_sampling_rate = torchaudio.load(audio_path, backend="soundfile")
+            except Exception:
+                try:
+                    audio_data, prompt_sampling_rate = sf.read(
+                        audio_path,
+                        dtype="float32",
+                        always_2d=True,
+                    )
+                    waveform = torch_module.from_numpy(audio_data.T)
+                except Exception:
+                    aseg = AudioSegment.from_file(audio_path)
+                    audio_data = np.array(aseg.get_array_of_samples()).astype(np.float32) / 32768.0
+                    if aseg.channels == 1:
+                        waveform = torch_module.from_numpy(audio_data).unsqueeze(0)
+                    else:
+                        waveform = torch_module.from_numpy(audio_data.reshape(-1, aseg.channels).T)
+                    prompt_sampling_rate = aseg.frame_rate
+
+            if prompt_sampling_rate != sampling_rate:
+                waveform = torchaudio.functional.resample(
+                    waveform,
+                    orig_freq=prompt_sampling_rate,
+                    new_freq=sampling_rate,
+                )
+            if waveform.shape[0] > 1:
+                waveform = torch_module.mean(waveform, dim=0, keepdim=True)
+            return waveform
+
+        omnivoice_audio_module.load_audio = _load_audio_compat
+        omnivoice_model_module.load_audio = _load_audio_compat
+        self._audio_patch_applied = True
