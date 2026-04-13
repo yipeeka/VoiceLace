@@ -123,6 +123,7 @@ Base URL: `http://localhost:8000/api/v1`
 - 声音试听：`POST /voices/preview`
 - 参考音频转写：`POST /voices/transcribe`
 - 项目事件日志：`GET /projects/{project_id}/events`
+- 文件浏览：`POST /system/files/browse`（仅允许白名单目录）
 
 ## WebSocket
 

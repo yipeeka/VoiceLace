@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 import unittest
 import json
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -149,6 +150,24 @@ class ApiSmokeTest(unittest.TestCase):
             self.assertEqual(cfg.get("llm_threads"), 6)
         finally:
             self.client.post("/api/v1/system/orchestrator/config/reset", json={})
+
+    def test_browse_files_allows_data_dir(self) -> None:
+        response = self.client.post(
+            "/api/v1/system/files/browse",
+            json={"path": str(self.app_state.settings.data_dir)},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIsInstance(response.json(), list)
+
+    def test_browse_files_rejects_outside_allowed_roots(self) -> None:
+        outside = Path(self.app_state.settings.base_dir.anchor or "C:\\").resolve()
+        response = self.client.post(
+            "/api/v1/system/files/browse",
+            json={"path": str(outside)},
+        )
+        self.assertEqual(response.status_code, 403)
+        body = response.json()
+        self.assertEqual(body["code"], "http_403")
 
     def test_project_crud(self) -> None:
         name = f"smoke-{uuid.uuid4().hex[:8]}"

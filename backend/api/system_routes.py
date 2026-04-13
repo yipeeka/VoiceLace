@@ -4,7 +4,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from backend.engine import OrchestratorConfig
 from backend.models import FileBrowseRequest, LoadLlmRequest, LoadTtsRequest, OrchestratorConfigPayload
@@ -12,6 +12,26 @@ from backend.runtime_config import save_runtime_config
 from backend.state import get_app_state
 
 router = APIRouter()
+
+
+def _allowed_browse_roots(state) -> list[Path]:
+    project_root = state.settings.base_dir.parent.resolve()
+    return [
+        state.settings.data_dir.resolve(),
+        state.settings.projects_dir.resolve(),
+        state.settings.voices_dir.resolve(),
+        state.settings.output_dir.resolve(),
+        (project_root / "models").resolve(),
+        (project_root / "samples").resolve(),
+    ]
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
 
 
 @router.get("/status")
@@ -103,8 +123,11 @@ async def unload_tts(state=Depends(get_app_state)):
 
 
 @router.post("/files/browse")
-async def browse_files(payload: FileBrowseRequest):
+async def browse_files(payload: FileBrowseRequest, state=Depends(get_app_state)):
     base = Path(payload.path).expanduser().resolve()
+    allowed_roots = _allowed_browse_roots(state)
+    if not any(_is_within(base, root) for root in allowed_roots):
+        raise HTTPException(status_code=403, detail="Path is outside allowed browse roots")
     entries = []
     if not base.exists():
         return entries
