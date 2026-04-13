@@ -1,0 +1,97 @@
+from __future__ import annotations
+
+import unittest
+
+from backend.engine.model_orchestrator import ModelOrchestrator, OrchestratorConfig
+
+
+class _FakeLlmEngine:
+    def __init__(self) -> None:
+        self.is_loaded = False
+        self.last_error = ""
+        self.backend_name = "llama-cpp-python"
+        self.enable_llama_cpp_think_mode = True
+        self.loaded_args = None
+        self.unload_called = False
+
+    def needs_reload(self, **kwargs) -> bool:
+        return False
+
+    async def load_model(self, *args, **kwargs) -> None:
+        self.is_loaded = True
+        self.loaded_args = (args, kwargs)
+
+    async def unload_model(self) -> None:
+        self.is_loaded = False
+        self.unload_called = True
+
+
+class _FakeTtsEngine:
+    def __init__(self) -> None:
+        self.is_loaded = False
+        self.last_error = ""
+        self.backend_name = "mock"
+        self.loaded_args = None
+        self.unload_called = False
+
+    async def load_model(self, *args, **kwargs) -> None:
+        self.is_loaded = True
+        self.loaded_args = (args, kwargs)
+
+    async def unload_model(self) -> None:
+        self.is_loaded = False
+        self.unload_called = True
+
+
+class ModelOrchestratorTest(unittest.IsolatedAsyncioTestCase):
+    async def test_status_marks_llm_fallback_active(self) -> None:
+        llm = _FakeLlmEngine()
+        tts = _FakeTtsEngine()
+        orch = ModelOrchestrator(llm, tts)
+        orch.set_config(OrchestratorConfig(llm_backend="llama_cpp"))
+
+        llm.is_loaded = True
+        llm.backend_name = "mock"
+        llm.last_error = "failed to load gguf"
+
+        status = await orch.get_status()
+        self.assertTrue(status["llm_fallback_active"])
+        self.assertEqual(status["llm_status"], "ready")
+        self.assertEqual(status["llm_backend"], "mock")
+
+    async def test_status_no_fallback_when_config_is_mock(self) -> None:
+        llm = _FakeLlmEngine()
+        tts = _FakeTtsEngine()
+        orch = ModelOrchestrator(llm, tts)
+        orch.set_config(OrchestratorConfig(llm_backend="mock"))
+
+        llm.is_loaded = True
+        llm.backend_name = "mock"
+        llm.last_error = "none"
+
+        status = await orch.get_status()
+        self.assertFalse(status["llm_fallback_active"])
+
+    async def test_set_config_updates_think_mode_flag(self) -> None:
+        llm = _FakeLlmEngine()
+        tts = _FakeTtsEngine()
+        orch = ModelOrchestrator(llm, tts)
+        self.assertTrue(llm.enable_llama_cpp_think_mode)
+        orch.set_config(OrchestratorConfig(enable_llama_cpp_think_mode=False))
+        self.assertFalse(llm.enable_llama_cpp_think_mode)
+
+    async def test_ensure_llm_ready_unloads_tts_when_auto_serial_enabled(self) -> None:
+        llm = _FakeLlmEngine()
+        tts = _FakeTtsEngine()
+        tts.is_loaded = True
+
+        orch = ModelOrchestrator(llm, tts)
+        orch.set_config(OrchestratorConfig(auto_serial=True, llm_model_path="E:/models/test.gguf"))
+
+        await orch.ensure_llm_ready()
+        self.assertTrue(llm.is_loaded)
+        self.assertTrue(tts.unload_called)
+
+
+if __name__ == "__main__":
+    unittest.main()

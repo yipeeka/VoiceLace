@@ -7,13 +7,19 @@ import json
 from fastapi.testclient import TestClient
 
 from backend.main import app
-from backend.state import app_state
+from backend.state import get_app_state_from_app
 
 
 class ApiSmokeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.client = TestClient(app)
+        cls._client_ctx = TestClient(app)
+        cls.client = cls._client_ctx.__enter__()
+        cls.app_state = get_app_state_from_app(app)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._client_ctx.__exit__(None, None, None)
 
     def test_root(self) -> None:
         response = self.client.get("/")
@@ -29,6 +35,9 @@ class ApiSmokeTest(unittest.TestCase):
         self.assertIn("llm_backend", body)
         self.assertIn("tts_backend", body)
         self.assertIn("asr_backend", body)
+        self.assertIn("python_executable", body)
+        self.assertIn("llama_cpp_available", body)
+        self.assertIn("llama_cpp_module_path", body)
 
     def test_default_prompt(self) -> None:
         response = self.client.get("/api/v1/llm/prompts/default")
@@ -37,7 +46,7 @@ class ApiSmokeTest(unittest.TestCase):
         self.assertTrue(body.get("prompt"))
 
     def test_update_orchestrator_llm_params(self) -> None:
-        cfg_path = app_state.settings.runtime_config_path
+        cfg_path = self.app_state.settings.runtime_config_path
         original_cfg = cfg_path.read_text(encoding="utf-8") if cfg_path.exists() else None
         payload = {
             "auto_serial": True,
@@ -92,6 +101,55 @@ class ApiSmokeTest(unittest.TestCase):
         self.assertIn("tts_model_path", body)
         self.assertIn("asr_model_path", body)
 
+    def test_load_llm_validation_error(self) -> None:
+        response = self.client.post("/api/v1/system/load-llm", json={"n_ctx": "bad-type"})
+        self.assertEqual(response.status_code, 422)
+
+    def test_load_tts_validation_error(self) -> None:
+        response = self.client.post("/api/v1/system/load-tts", json={"unexpected": "field"})
+        self.assertEqual(response.status_code, 422)
+
+    def test_load_llm_partial_update_keeps_existing_config(self) -> None:
+        seed = {
+            "auto_serial": True,
+            "auto_unload_llm_after_parse": True,
+            "auto_load_tts_before_synth": True,
+            "enable_llama_cpp_think_mode": True,
+            "llm_backend": "llama_cpp",
+            "llm_model_path": "E:/models/keep-me.gguf",
+            "llm_api_model": "seed-model",
+            "llm_n_ctx": 6144,
+            "llm_n_gpu_layers": -1,
+            "llm_threads": 6,
+            "llm_temperature": 0.2,
+            "llm_top_p": 0.9,
+            "llm_top_k": 40,
+            "llm_min_p": 0.0,
+            "llm_presence_penalty": 0.0,
+            "llm_repeat_penalty": 1.0,
+            "llm_max_tokens": 2048,
+            "tts_model_path": "k2-fsa/OmniVoice",
+            "tts_device": "cuda:0",
+            "asr_model_path": "base",
+            "asr_device": "cuda:0",
+        }
+        try:
+            self.assertEqual(self.client.put("/api/v1/system/orchestrator/config", json=seed).status_code, 200)
+
+            response = self.client.post("/api/v1/system/load-llm", json={"backend": "mock"})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json().get("backend"), "mock")
+
+            status = self.client.get("/api/v1/system/status")
+            self.assertEqual(status.status_code, 200)
+            cfg = status.json().get("config", {})
+            self.assertEqual(cfg.get("llm_backend"), "mock")
+            self.assertEqual(cfg.get("llm_model_path"), "E:/models/keep-me.gguf")
+            self.assertEqual(cfg.get("llm_n_ctx"), 6144)
+            self.assertEqual(cfg.get("llm_threads"), 6)
+        finally:
+            self.client.post("/api/v1/system/orchestrator/config/reset", json={})
+
     def test_project_crud(self) -> None:
         name = f"smoke-{uuid.uuid4().hex[:8]}"
         created = self.client.post("/api/v1/projects", json={"name": name})
@@ -127,14 +185,12 @@ class ApiSmokeTest(unittest.TestCase):
         self.assertEqual(body["path"], "/api/v1/voices/transcribe")
 
     def test_create_preset_still_works_with_corrupted_preset_file(self) -> None:
-        from backend.state import app_state
-
         original = ""
-        existed = app_state.voice_manager.presets_file.exists()
+        existed = self.app_state.voice_manager.presets_file.exists()
         if existed:
-            original = app_state.voice_manager.presets_file.read_text(encoding="utf-8")
+            original = self.app_state.voice_manager.presets_file.read_text(encoding="utf-8")
         try:
-            app_state.voice_manager.presets_file.write_text("{not-json", encoding="utf-8")
+            self.app_state.voice_manager.presets_file.write_text("{not-json", encoding="utf-8")
             response = self.client.post(
                 "/api/v1/voices/presets",
                 json={
@@ -152,9 +208,9 @@ class ApiSmokeTest(unittest.TestCase):
             self.assertTrue(body["id"])
         finally:
             if existed:
-                app_state.voice_manager.presets_file.write_text(original, encoding="utf-8")
+                self.app_state.voice_manager.presets_file.write_text(original, encoding="utf-8")
             else:
-                app_state.voice_manager.presets_file.unlink(missing_ok=True)
+                self.app_state.voice_manager.presets_file.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

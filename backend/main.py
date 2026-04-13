@@ -11,14 +11,19 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from backend.api import api_router
 from backend.config import settings
+from backend.state import create_app_state
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(app: FastAPI):
     settings.ensure_directories()
-    yield
+    app.state.app_state = create_app_state()
+    try:
+        yield
+    finally:
+        app.state.app_state = None
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)

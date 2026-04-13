@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -9,16 +11,30 @@ from fastapi import HTTPException
 from backend.models import Project
 
 
+def _atomic_write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(prefix=f"{path.name}.", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as tmp_file:
+            tmp_file.write(content)
+            tmp_file.flush()
+            os.fsync(tmp_file.fileno())
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
 def project_path(projects_dir: Path, project_id: str) -> Path:
     return projects_dir / f"{project_id}.json"
 
 
 def save_project(projects_dir: Path, project: Project) -> Project:
     project.updated_at = datetime.now(timezone.utc)
-    project_path(projects_dir, project.id).write_text(
-        project.model_dump_json(indent=2),
-        encoding="utf-8",
-    )
+    _atomic_write_text(project_path(projects_dir, project.id), project.model_dump_json(indent=2))
     return project
 
 

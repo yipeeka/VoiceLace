@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from backend.config import settings
+from starlette.requests import HTTPConnection
+
+from backend.config import settings as app_settings
 from backend.engine import ASREngine, LLMEngine, ModelOrchestrator, TTSEngine, VoiceManager
 from backend.realtime import RealtimeHub
 from backend.runtime_config import load_runtime_config
@@ -11,7 +13,7 @@ from backend.runtime_config import load_runtime_config
 
 @dataclass(slots=True)
 class AppState:
-    settings = settings
+    settings: Any = field(default_factory=lambda: app_settings)
     llm_engine: LLMEngine = field(default_factory=LLMEngine)
     tts_engine: TTSEngine = field(default_factory=TTSEngine)
     asr_engine: ASREngine = field(default_factory=ASREngine)
@@ -40,8 +42,21 @@ class AppState:
         self.orchestrator.add_listener(_broadcast_system_event)
 
 
-app_state = AppState()
+def create_app_state() -> AppState:
+    return AppState()
 
 
-def get_app_state():
-    return app_state
+def get_app_state(connection: HTTPConnection) -> AppState:
+    state = getattr(connection.app.state, "app_state", None)
+    if state is None:
+        state = create_app_state()
+        connection.app.state.app_state = state
+    return state
+
+
+def get_app_state_from_app(app: Any) -> AppState:
+    state = getattr(app.state, "app_state", None)
+    if state is None:
+        state = create_app_state()
+        app.state.app_state = state
+    return state

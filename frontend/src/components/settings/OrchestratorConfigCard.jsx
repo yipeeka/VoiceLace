@@ -1,0 +1,188 @@
+import { HardDrive, Settings } from "lucide-react";
+
+import GlassCard from "../shared/GlassCard";
+import Button from "../ui/Button";
+
+const llmBackendOptions = [
+  { value: "llama_cpp", label: "llama.cpp (本地 GGUF)" },
+  { value: "openai", label: "OpenAI API" },
+  { value: "gemini", label: "Gemini API" },
+  { value: "mock", label: "Mock (调试)" },
+];
+
+export default function OrchestratorConfigCard({ form, isSaving, onSetField, onSave, onReset }) {
+  return (
+    <GlassCard>
+      <h2 className="cardTitle">
+        <Settings size={16} /> 模型调度配置
+      </h2>
+      <p className="cardSubtitle">配置 LLM / TTS 模型文件路径与自动串行模式。</p>
+
+      {form ? (
+        <>
+          <div className="formGroup">
+            <label className="formLabel">LLM 后端</label>
+            <select
+              className="textInput"
+              value={form.llm_backend ?? "llama_cpp"}
+              onChange={(e) => onSetField("llm_backend", e.target.value)}
+            >
+              {llmBackendOptions.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="formGroup">
+            <label className="formLabel">LLM 模型路径</label>
+            <input
+              className="textInput"
+              value={form.llm_model_path ?? ""}
+              onChange={(e) => onSetField("llm_model_path", e.target.value)}
+              placeholder="e.g. D:/models/qwen2.5-7b-q4.gguf"
+            />
+          </div>
+
+          <div className="formGroup">
+            <label className="formLabel">LLM API 模型名（OpenAI/Gemini）</label>
+            <input
+              className="textInput"
+              value={form.llm_api_model ?? ""}
+              onChange={(e) => onSetField("llm_api_model", e.target.value)}
+              placeholder="如 gpt-4.1-mini / gemini-2.5-flash"
+            />
+          </div>
+
+          <div className="formGroup">
+            <label className="formLabel">TTS 模型目录</label>
+            <input
+              className="textInput"
+              value={form.tts_model_path ?? ""}
+              onChange={(e) => onSetField("tts_model_path", e.target.value)}
+              placeholder="e.g. D:/models/omnivoice"
+            />
+          </div>
+
+          <div className="formGroup">
+            <label className="formLabel">ASR 模型目录/名称</label>
+            <input
+              className="textInput"
+              value={form.asr_model_path ?? "base"}
+              onChange={(e) => onSetField("asr_model_path", e.target.value)}
+              placeholder="如 E:/models/faster-whisper-large-v3 或 base"
+            />
+          </div>
+
+          <div className="editorGrid three">
+            <div className="formGroup">
+              <label className="formLabel">temperature</label>
+              <input className="textInput" type="number" step="0.01" min="0" max="2" value={form.llm_temperature ?? 0.2} onChange={(e) => onSetField("llm_temperature", e.target.value)} />
+            </div>
+            <div className="formGroup">
+              <label className="formLabel">top_p</label>
+              <input className="textInput" type="number" step="0.01" min="0" max="1" value={form.llm_top_p ?? 0.9} onChange={(e) => onSetField("llm_top_p", e.target.value)} />
+            </div>
+            <div className="formGroup">
+              <label className="formLabel">top_k</label>
+              <input className="textInput" type="number" step="1" min="0" value={form.llm_top_k ?? 40} onChange={(e) => onSetField("llm_top_k", e.target.value)} />
+            </div>
+          </div>
+
+          <div className="editorGrid three">
+            <div className="formGroup">
+              <label className="formLabel">min_p</label>
+              <input className="textInput" type="number" step="0.01" min="0" max="1" value={form.llm_min_p ?? 0} onChange={(e) => onSetField("llm_min_p", e.target.value)} />
+            </div>
+            <div className="formGroup">
+              <label className="formLabel">presence_penalty</label>
+              <input className="textInput" type="number" step="0.01" min="-2" max="2" value={form.llm_presence_penalty ?? 0} onChange={(e) => onSetField("llm_presence_penalty", e.target.value)} />
+            </div>
+            <div className="formGroup">
+              <label className="formLabel">repeat_penalty</label>
+              <input className="textInput" type="number" step="0.01" min="0" max="3" value={form.llm_repeat_penalty ?? 1} onChange={(e) => onSetField("llm_repeat_penalty", e.target.value)} />
+            </div>
+          </div>
+
+          <div className="editorGrid three">
+            <div className="formGroup">
+              <label className="formLabel">ctx-size (n_ctx)</label>
+              <input className="textInput" type="number" step="1" min="256" value={form.llm_n_ctx ?? 8192} onChange={(e) => onSetField("llm_n_ctx", e.target.value)} />
+            </div>
+            <div className="formGroup">
+              <label className="formLabel">n-layer (GPU)</label>
+              <input className="textInput" type="number" step="1" value={form.llm_n_gpu_layers ?? -1} onChange={(e) => onSetField("llm_n_gpu_layers", e.target.value)} />
+            </div>
+            <div className="formGroup">
+              <label className="formLabel">thread</label>
+              <input className="textInput" type="number" step="1" min="0" value={form.llm_threads ?? 0} onChange={(e) => onSetField("llm_threads", e.target.value)} />
+            </div>
+          </div>
+
+          <div className="formGroup">
+            <label className="formLabel">max out token</label>
+            <input className="textInput" type="number" step="1" min="64" value={form.llm_max_tokens ?? 2048} onChange={(e) => onSetField("llm_max_tokens", e.target.value)} />
+          </div>
+
+          <label
+            className="controlRow"
+            style={{ cursor: "pointer", padding: "10px 12px", background: "var(--bg-elevated)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-default)" }}
+          >
+            <input
+              type="checkbox"
+              checked={Boolean(form.auto_serial)}
+              onChange={(e) => onSetField("auto_serial", e.target.checked)}
+              style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
+            />
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontSize: 13.5, color: "var(--text-primary)", fontWeight: 500 }}>自动串行模式</span>
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>解析完成后自动卸载 LLM，再加载 TTS</span>
+            </div>
+          </label>
+
+          <label
+            className="controlRow"
+            style={{ cursor: "pointer", padding: "10px 12px", background: "var(--bg-elevated)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-default)" }}
+          >
+            <input
+              type="checkbox"
+              checked={Boolean(form.enable_llama_cpp_think_mode ?? true)}
+              onChange={(e) => onSetField("enable_llama_cpp_think_mode", e.target.checked)}
+              style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
+            />
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontSize: 13.5, color: "var(--text-primary)", fontWeight: 500 }}>启用 llama-cpp-python Think 模式</span>
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>切换 Qwen 模型推理是否启用思考模板</span>
+            </div>
+          </label>
+
+          <div className="formGroup">
+            <label className="formLabel">LLM 系统提示词（默认）</label>
+            <textarea
+              className="textArea"
+              style={{ minHeight: 120, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}
+              value={form.default_system_prompt ?? ""}
+              onChange={(e) => onSetField("default_system_prompt", e.target.value)}
+              placeholder="留空使用内置提示词"
+            />
+          </div>
+
+          <div className="controlRow">
+            <Button variant="primary" disabled={isSaving} onClick={onSave}>
+              {isSaving ? "保存中..." : "保存配置"}
+            </Button>
+            <Button variant="secondary" disabled={isSaving} onClick={onReset}>
+              Reset 缺省值
+            </Button>
+          </div>
+        </>
+      ) : (
+        <div className="emptyState">
+          <HardDrive size={28} style={{ color: "var(--text-muted)" }} />
+          <span style={{ color: "var(--text-muted)" }}>正在加载配置...</span>
+        </div>
+      )}
+    </GlassCard>
+  );
+}

@@ -12,13 +12,19 @@ from fastapi.testclient import TestClient
 
 from backend.main import app
 from backend.models import Script, Segment
-from backend.state import app_state
+from backend.state import get_app_state_from_app
 
 
 class TaskFlowTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.client = TestClient(app)
+        cls._client_ctx = TestClient(app)
+        cls.client = cls._client_ctx.__enter__()
+        cls.app_state = get_app_state_from_app(app)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._client_ctx.__exit__(None, None, None)
 
     def _create_project(self, name_prefix: str = "task-flow") -> str:
         name = f"{name_prefix}-{uuid.uuid4().hex[:8]}"
@@ -65,9 +71,9 @@ class TaskFlowTest(unittest.TestCase):
         )
 
         with (
-            patch.object(app_state.orchestrator, "ensure_llm_ready", new=AsyncMock(return_value=None)),
-            patch.object(app_state.orchestrator, "unload_llm", new=AsyncMock(return_value=None)),
-            patch.object(app_state.llm_engine, "parse_text_chunked_stream", new=AsyncMock(return_value=parsed_script)),
+            patch.object(self.app_state.orchestrator, "ensure_llm_ready", new=AsyncMock(return_value=None)),
+            patch.object(self.app_state.orchestrator, "unload_llm", new=AsyncMock(return_value=None)),
+            patch.object(self.app_state.llm_engine, "parse_text_chunked_stream", new=AsyncMock(return_value=parsed_script)),
         ):
             started = self.client.post(
                 "/api/v1/llm/parse",
@@ -97,9 +103,9 @@ class TaskFlowTest(unittest.TestCase):
             )
 
         with (
-            patch.object(app_state.orchestrator, "ensure_llm_ready", new=AsyncMock(return_value=None)),
-            patch.object(app_state.orchestrator, "unload_llm", new=AsyncMock(return_value=None)),
-            patch.object(app_state.llm_engine, "parse_text_chunked_stream", new=AsyncMock(side_effect=slow_parse)),
+            patch.object(self.app_state.orchestrator, "ensure_llm_ready", new=AsyncMock(return_value=None)),
+            patch.object(self.app_state.orchestrator, "unload_llm", new=AsyncMock(return_value=None)),
+            patch.object(self.app_state.llm_engine, "parse_text_chunked_stream", new=AsyncMock(side_effect=slow_parse)),
         ):
             started = self.client.post(
                 "/api/v1/llm/parse",
@@ -143,8 +149,8 @@ class TaskFlowTest(unittest.TestCase):
             return output_path
 
         with (
-            patch.object(app_state.orchestrator, "ensure_tts_ready", new=AsyncMock(return_value=None)),
-            patch.object(app_state.tts_engine, "synthesize_to_file", new=AsyncMock(side_effect=fake_synthesize)),
+            patch.object(self.app_state.orchestrator, "ensure_tts_ready", new=AsyncMock(return_value=None)),
+            patch.object(self.app_state.tts_engine, "synthesize_to_file", new=AsyncMock(side_effect=fake_synthesize)),
         ):
             started = self.client.post(
                 "/api/v1/tts/synthesize",
@@ -173,7 +179,7 @@ class TaskFlowTest(unittest.TestCase):
             self.assertIn("application/zip", archive_resp.headers.get("content-type", ""))
 
     def test_transcribe_success_with_mocked_asr(self) -> None:
-        audio_path = app_state.settings.voices_dir / f"asr-{uuid.uuid4().hex[:8]}.wav"
+        audio_path = self.app_state.settings.voices_dir / f"asr-{uuid.uuid4().hex[:8]}.wav"
         with wave.open(str(audio_path), "wb") as wav_file:
             wav_file.setnchannels(1)
             wav_file.setsampwidth(2)
@@ -181,8 +187,8 @@ class TaskFlowTest(unittest.TestCase):
             wav_file.writeframes(b"\x00\x00" * 16000)
 
         with (
-            patch.object(app_state.asr_engine, "transcribe", new=AsyncMock(return_value="hello world")),
-            patch.object(app_state.asr_engine, "backend_name", "test-asr"),
+            patch.object(self.app_state.asr_engine, "transcribe", new=AsyncMock(return_value="hello world")),
+            patch.object(self.app_state.asr_engine, "backend_name", "test-asr"),
         ):
             response = self.client.post(
                 "/api/v1/voices/transcribe",
@@ -218,8 +224,8 @@ class TaskFlowTest(unittest.TestCase):
             return output_path
 
         with (
-            patch.object(app_state.orchestrator, "ensure_tts_ready", new=AsyncMock(return_value=None)),
-            patch.object(app_state.tts_engine, "synthesize_to_file", new=AsyncMock(side_effect=fake_synthesize)),
+            patch.object(self.app_state.orchestrator, "ensure_tts_ready", new=AsyncMock(return_value=None)),
+            patch.object(self.app_state.tts_engine, "synthesize_to_file", new=AsyncMock(side_effect=fake_synthesize)),
         ):
             started = self.client.post("/api/v1/tts/synthesize", json={"project_id": project_id})
             self.assertEqual(started.status_code, 200)
@@ -228,12 +234,12 @@ class TaskFlowTest(unittest.TestCase):
             self.assertEqual(status_code, 200)
             self.assertEqual(body["status"], "done")
 
-        project_file = app_state.settings.projects_dir / f"{project_id}.json"
-        event_file = app_state.settings.projects_dir / f"{project_id}.events.jsonl"
-        task_dir = app_state.settings.output_dir / task_id
-        wav_file = app_state.settings.output_dir / f"{project_id}.wav"
-        srt_file = app_state.settings.output_dir / f"{project_id}.srt"
-        lrc_file = app_state.settings.output_dir / f"{project_id}.lrc"
+        project_file = self.app_state.settings.projects_dir / f"{project_id}.json"
+        event_file = self.app_state.settings.projects_dir / f"{project_id}.events.jsonl"
+        task_dir = self.app_state.settings.output_dir / task_id
+        wav_file = self.app_state.settings.output_dir / f"{project_id}.wav"
+        srt_file = self.app_state.settings.output_dir / f"{project_id}.srt"
+        lrc_file = self.app_state.settings.output_dir / f"{project_id}.lrc"
 
         self.assertTrue(project_file.exists())
         self.assertTrue(event_file.exists())

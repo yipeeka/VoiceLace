@@ -269,7 +269,8 @@ async def _run_synthesis_task(task_id: str, payload: SynthesizeRequest, state) -
                 normalize=True,
                 target_sample_rate=24000,
             )
-            mixed_audio.export(str(wav_export_path), format="wav")
+            with wav_export_path.open("wb") as wav_out:
+                mixed_audio.export(wav_out, format="wav")
         except Exception:
             with wave.open(str(wav_export_path), "wb") as full_wav:
                 full_wav.setnchannels(1)
@@ -290,7 +291,10 @@ async def _run_synthesis_task(task_id: str, payload: SynthesizeRequest, state) -
             try:
                 from pydub import AudioSegment
 
-                AudioSegment.from_wav(str(wav_export_path)).export(str(mp3_export_path), format="mp3")
+                with wav_export_path.open("rb") as wav_in:
+                    wav_audio = AudioSegment.from_file(wav_in, format="wav")
+                with mp3_export_path.open("wb") as mp3_out:
+                    wav_audio.export(mp3_out, format="mp3")
                 converted = mp3_export_path.exists() and mp3_export_path.stat().st_size > 0
             except Exception:
                 converted = False

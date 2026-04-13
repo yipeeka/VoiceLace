@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends
 
 from backend.engine import OrchestratorConfig
-from backend.models import FileBrowseRequest, OrchestratorConfigPayload
+from backend.models import FileBrowseRequest, LoadLlmRequest, LoadTtsRequest, OrchestratorConfigPayload
 from backend.runtime_config import save_runtime_config
 from backend.state import get_app_state
 
@@ -63,13 +63,19 @@ async def reset_orchestrator_config(state=Depends(get_app_state)):
 
 
 @router.post("/load-llm")
-async def load_llm(payload: dict, state=Depends(get_app_state)):
-    state.orchestrator.config.llm_backend = payload.get("backend", state.orchestrator.config.llm_backend)
-    state.orchestrator.config.llm_model_path = payload.get("model_path", "")
-    state.orchestrator.config.llm_api_model = payload.get("api_model", state.orchestrator.config.llm_api_model)
-    state.orchestrator.config.llm_n_ctx = payload.get("n_ctx", 8192)
-    state.orchestrator.config.llm_n_gpu_layers = payload.get("n_gpu_layers", -1)
-    state.orchestrator.config.llm_threads = payload.get("threads", state.orchestrator.config.llm_threads)
+async def load_llm(payload: LoadLlmRequest, state=Depends(get_app_state)):
+    if payload.llm_backend is not None:
+        state.orchestrator.config.llm_backend = payload.llm_backend
+    if payload.llm_model_path is not None:
+        state.orchestrator.config.llm_model_path = payload.llm_model_path
+    if payload.llm_api_model is not None:
+        state.orchestrator.config.llm_api_model = payload.llm_api_model
+    if payload.llm_n_ctx is not None:
+        state.orchestrator.config.llm_n_ctx = payload.llm_n_ctx
+    if payload.llm_n_gpu_layers is not None:
+        state.orchestrator.config.llm_n_gpu_layers = payload.llm_n_gpu_layers
+    if payload.llm_threads is not None:
+        state.orchestrator.config.llm_threads = payload.llm_threads
     await state.orchestrator.ensure_llm_ready()
     return {"status": "ok", "backend": state.llm_engine.backend_name, "error": state.llm_engine.last_error}
 
@@ -81,9 +87,11 @@ async def unload_llm(state=Depends(get_app_state)):
 
 
 @router.post("/load-tts")
-async def load_tts(payload: dict, state=Depends(get_app_state)):
-    state.orchestrator.config.tts_model_path = payload.get("model_path", "k2-fsa/OmniVoice")
-    state.orchestrator.config.tts_device = payload.get("device", "cuda:0")
+async def load_tts(payload: LoadTtsRequest, state=Depends(get_app_state)):
+    if payload.tts_model_path is not None:
+        state.orchestrator.config.tts_model_path = payload.tts_model_path
+    if payload.tts_device is not None:
+        state.orchestrator.config.tts_device = payload.tts_device
     await state.orchestrator.ensure_tts_ready()
     return {"status": "ok", "backend": state.tts_engine.backend_name, "error": state.tts_engine.last_error}
 

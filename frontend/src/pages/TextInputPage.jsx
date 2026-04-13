@@ -29,6 +29,10 @@ export default function TextInputPage({ onNavigate }) {
     parseText,
     cancelParse,
     isParsing,
+    status,
+    connectionStatus,
+    modelStatus,
+    lastSyncError,
     parseProgress,
     error,
     setScript,
@@ -244,6 +248,11 @@ export default function TextInputPage({ onNavigate }) {
         </div>
 
         {error && <div className="errorText">⚠ {error}</div>}
+        {!error && (modelStatus || lastSyncError) ? (
+          <div className="errorText" style={{ color: lastSyncError ? "var(--danger)" : "var(--text-secondary)" }}>
+            {lastSyncError ? `⚠ ${lastSyncError}` : `${modelStatus} · 连接：${connectionStatus} · 任务：${status}`}
+          </div>
+        ) : null}
       </GlassCard>
 
       {/* Right: Stream output */}

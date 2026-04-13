@@ -30,7 +30,7 @@ function formatTimeMs(ms) {
 export default function SynthesisPage() {
   const { currentProject, refreshCurrentProject } = useProjectStore();
   const {
-    taskId, status, modelStatus, progress, segmentResults, fullAudioUrl, isRunning, error,
+    taskId, status, connectionStatus, modelStatus, lastSyncError, progress, segmentResults, fullAudioUrl, isRunning, error,
     subtitleSrtUrl, subtitleLrcUrl,
     startSynthesis, cancelSynthesis, reset,
   } = useSynthesisStore();
@@ -169,12 +169,14 @@ export default function SynthesisPage() {
           <h2 className="cardTitle">任务状态</h2>
           <div className="listStack">
             <div className="statRow"><span>状态</span><strong>{modelStatus || status}</strong></div>
+            <div className="statRow"><span>连接</span><strong>{connectionStatus}</strong></div>
             <div className="statRow">
               <span>进度</span>
               <strong style={{ fontFamily: "monospace" }}>{progress.current}&thinsp;/&thinsp;{progress.total || totalSegments}</strong>
             </div>
             <div className="statRow"><span>Task ID</span><strong style={{ fontFamily: "monospace", fontSize: 11 }}>{taskId || "—"}</strong></div>
           </div>
+          {lastSyncError ? <div className="errorText">⚠ {lastSyncError}</div> : null}
           {(isRunning || status !== "idle") && (
             <Progress value={progressPct} color={status === "done" ? "success" : status === "error" ? "danger" : "primary"} />
           )}

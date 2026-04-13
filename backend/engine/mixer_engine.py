@@ -35,7 +35,9 @@ class MixerEngine:
 
         for index, item in enumerate(segment_inputs):
             path = Path(item["path"])
-            audio = AudioSegment.from_file(str(path))
+            # Open file handle explicitly so it is always closed on Windows.
+            with path.open("rb") as audio_file:
+                audio = AudioSegment.from_file(audio_file, format=path.suffix.lstrip(".") or None)
             audio = audio.set_frame_rate(target_sample_rate).set_channels(1)
             if normalize:
                 audio = normalize_audio(audio)
