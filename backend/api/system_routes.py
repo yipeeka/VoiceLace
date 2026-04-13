@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib.util
+import sys
 from pathlib import Path
 
 from fastapi import APIRouter, Depends
@@ -15,6 +17,10 @@ router = APIRouter()
 @router.get("/status")
 async def get_status(state=Depends(get_app_state)):
     status = await state.orchestrator.get_status()
+    status["python_executable"] = sys.executable
+    spec = importlib.util.find_spec("llama_cpp")
+    status["llama_cpp_available"] = bool(spec)
+    status["llama_cpp_module_path"] = spec.origin if spec else ""
     status["asr_backend"] = getattr(state.asr_engine, "backend_name", "unknown")
     status["asr_loaded"] = getattr(state.asr_engine, "is_loaded", False)
     status["asr_error"] = getattr(state.asr_engine, "last_error", "")

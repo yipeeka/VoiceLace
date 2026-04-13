@@ -17,6 +17,7 @@ class RuntimeConfigTest(unittest.TestCase):
         try:
             path = tmp_dir / "config.json"
             cfg = OrchestratorConfig(
+                enable_llama_cpp_think_mode=False,
                 llm_backend="gemini",
                 llm_api_model="gemini-2.5-flash",
                 llm_n_ctx=4096,
@@ -27,8 +28,10 @@ class RuntimeConfigTest(unittest.TestCase):
             )
             save_runtime_config(path, cfg)
             raw = json.loads(path.read_text(encoding="utf-8"))
+            self.assertFalse(raw["enable_llama_cpp_think_mode"])
             self.assertEqual(raw["llm_backend"], "gemini")
             loaded = load_runtime_config(path)
+            self.assertFalse(loaded.enable_llama_cpp_think_mode)
             self.assertEqual(loaded.llm_backend, "gemini")
             self.assertEqual(loaded.asr_device, "cuda:1")
             self.assertEqual(loaded.llm_threads, 4)

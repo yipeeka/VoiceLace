@@ -44,6 +44,9 @@ class Settings:
     default_llm_presence_penalty: float = field(default_factory=lambda: float(os.getenv("BV_LLM_PRESENCE_PENALTY", "0.0")))
     default_llm_repeat_penalty: float = field(default_factory=lambda: float(os.getenv("BV_LLM_REPEAT_PENALTY", "1.0")))
     default_llm_max_tokens: int = field(default_factory=lambda: int(os.getenv("BV_LLM_MAX_TOKENS", "2048")))
+    default_enable_llama_cpp_think_mode: bool = field(
+        default_factory=lambda: os.getenv("BV_ENABLE_LLAMA_CPP_THINK_MODE", "true").lower() == "true"
+    )
     openai_api_key: str = field(default_factory=lambda: os.getenv("BV_OPENAI_API_KEY", ""))
     openai_base_url: str = field(default_factory=lambda: os.getenv("BV_OPENAI_BASE_URL", ""))
     openai_model: str = field(default_factory=lambda: os.getenv("BV_OPENAI_MODEL", "gpt-4.1-mini"))

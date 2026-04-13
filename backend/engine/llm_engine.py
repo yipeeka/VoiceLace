@@ -5,6 +5,7 @@ import inspect
 import json
 import logging
 import math
+import sys
 import threading
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -29,6 +30,7 @@ class LLMEngine:
         self.model_path = ""
         self.model_name = ""
         self.chat_format = settings.llm_chat_format
+        self.enable_llama_cpp_think_mode = settings.default_enable_llama_cpp_think_mode
         self.backend_name = "mock"
         self.last_error = ""
         self._llm: Any | None = None
@@ -37,6 +39,12 @@ class LLMEngine:
         self._loaded_n_ctx: int = settings.default_llm_n_ctx
         self._loaded_n_gpu_layers: int = settings.default_llm_n_gpu_layers
         self._loaded_n_threads: int = settings.default_llm_threads
+        self._loaded_enable_think_mode: bool = settings.default_enable_llama_cpp_think_mode
+
+    @staticmethod
+    def _is_qwen35_model_path(model_path: str) -> bool:
+        name = Path(model_path or "").name.lower()
+        return "qwen3.5" in name or "qwen35" in name
 
     def needs_reload(self, model_path: str, n_ctx: int, n_gpu_layers: int, backend: str, n_threads: int = 0) -> bool:
         normalized_backend = self._normalize_backend(backend)
@@ -48,6 +56,7 @@ class LLMEngine:
                 or int(n_ctx) != self._loaded_n_ctx
                 or int(n_gpu_layers) != self._loaded_n_gpu_layers
                 or int(n_threads or 0) != self._loaded_n_threads
+                or bool(self.enable_llama_cpp_think_mode) != self._loaded_enable_think_mode
             )
         return False
 
@@ -64,6 +73,7 @@ class LLMEngine:
         self._loaded_n_ctx = int(n_ctx)
         self._loaded_n_gpu_layers = int(n_gpu_layers)
         self._loaded_n_threads = int(n_threads or 0)
+        self._loaded_enable_think_mode = bool(self.enable_llama_cpp_think_mode)
         desired_path = model_path or settings.default_llm_model_path
         self.model_path = desired_path
         self.chat_format = settings.llm_chat_format
@@ -118,25 +128,52 @@ class LLMEngine:
 
         try:
             from llama_cpp import Llama
+            from llama_cpp.llama_chat_format import Qwen35ChatHandler
         except ImportError as exc:
-            self._fallback_or_raise(f"未安装 llama-cpp-python: {exc}")
+            self._fallback_or_raise(f"未安装 llama-cpp-python: {exc} (python={sys.executable})")
             return
 
         try:
+            init_kwargs: dict[str, Any] = {
+                "model_path": desired_path,
+                "n_ctx": n_ctx,
+                "n_gpu_layers": n_gpu_layers,
+                "n_batch": 2048,
+                "n_threads": max(0, int(n_threads or 0)) or None,
+                "flash_attn": True,
+                "verbose": False,
+            }
+            load_mode = "default-chat-format"
+            if self._is_qwen35_model_path(desired_path):
+                try:
+                    init_kwargs["chat_handler"] = Qwen35ChatHandler(enable_thinking=self.enable_llama_cpp_think_mode)
+                    load_mode = f"qwen35-chat-handler(enable_thinking={self.enable_llama_cpp_think_mode})"
+                except Exception as handler_exc:
+                    # Some llama-cpp-python versions expose Qwen35ChatHandler as MTMD and
+                    # require extra args (e.g. clip_model_path). Fall back to chat_format
+                    # so text-only Qwen models can still load instead of dropping to mock.
+                    init_kwargs["chat_format"] = self.chat_format
+                    load_mode = f"chat_format={self.chat_format} (qwen35 handler unavailable: {handler_exc})"
+                    logger.warning("Qwen35ChatHandler unavailable, fallback to chat_format: %s", handler_exc)
+            else:
+                init_kwargs["chat_format"] = self.chat_format
+                load_mode = f"chat_format={self.chat_format}"
+            logger.warning(
+                "Loading llama-cpp-python model path=%s mode=%s n_ctx=%s n_gpu_layers=%s n_threads=%s",
+                desired_path,
+                load_mode,
+                n_ctx,
+                n_gpu_layers,
+                max(0, int(n_threads or 0)) or None,
+            )
             self._llm = Llama(
-                model_path=desired_path,
-                n_ctx=n_ctx,
-                n_gpu_layers=n_gpu_layers,
-                n_batch=2048,
-                n_threads=max(0, int(n_threads or 0)) or None,
-                chat_format=self.chat_format,
-                flash_attn=True,
-                verbose=False,
+                **init_kwargs,
             )
             self.is_loaded = True
             self.backend_name = "llama-cpp-python"
             self.model_name = Path(desired_path).name
             self.last_error = ""
+            logger.warning("Loaded llama-cpp-python model=%s backend=%s", self.model_name, self.backend_name)
         except Exception as exc:
             self._fallback_or_raise(f"加载 llama-cpp-python 失败: {exc}")
 

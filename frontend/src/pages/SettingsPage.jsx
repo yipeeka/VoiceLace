@@ -45,6 +45,7 @@ export default function SettingsPage() {
         ...saved,
         tts_model_dir: saved.tts_model_path ?? "",
         auto_serial_mode: Boolean(saved.auto_serial),
+        enable_llama_cpp_think_mode: Boolean(saved.enable_llama_cpp_think_mode ?? true),
         llm_n_layer: Number(saved.llm_n_gpu_layers ?? -1),
         llm_threads: Number(saved.llm_threads ?? 0),
         llm_temperature: Number(saved.llm_temperature ?? 0.2),
@@ -65,8 +66,15 @@ export default function SettingsPage() {
   }
 
   const gpu = systemStatus?.gpu;
-  const llmStatus = systemStatus?.llm_status ?? "idle";
-  const ttsStatus = systemStatus?.tts_status ?? "idle";
+  const llmStatus =
+    systemStatus?.llm_status ??
+    (systemStatus?.llm_loaded ? "ready" : systemStatus?.llm_error ? "error" : "idle");
+  const ttsStatus =
+    systemStatus?.tts_status ??
+    (systemStatus?.tts_loaded ? "ready" : systemStatus?.tts_error ? "error" : "idle");
+  const llmBackend = systemStatus?.llm_backend ?? "unknown";
+  const llmError = systemStatus?.llm_error ?? "";
+  const llmFallbackActive = Boolean(systemStatus?.llm_fallback_active);
   const asrLoaded = Boolean(systemStatus?.asr_loaded);
   const asrBackend = systemStatus?.asr_backend ?? "unknown";
   const asrError = systemStatus?.asr_error ?? "";
@@ -104,6 +112,20 @@ export default function SettingsPage() {
               {llmStatus}
             </strong>
           </div>
+          <div className="statRow">
+            <span>LLM 后端</span>
+            <strong style={{ color: llmFallbackActive ? "var(--warning, #f59e0b)" : "var(--text-primary)" }}>
+              {llmFallbackActive ? `${llmBackend} (fallback)` : llmBackend}
+            </strong>
+          </div>
+          {llmError ? (
+            <div className="statRow">
+              <span>LLM 错误</span>
+              <strong style={{ color: "var(--danger)", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {llmError}
+              </strong>
+            </div>
+          ) : null}
           <div className="statRow">
             <span>TTS 状态</span>
             <strong style={{ color: ttsStatus === "ready" ? "var(--success)" : ttsStatus === "error" ? "var(--danger)" : "var(--text-secondary)" }}>
@@ -305,6 +327,22 @@ export default function SettingsPage() {
               <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                 <span style={{ fontSize: 13.5, color: "var(--text-primary)", fontWeight: 500 }}>自动串行模式</span>
                 <span style={{ fontSize: 12, color: "var(--text-muted)" }}>解析完成后自动卸载 LLM，再加载 TTS</span>
+              </div>
+            </label>
+
+            <label
+              className="controlRow"
+              style={{ cursor: "pointer", padding: "10px 12px", background: "var(--bg-elevated)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-default)" }}
+            >
+              <input
+                type="checkbox"
+                checked={Boolean(form.enable_llama_cpp_think_mode ?? true)}
+                onChange={(e) => setField("enable_llama_cpp_think_mode", e.target.checked)}
+                style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
+              />
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                <span style={{ fontSize: 13.5, color: "var(--text-primary)", fontWeight: 500 }}>启用 llama-cpp-python Think 模式</span>
+                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>开启时向 Qwen/llama.cpp 注入 /think，关闭时注入 /no_think</span>
               </div>
             </label>
 

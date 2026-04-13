@@ -25,6 +25,7 @@ class OrchestratorConfig:
     auto_serial: bool = settings.default_auto_serial
     auto_unload_llm_after_parse: bool = settings.default_auto_unload_llm_after_parse
     auto_load_tts_before_synth: bool = settings.default_auto_load_tts_before_synth
+    enable_llama_cpp_think_mode: bool = settings.default_enable_llama_cpp_think_mode
     llm_backend: str = settings.default_llm_backend
     llm_model_path: str = settings.default_llm_model_path
     llm_api_model: str = settings.default_llm_api_model
@@ -75,6 +76,8 @@ class ModelOrchestrator:
 
     def set_config(self, config: OrchestratorConfig) -> None:
         self._config = config
+        if hasattr(self._llm, "enable_llama_cpp_think_mode"):
+            self._llm.enable_llama_cpp_think_mode = config.enable_llama_cpp_think_mode
 
     def add_listener(self, callback: Listener) -> None:
         self._listeners.append(callback)
@@ -89,6 +92,8 @@ class ModelOrchestrator:
 
     async def update_config(self, payload: OrchestratorConfig) -> dict:
         self._config = payload
+        if hasattr(self._llm, "enable_llama_cpp_think_mode"):
+            self._llm.enable_llama_cpp_think_mode = payload.enable_llama_cpp_think_mode
         return asdict(self._config)
 
     def get_gpu_info(self) -> dict:
@@ -167,15 +172,32 @@ class ModelOrchestrator:
             await self._set_state(ModelState.IDLE, "tts")
 
     async def get_status(self) -> dict:
+        llm_loaded = bool(self._llm.is_loaded)
+        tts_loaded = bool(self._tts.is_loaded)
+        llm_error = getattr(self._llm, "last_error", "")
+        tts_error = getattr(self._tts, "last_error", "")
+        llm_backend = getattr(self._llm, "backend_name", "unknown")
+        tts_backend = getattr(self._tts, "backend_name", "unknown")
+        llm_status = "ready" if llm_loaded else ("error" if llm_error else "idle")
+        tts_status = "ready" if tts_loaded else ("error" if tts_error else "idle")
+        llm_fallback_active = bool(
+            llm_loaded
+            and llm_backend == "mock"
+            and self._config.llm_backend != "mock"
+            and llm_error
+        )
         return {
             "state": self._state.value,
             "auto_serial": self._config.auto_serial,
-            "llm_loaded": self._llm.is_loaded,
-            "tts_loaded": self._tts.is_loaded,
-            "llm_backend": getattr(self._llm, "backend_name", "unknown"),
-            "tts_backend": getattr(self._tts, "backend_name", "unknown"),
-            "llm_error": getattr(self._llm, "last_error", ""),
-            "tts_error": getattr(self._tts, "last_error", ""),
+            "llm_loaded": llm_loaded,
+            "tts_loaded": tts_loaded,
+            "llm_status": llm_status,
+            "tts_status": tts_status,
+            "llm_backend": llm_backend,
+            "tts_backend": tts_backend,
+            "llm_error": llm_error,
+            "tts_error": tts_error,
+            "llm_fallback_active": llm_fallback_active,
             "gpu": self.get_gpu_info(),
             "config": asdict(self._config),
         }

@@ -43,6 +43,7 @@ class ApiSmokeTest(unittest.TestCase):
             "auto_serial": True,
             "auto_unload_llm_after_parse": True,
             "auto_load_tts_before_synth": True,
+            "enable_llama_cpp_think_mode": False,
             "llm_backend": "openai",
             "llm_model_path": "unused-for-openai",
             "llm_api_model": "gpt-4.1-mini",
@@ -65,12 +66,14 @@ class ApiSmokeTest(unittest.TestCase):
             response = self.client.put("/api/v1/system/orchestrator/config", json=payload)
             self.assertEqual(response.status_code, 200)
             body = response.json()
+            self.assertFalse(body["enable_llama_cpp_think_mode"])
             self.assertEqual(body["llm_backend"], "openai")
             self.assertEqual(body["llm_api_model"], "gpt-4.1-mini")
             self.assertEqual(body["llm_threads"], 8)
             self.assertEqual(body["asr_model_path"], "E:/models/faster-whisper-large-v3")
             self.assertAlmostEqual(body["llm_temperature"], 0.35, places=6)
             persisted = json.loads(cfg_path.read_text(encoding="utf-8"))
+            self.assertFalse(persisted["enable_llama_cpp_think_mode"])
             self.assertEqual(persisted["llm_backend"], "openai")
             self.assertEqual(persisted["llm_threads"], 8)
         finally:
@@ -83,6 +86,7 @@ class ApiSmokeTest(unittest.TestCase):
         response = self.client.post("/api/v1/system/orchestrator/config/reset", json={})
         self.assertEqual(response.status_code, 200)
         body = response.json()
+        self.assertIn("enable_llama_cpp_think_mode", body)
         self.assertIn("llm_backend", body)
         self.assertIn("llm_n_ctx", body)
         self.assertIn("tts_model_path", body)
