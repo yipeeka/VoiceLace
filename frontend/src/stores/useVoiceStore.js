@@ -4,6 +4,28 @@ import { api } from "../utils/api";
 import { formatError, getErrorMessage } from "../utils/errors";
 import { useUiStore } from "./useUiStore";
 
+function reorderByIds(items, orderedIds) {
+  const itemMap = new Map(items.map((item) => [item.id, item]));
+  const seen = new Set();
+  const ordered = [];
+
+  orderedIds.forEach((id) => {
+    if (seen.has(id) || !itemMap.has(id)) {
+      return;
+    }
+    seen.add(id);
+    ordered.push(itemMap.get(id));
+  });
+
+  items.forEach((item) => {
+    if (!seen.has(item.id)) {
+      ordered.push(item);
+    }
+  });
+
+  return ordered;
+}
+
 export const useVoiceStore = create((set) => ({
   presets: [],
   assignments: {},
@@ -81,6 +103,21 @@ export const useVoiceStore = create((set) => ({
       const message = getErrorMessage(error, "删除预设失败");
       set({ isSaving: false, error: message });
       useUiStore.getState().pushToast({ title: formatError("删除预设失败", message), tone: "error" });
+      throw error;
+    }
+  },
+  reorderPresets: async (orderedIds) => {
+    const previousPresets = useVoiceStore.getState().presets;
+    set({ isSaving: true, error: "", presets: reorderByIds(previousPresets, orderedIds) });
+    try {
+      const presets = await api.post("/voices/presets/reorder", { preset_ids: orderedIds });
+      set({ presets, isSaving: false });
+      useUiStore.getState().pushToast({ title: "预设顺序已保存", tone: "success" });
+      return presets;
+    } catch (error) {
+      const message = getErrorMessage(error, "调整预设顺序失败");
+      set({ presets: previousPresets, isSaving: false, error: message });
+      useUiStore.getState().pushToast({ title: formatError("调整预设顺序失败", message), tone: "error" });
       throw error;
     }
   },

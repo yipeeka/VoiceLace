@@ -1,5 +1,8 @@
-import { Mic, Plus, Trash2 } from "lucide-react";
+import { GripVertical, Mic, Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
+import { arrayMove, rectSortingStrategy, SortableContext, useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 import AudioPlayer from "../components/shared/AudioPlayer";
 import CharacterBadge from "../components/shared/CharacterBadge";
@@ -59,13 +62,85 @@ const emptyForm = {
   speed: 1.0,
 };
 
+function SortablePresetCard({
+  preset,
+  isSelected,
+  onToggleSelect,
+  onPreview,
+  onDelete,
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: preset.id,
+  });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.75 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`presetCard ${isSelected ? "selected" : ""}`}
+      onClick={onToggleSelect}
+    >
+      <button
+        type="button"
+        className="primaryButton ghostButton"
+        title="拖拽调整顺序"
+        aria-label="拖拽调整顺序"
+        style={{
+          alignSelf: "flex-end",
+          cursor: isDragging ? "grabbing" : "grab",
+          padding: "4px 6px",
+          border: "1px solid rgba(255,255,255,0.22)",
+          background: "rgba(255,255,255,0.08)",
+        }}
+        onClick={(e) => e.stopPropagation()}
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical size={14} />
+      </button>
+      <div className="presetAvatar">
+        {preset.gender === "female" ? "♀" : preset.gender === "male" ? "♂" : "🎙"}
+      </div>
+      <div className="presetName" title={preset.name}>{preset.name}</div>
+      <span className={`presetModeBadge ${preset.voice_mode}`}>{preset.voice_mode}</span>
+      <div className="controlRow" style={{ marginTop: 4 }}>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            onPreview();
+          }}
+        >
+          试听
+        </Button>
+        <Button
+          variant="danger"
+          size="sm"
+          icon={Trash2}
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export default function VoiceConfigPage() {
   const { currentProject, refreshCurrentProject } = useProjectStore();
   const {
     presets, assignments, previewAudioUrl,
     isLoading, isSaving, error,
     setAssignments, assignVoice, loadPresets,
-    createPreset, updatePreset, deletePreset, saveAssignments, previewVoice,
+    createPreset, updatePreset, deletePreset, reorderPresets, saveAssignments, previewVoice,
     uploadReferenceAudio, transcribeAudio, uploadedRefAudioPath, transcribedRefText,
   } = useVoiceStore();
 
@@ -73,6 +148,7 @@ export default function VoiceConfigPage() {
   const [selectedPresetId, setSelectedPresetId] = useState(null);
   const [sampleText, setSampleText] = useState("这是试听文本，用于确认角色声音风格。");
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
   useEffect(() => {
     loadPresets().catch(() => undefined);
@@ -88,6 +164,7 @@ export default function VoiceConfigPage() {
     [presets]
   );
   const selectedPreset = presets.find((p) => p.id === selectedPresetId);
+  const presetIds = useMemo(() => presets.map((preset) => preset.id), [presets]);
   const isEditMode = Boolean(selectedPresetId && selectedPreset);
 
   useEffect(() => {
@@ -147,6 +224,12 @@ export default function VoiceConfigPage() {
     await previewVoice({ preset: selectedPreset, text: sampleText });
   }
 
+  async function handlePreviewPreset(preset) {
+    setSampleText("这是试听文本");
+    setSelectedPresetId(preset.id);
+    await previewVoice({ preset, text: "这是试听文本" });
+  }
+
   async function handleRefAudioUpload(file) {
     await uploadReferenceAudio(file);
   }
@@ -154,6 +237,22 @@ export default function VoiceConfigPage() {
   async function handleTranscribe() {
     if (!uploadedRefAudioPath) return;
     await transcribeAudio(uploadedRefAudioPath);
+  }
+
+  async function handlePresetDragEnd(event) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) {
+      return;
+    }
+
+    const oldIndex = presetIds.indexOf(active.id);
+    const newIndex = presetIds.indexOf(over.id);
+    if (oldIndex < 0 || newIndex < 0) {
+      return;
+    }
+
+    const nextOrder = arrayMove(presetIds, oldIndex, newIndex);
+    await reorderPresets(nextOrder);
   }
 
   return (
@@ -307,58 +406,45 @@ export default function VoiceConfigPage() {
         {/* Preset grid */}
         <GlassCard>
           <h2 className="cardTitle">声音预设</h2>
+          <p className="cardSubtitle">可拖拽调整预设顺序，新的顺序会自动保存。</p>
           {presets.length ? (
-            <div className="presetGrid">
-              {presets.map((preset) => (
-                <div
-                  key={preset.id}
-                  className={`presetCard ${selectedPresetId === preset.id ? "selected" : ""}`}
-                  onClick={() => {
-                    if (preset.id === selectedPresetId) {
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handlePresetDragEnd}>
+              <SortableContext items={presetIds} strategy={rectSortingStrategy}>
+                <div className="presetGrid">
+                  {presets.map((preset) => (
+                    <SortablePresetCard
+                      key={preset.id}
+                      preset={preset}
+                      isSelected={selectedPresetId === preset.id}
+                      onToggleSelect={() => {
+                        if (preset.id === selectedPresetId) {
+                          setSelectedPresetId(null);
+                          setForm({ ...emptyForm });
+                          useVoiceStore.setState({ uploadedRefAudioPath: "", transcribedRefText: "" });
+                          return;
+                        }
+                        setSelectedPresetId(preset.id);
+                      }}
+                      onDelete={() => setDeleteTarget(preset.id)}
+                      onPreview={() => handlePreviewPreset(preset)}
+                    />
+                  ))}
+                  {/* Add new card */}
+                  <div
+                    className="presetCard"
+                    style={{ borderStyle: "dashed", cursor: "pointer", alignItems: "center", justifyContent: "center", minHeight: 140 }}
+                    onClick={() => {
                       setSelectedPresetId(null);
                       setForm({ ...emptyForm });
                       useVoiceStore.setState({ uploadedRefAudioPath: "", transcribedRefText: "" });
-                      return;
-                    }
-                    setSelectedPresetId(preset.id);
-                  }}
-                >
-                  <div className="presetAvatar">
-                    {preset.gender === "female" ? "♀" : preset.gender === "male" ? "♂" : "🎙"}
-                  </div>
-                  <div className="presetName" title={preset.name}>{preset.name}</div>
-                  <span className={`presetModeBadge ${preset.voice_mode}`}>{preset.voice_mode}</span>
-                  <div className="controlRow" style={{ marginTop: 4 }}>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => { e.stopPropagation(); setSampleText("这是试听文本"); setSelectedPresetId(preset.id); handlePreview(); }}
-                    >
-                      试听
-                    </Button>
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      icon={Trash2}
-                      onClick={(e) => { e.stopPropagation(); setDeleteTarget(preset.id); }}
-                    />
+                    }}
+                  >
+                    <Plus size={24} style={{ color: "var(--text-muted)" }} />
+                    <span className="muted">新建预设</span>
                   </div>
                 </div>
-              ))}
-              {/* Add new card */}
-              <div
-                className="presetCard"
-                style={{ borderStyle: "dashed", cursor: "pointer", alignItems: "center", justifyContent: "center", minHeight: 140 }}
-                onClick={() => {
-                  setSelectedPresetId(null);
-                  setForm({ ...emptyForm });
-                  useVoiceStore.setState({ uploadedRefAudioPath: "", transcribedRefText: "" });
-                }}
-              >
-                <Plus size={24} style={{ color: "var(--text-muted)" }} />
-                <span className="muted">新建预设</span>
-              </div>
-            </div>
+              </SortableContext>
+            </DndContext>
           ) : (
             <EmptyState
               title="还没有声音预设"
