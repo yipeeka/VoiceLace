@@ -1,7 +1,7 @@
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Pencil, Trash2, Users } from "lucide-react";
+import { GripVertical, Pencil, Save, Trash2, Users } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
 import CharacterBadge, { getCharColor } from "../components/shared/CharacterBadge";
@@ -154,7 +154,7 @@ function createSegmentDraft(index) {
 
 export default function ScriptEditorPage() {
   const { currentProject, refreshCurrentProject } = useProjectStore();
-  const { script, updateSegment, addSegment, deleteSegment, replaceScript, isSaving, error } = useScriptStore();
+  const { script, updateSegment, addSegment, deleteSegment, replaceScript, saveScript, isSaving, error } = useScriptStore();
   const fileInputRef = useRef(null);
   const [editingId, setEditingId] = useState(null);
   const [drafts, setDrafts] = useState({});
@@ -168,6 +168,14 @@ export default function ScriptEditorPage() {
     const map = Object.fromEntries(base.map((s) => [s.id, s]));
     return segmentOrder.map((id) => map[id]).filter(Boolean);
   }, [script.segments, segmentOrder]);
+  const hasDraftChanges = useMemo(() => Object.keys(drafts).length > 0, [drafts]);
+  const hasOrderChanges = useMemo(() => {
+    if (!segmentOrder) return false;
+    const baseIds = (script.segments ?? []).map((s) => s.id);
+    if (baseIds.length !== segmentOrder.length) return true;
+    return segmentOrder.some((id, idx) => id !== baseIds[idx]);
+  }, [segmentOrder, script.segments]);
+  const hasUnsavedChanges = hasDraftChanges || hasOrderChanges;
 
   // Character stats
   const characters = useMemo(() => {
@@ -232,6 +240,29 @@ export default function ScriptEditorPage() {
     await refreshCurrentProject(currentProject.id);
   }
 
+  async function handleSaveScript() {
+    if (!currentProject?.id) return;
+    const mergedSegments = segments.map((segment, index) => {
+      const draft = drafts[segment.id];
+      const merged = draft ? { ...segment, ...draft } : segment;
+      return {
+        ...merged,
+        index,
+        speaker: (merged.speaker || "").trim() || "narrator",
+        text: (merged.text || "").trim(),
+      };
+    });
+    const payload = {
+      ...script,
+      segments: mergedSegments,
+    };
+    await saveScript({ projectId: currentProject.id, script: payload });
+    await refreshCurrentProject(currentProject.id);
+    setEditingId(null);
+    setDrafts({});
+    setSegmentOrder(null);
+  }
+
   function handleExportJson() {
     if (!script) return;
     const blob = new Blob([JSON.stringify(script, null, 2)], { type: "application/json" });
@@ -292,6 +323,15 @@ export default function ScriptEditorPage() {
         <GlassCard>
           <h2 className="cardTitle">操作</h2>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {hasUnsavedChanges ? (
+              <div className="statusBadge warning">有未保存改动</div>
+            ) : (
+              <div className="statusBadge success">已保存</div>
+            )}
+            <Button variant="primary" onClick={handleSaveScript} disabled={!canEdit || isSaving || !hasUnsavedChanges}>
+              <Save size={14} />
+              {isSaving ? "保存中..." : hasUnsavedChanges ? "保存剧本" : "已保存"}
+            </Button>
             <Button variant="secondary" onClick={handleExportJson} disabled={!script?.segments?.length}>
               导出 JSON
             </Button>
@@ -344,7 +384,9 @@ export default function ScriptEditorPage() {
         <div className="sectionHeader">
           <div className="sectionHeaderLeft">
             <h2 className="cardTitle">片段列表</h2>
-            <p className="cardSubtitle">拖动左侧手柄可调整顺序，点击内容编辑片段。</p>
+            <p className="cardSubtitle">
+              拖动左侧手柄可调整顺序，点击内容编辑片段。{hasUnsavedChanges ? "（当前有未保存改动）" : "（当前已保存）"}
+            </p>
           </div>
         </div>
 

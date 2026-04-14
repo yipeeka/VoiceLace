@@ -300,4 +300,18 @@ export const useScriptStore = create((set) => ({
       throw error;
     }
   },
+  saveScript: async ({ projectId, script }) => {
+    set({ isSaving: true, error: "" });
+    try {
+      const updated = await api.put(`/projects/${projectId}/script`, script);
+      set({ script: updated, sourceText: updated.source_text || "", isSaving: false });
+      useUiStore.getState().pushToast({ title: "剧本已保存", tone: "success" });
+      return updated;
+    } catch (error) {
+      const message = getErrorMessage(error, "保存剧本失败");
+      set({ isSaving: false, error: message });
+      useUiStore.getState().pushToast({ title: formatError("保存剧本失败", message), tone: "error" });
+      throw error;
+    }
+  },
 }));

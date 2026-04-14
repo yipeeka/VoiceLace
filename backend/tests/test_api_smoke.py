@@ -231,6 +231,47 @@ class ApiSmokeTest(unittest.TestCase):
             else:
                 self.app_state.voice_manager.presets_file.unlink(missing_ok=True)
 
+    def test_reorder_voice_presets(self) -> None:
+        original = ""
+        existed = self.app_state.voice_manager.presets_file.exists()
+        if existed:
+            original = self.app_state.voice_manager.presets_file.read_text(encoding="utf-8")
+
+        try:
+            self.app_state.voice_manager.save_presets([])
+            created_ids: list[str] = []
+            for name in ["preset-a", "preset-b", "preset-c"]:
+                created = self.client.post(
+                    "/api/v1/voices/presets",
+                    json={
+                        "name": name,
+                        "voice_mode": "design",
+                        "description": name,
+                        "gender": "female",
+                        "style": "calm",
+                        "speed": 1.0,
+                    },
+                )
+                self.assertEqual(created.status_code, 200)
+                created_ids.append(created.json()["id"])
+
+            reordered_ids = [created_ids[2], created_ids[0], created_ids[1]]
+            reordered = self.client.post(
+                "/api/v1/voices/presets/reorder",
+                json={"preset_ids": reordered_ids},
+            )
+            self.assertEqual(reordered.status_code, 200)
+            self.assertEqual([item["id"] for item in reordered.json()], reordered_ids)
+
+            listed = self.client.get("/api/v1/voices/presets")
+            self.assertEqual(listed.status_code, 200)
+            self.assertEqual([item["id"] for item in listed.json()], reordered_ids)
+        finally:
+            if existed:
+                self.app_state.voice_manager.presets_file.write_text(original, encoding="utf-8")
+            else:
+                self.app_state.voice_manager.presets_file.unlink(missing_ok=True)
+
 
 if __name__ == "__main__":
     unittest.main()

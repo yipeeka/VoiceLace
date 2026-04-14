@@ -8,7 +8,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
-from backend.models import TranscribeRequest, VoicePreset, VoicePreviewRequest
+from backend.models import ReorderVoicePresetsRequest, TranscribeRequest, VoicePreset, VoicePreviewRequest
 from backend.state import get_app_state
 
 router = APIRouter()
@@ -55,6 +55,27 @@ async def delete_preset(preset_id: str, state=Depends(get_app_state)):
     presets = [preset for preset in state.voice_manager.list_presets() if preset.id != preset_id]
     state.voice_manager.save_presets(presets)
     return {"status": "deleted"}
+
+
+@router.post("/presets/reorder")
+async def reorder_presets(payload: ReorderVoicePresetsRequest, state=Depends(get_app_state)):
+    presets = state.voice_manager.list_presets()
+    preset_by_id = {preset.id: preset for preset in presets}
+    ordered: list[VoicePreset] = []
+    seen: set[str] = set()
+
+    for preset_id in payload.preset_ids:
+        preset = preset_by_id.get(preset_id)
+        if preset and preset_id not in seen:
+            ordered.append(preset)
+            seen.add(preset_id)
+
+    for preset in presets:
+        if preset.id not in seen:
+            ordered.append(preset)
+
+    state.voice_manager.save_presets(ordered)
+    return ordered
 
 
 @router.post("/upload-ref")
