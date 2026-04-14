@@ -4,6 +4,8 @@ import uuid
 import unittest
 import json
 from pathlib import Path
+import io
+import zipfile
 
 from fastapi.testclient import TestClient
 
@@ -271,6 +273,383 @@ class ApiSmokeTest(unittest.TestCase):
                 self.app_state.voice_manager.presets_file.write_text(original, encoding="utf-8")
             else:
                 self.app_state.voice_manager.presets_file.unlink(missing_ok=True)
+
+    def test_import_archive_invalid_zip_returns_400(self) -> None:
+        response = self.client.post(
+            "/api/v1/projects/import/archive",
+            files={"file": ("bad.zip", io.BytesIO(b"not-a-zip"), "application/zip")},
+        )
+        self.assertEqual(response.status_code, 400)
+        body = response.json()
+        self.assertEqual(body["code"], "http_400")
+
+    def test_import_archive_v1_layout_supported(self) -> None:
+        name = f"legacy-{uuid.uuid4().hex[:8]}"
+        created = self.client.post("/api/v1/projects", json={"name": name})
+        self.assertEqual(created.status_code, 200)
+        source_project = created.json()
+        source_id = source_project["id"]
+        try:
+            script_update = self.client.put(
+                f"/api/v1/projects/{source_id}/script",
+                json={
+                    "title": "legacy-script",
+                    "source_text": "旁白：测试",
+                    "segments": [
+                        {"id": "seg-legacy-1", "index": 0, "type": "narration", "speaker": "narrator", "text": "测试"},
+                    ],
+                    "characters": [],
+                    "metadata": {},
+                },
+            )
+            self.assertEqual(script_update.status_code, 200)
+            project_full = self.client.get(f"/api/v1/projects/{source_id}").json()
+
+            archive_bytes = io.BytesIO()
+            with zipfile.ZipFile(archive_bytes, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("project.json", json.dumps(project_full, ensure_ascii=False))
+                zf.writestr(f"audio/{source_id}.wav", b"RIFFdemo")
+                zf.writestr("segments/seg-legacy-1.wav", b"RIFFdemo")
+                zf.writestr(f"{source_id}.srt", "1\n00:00:00,000 --> 00:00:01,000\n测试\n")
+            archive_bytes.seek(0)
+
+            response = self.client.post(
+                "/api/v1/projects/import/archive",
+                files={"file": ("legacy.zip", archive_bytes, "application/zip")},
+            )
+            self.assertEqual(response.status_code, 200)
+            body = response.json()
+            self.assertTrue(body["project_id"])
+            self.assertEqual(body["from_project_id"], source_id)
+            self.assertGreaterEqual(body["imported_segments"], 1)
+            warning_text = " | ".join(body.get("warnings", []))
+            self.assertIn("legacy archive layout", warning_text)
+            self.assertIn("voices/presets.json", warning_text)
+        finally:
+            self.client.delete(f"/api/v1/projects/{source_id}")
+
+    def test_partial_synthesis_requires_segment_ids(self) -> None:
+        project_name = f"partial-{uuid.uuid4().hex[:8]}"
+        created = self.client.post("/api/v1/projects", json={"name": project_name})
+        self.assertEqual(created.status_code, 200)
+        project_id = created.json()["id"]
+        try:
+            response = self.client.post(
+                "/api/v1/tts/synthesize/segments",
+                json={"project_id": project_id, "config": {"output_format": "wav"}},
+            )
+            self.assertEqual(response.status_code, 400)
+            body = response.json()
+            self.assertEqual(body["code"], "http_400")
+        finally:
+            self.client.delete(f"/api/v1/projects/{project_id}")
+
+    def test_stale_report_marks_missing_and_stale_segments(self) -> None:
+        project_name = f"stale-{uuid.uuid4().hex[:8]}"
+        created = self.client.post("/api/v1/projects", json={"name": project_name})
+        self.assertEqual(created.status_code, 200)
+        project_id = created.json()["id"]
+        try:
+            update = self.client.put(
+                f"/api/v1/projects/{project_id}/script",
+                json={
+                    "title": "stale",
+                    "source_text": "stale",
+                    "segments": [
+                        {"id": "seg-stale-a", "index": 0, "type": "narration", "speaker": "narrator", "text": "A"},
+                        {"id": "seg-stale-b", "index": 1, "type": "narration", "speaker": "narrator", "text": "B"},
+                    ],
+                    "characters": [],
+                    "metadata": {},
+                },
+            )
+            self.assertEqual(update.status_code, 200)
+
+            project_resp = self.client.get(f"/api/v1/projects/{project_id}")
+            self.assertEqual(project_resp.status_code, 200)
+            project = project_resp.json()
+
+            project_seg_dir = self.app_state.settings.output_dir / "projects" / project_id / "segments"
+            project_seg_dir.mkdir(parents=True, exist_ok=True)
+            seg_a = project_seg_dir / "seg-stale-a.wav"
+            seg_a.write_bytes(b"RIFFdemo")
+
+            project["audio_assets"]["segments"] = {
+                "seg-stale-a": {
+                    "segment_id": "seg-stale-a",
+                    "audio_relpath": f"projects/{project_id}/segments/seg-stale-a.wav",
+                    "duration_ms": 1000,
+                    "fingerprint": "mismatch",
+                    "source_text": "OLD-TEXT",
+                    "source_speaker": "narrator",
+                    "source_type": "narration",
+                    "source_emotion": "neutral",
+                    "source_tts_overrides": {},
+                    "source_voice_preset_id": None,
+                    "source_preset_hash": "",
+                    "source_config_hash": "",
+                    "source_tts_backend": "",
+                    "source_tts_model_path": "",
+                    "source_task_id": None,
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "status": "ready",
+                }
+            }
+            saved = self.client.put(f"/api/v1/projects/{project_id}", json=project)
+            self.assertEqual(saved.status_code, 200)
+
+            report_resp = self.client.get(f"/api/v1/tts/projects/{project_id}/stale-report")
+            self.assertEqual(report_resp.status_code, 200)
+            report = report_resp.json()
+            self.assertEqual(report["total"], 2)
+            self.assertIn("seg-stale-b", report["missing_segment_ids"])
+            self.assertIn("seg-stale-a", report["stale_segment_ids"])
+            by_id = {item["segment_id"]: item for item in report["items"]}
+            self.assertIn("missing_audio", by_id["seg-stale-b"]["reasons"])
+            self.assertIn("text_changed", by_id["seg-stale-a"]["reasons"])
+        finally:
+            self.client.delete(f"/api/v1/projects/{project_id}")
+
+    def test_stale_report_ready_when_fingerprint_matches_current_preset(self) -> None:
+        project_name = f"stale-fingerprint-{uuid.uuid4().hex[:8]}"
+        created = self.client.post("/api/v1/projects", json={"name": project_name})
+        self.assertEqual(created.status_code, 200)
+        project_id = created.json()["id"]
+
+        presets_file = self.app_state.voice_manager.presets_file
+        presets_backup = presets_file.read_text(encoding="utf-8") if presets_file.exists() else None
+
+        try:
+            script_update = self.client.put(
+                f"/api/v1/projects/{project_id}/script",
+                json={
+                    "title": "stale-fingerprint",
+                    "source_text": "stale-fingerprint",
+                    "segments": [
+                        {"id": "seg-fingerprint-a", "index": 0, "type": "dialogue", "speaker": "角色A", "text": "测试"},
+                    ],
+                    "characters": [],
+                    "metadata": {},
+                },
+            )
+            self.assertEqual(script_update.status_code, 200)
+
+            preset_resp = self.client.post(
+                "/api/v1/voices/presets",
+                json={
+                    "name": f"preset-{uuid.uuid4().hex[:6]}",
+                    "voice_mode": "design",
+                    "description": "for stale fingerprint regression",
+                    "gender": "female",
+                    "style": "calm",
+                    "speed": 1.0,
+                },
+            )
+            self.assertEqual(preset_resp.status_code, 200)
+            preset_id = preset_resp.json()["id"]
+
+            project = self.client.get(f"/api/v1/projects/{project_id}").json()
+            project["voice_assignments"] = {"角色A": preset_id}
+            saved_project = self.client.put(f"/api/v1/projects/{project_id}", json=project)
+            self.assertEqual(saved_project.status_code, 200)
+
+            initial_report = self.client.get(f"/api/v1/tts/projects/{project_id}/stale-report")
+            self.assertEqual(initial_report.status_code, 200)
+            expected_fingerprint = initial_report.json()["items"][0]["expected_fingerprint"]
+
+            project_seg_dir = self.app_state.settings.output_dir / "projects" / project_id / "segments"
+            project_seg_dir.mkdir(parents=True, exist_ok=True)
+            seg_path = project_seg_dir / "seg-fingerprint-a.wav"
+            seg_path.write_bytes(b"RIFFdemo")
+
+            project = self.client.get(f"/api/v1/projects/{project_id}").json()
+            project["audio_assets"]["segments"] = {
+                "seg-fingerprint-a": {
+                    "segment_id": "seg-fingerprint-a",
+                    "audio_relpath": f"projects/{project_id}/segments/seg-fingerprint-a.wav",
+                    "duration_ms": 1000,
+                    "fingerprint": expected_fingerprint,
+                    "source_text": "测试",
+                    "source_speaker": "角色A",
+                    "source_type": "dialogue",
+                    "source_emotion": "neutral",
+                    "source_tts_overrides": {},
+                    "source_voice_preset_id": "old-preset-id",
+                    "source_preset_hash": "old-preset-hash",
+                    "source_config_hash": "",
+                    "source_tts_backend": "",
+                    "source_tts_model_path": "",
+                    "source_task_id": None,
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "status": "ready",
+                }
+            }
+            saved = self.client.put(f"/api/v1/projects/{project_id}", json=project)
+            self.assertEqual(saved.status_code, 200)
+
+            report_resp = self.client.get(f"/api/v1/tts/projects/{project_id}/stale-report")
+            self.assertEqual(report_resp.status_code, 200)
+            report = report_resp.json()
+            self.assertEqual(report["stale_count"], 0)
+            self.assertIn("seg-fingerprint-a", report["ready_segment_ids"])
+            item = report["items"][0]
+            self.assertEqual(item["status"], "ready")
+            self.assertEqual(item["current_fingerprint"], item["expected_fingerprint"])
+            self.assertNotIn("voice_assignment_changed", item["reasons"])
+            self.assertNotIn("preset_changed", item["reasons"])
+        finally:
+            if presets_backup is None:
+                presets_file.unlink(missing_ok=True)
+            else:
+                presets_file.write_text(presets_backup, encoding="utf-8")
+            self.client.delete(f"/api/v1/projects/{project_id}")
+
+    def test_stale_report_exposes_segment_field_change_reasons(self) -> None:
+        project_name = f"stale-fields-{uuid.uuid4().hex[:8]}"
+        created = self.client.post("/api/v1/projects", json={"name": project_name})
+        self.assertEqual(created.status_code, 200)
+        project_id = created.json()["id"]
+        try:
+            script_update = self.client.put(
+                f"/api/v1/projects/{project_id}/script",
+                json={
+                    "title": "stale-fields",
+                    "source_text": "stale-fields",
+                    "segments": [
+                        {
+                            "id": "seg-fields-a",
+                            "index": 0,
+                            "type": "dialogue",
+                            "speaker": "角色A",
+                            "text": "新文本",
+                            "emotion": "cheerful",
+                            "non_verbal": ["laugh"],
+                            "tts_overrides": {"speed": 1.1},
+                        },
+                    ],
+                    "characters": [],
+                    "metadata": {},
+                },
+            )
+            self.assertEqual(script_update.status_code, 200)
+
+            project_seg_dir = self.app_state.settings.output_dir / "projects" / project_id / "segments"
+            project_seg_dir.mkdir(parents=True, exist_ok=True)
+            seg_path = project_seg_dir / "seg-fields-a.wav"
+            seg_path.write_bytes(b"RIFFdemo")
+
+            project = self.client.get(f"/api/v1/projects/{project_id}").json()
+            project["audio_assets"]["segments"] = {
+                "seg-fields-a": {
+                    "segment_id": "seg-fields-a",
+                    "audio_relpath": f"projects/{project_id}/segments/seg-fields-a.wav",
+                    "duration_ms": 1000,
+                    "fingerprint": "legacy-fingerprint",
+                    "source_text": "旧文本",
+                    "source_speaker": "角色B",
+                    "source_type": "narration",
+                    "source_emotion": "neutral",
+                    "source_tts_overrides": {},
+                    "source_voice_preset_id": None,
+                    "source_preset_hash": "",
+                    "source_config_hash": "",
+                    "source_tts_backend": "",
+                    "source_tts_model_path": "",
+                    "source_task_id": None,
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "status": "ready",
+                }
+            }
+            saved = self.client.put(f"/api/v1/projects/{project_id}", json=project)
+            self.assertEqual(saved.status_code, 200)
+
+            report_resp = self.client.get(f"/api/v1/tts/projects/{project_id}/stale-report")
+            self.assertEqual(report_resp.status_code, 200)
+            report = report_resp.json()
+            self.assertEqual(report["stale_count"], 1)
+            item = report["items"][0]
+            self.assertEqual(item["segment_id"], "seg-fields-a")
+            self.assertEqual(item["status"], "stale")
+            self.assertIn("text_changed", item["reasons"])
+            self.assertIn("speaker_changed", item["reasons"])
+            self.assertIn("type_changed", item["reasons"])
+            self.assertIn("emotion_changed", item["reasons"])
+            self.assertIn("tts_overrides_changed", item["reasons"])
+        finally:
+            self.client.delete(f"/api/v1/projects/{project_id}")
+
+    def test_update_script_invalidates_legacy_segment_asset_when_text_changes(self) -> None:
+        project_name = f"stale-legacy-update-{uuid.uuid4().hex[:8]}"
+        created = self.client.post("/api/v1/projects", json={"name": project_name})
+        self.assertEqual(created.status_code, 200)
+        project_id = created.json()["id"]
+        try:
+            initial = self.client.put(
+                f"/api/v1/projects/{project_id}/script",
+                json={
+                    "title": "legacy-invalidate",
+                    "source_text": "legacy-invalidate",
+                    "segments": [
+                        {"id": "seg-legacy-1", "index": 0, "type": "narration", "speaker": "narrator", "text": "旧文本"},
+                    ],
+                    "characters": [],
+                    "metadata": {},
+                },
+            )
+            self.assertEqual(initial.status_code, 200)
+
+            project_seg_dir = self.app_state.settings.output_dir / "projects" / project_id / "segments"
+            project_seg_dir.mkdir(parents=True, exist_ok=True)
+            seg_path = project_seg_dir / "seg-legacy-1.wav"
+            seg_path.write_bytes(b"RIFFdemo")
+
+            project = self.client.get(f"/api/v1/projects/{project_id}").json()
+            project["audio_assets"]["segments"] = {
+                "seg-legacy-1": {
+                    "segment_id": "seg-legacy-1",
+                    "audio_relpath": f"projects/{project_id}/segments/seg-legacy-1.wav",
+                    "duration_ms": 1000,
+                    "fingerprint": "",
+                    "source_text": "",
+                    "source_speaker": "",
+                    "source_type": "",
+                    "source_emotion": "",
+                    "source_tts_overrides": {},
+                    "source_voice_preset_id": None,
+                    "source_preset_hash": "",
+                    "source_config_hash": "",
+                    "source_tts_backend": "",
+                    "source_tts_model_path": "",
+                    "source_task_id": None,
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "status": "ready",
+                }
+            }
+            saved = self.client.put(f"/api/v1/projects/{project_id}", json=project)
+            self.assertEqual(saved.status_code, 200)
+
+            changed = self.client.put(
+                f"/api/v1/projects/{project_id}/script",
+                json={
+                    "title": "legacy-invalidate",
+                    "source_text": "legacy-invalidate",
+                    "segments": [
+                        {"id": "seg-legacy-1", "index": 0, "type": "narration", "speaker": "narrator", "text": "新文本"},
+                    ],
+                    "characters": [],
+                    "metadata": {},
+                },
+            )
+            self.assertEqual(changed.status_code, 200)
+
+            report_resp = self.client.get(f"/api/v1/tts/projects/{project_id}/stale-report")
+            self.assertEqual(report_resp.status_code, 200)
+            report = report_resp.json()
+            self.assertIn("seg-legacy-1", report["missing_segment_ids"])
+            by_id = {item["segment_id"]: item for item in report["items"]}
+            self.assertIn("missing_audio", by_id["seg-legacy-1"]["reasons"])
+        finally:
+            self.client.delete(f"/api/v1/projects/{project_id}")
 
 
 if __name__ == "__main__":

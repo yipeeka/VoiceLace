@@ -4,6 +4,17 @@
 
 This summary records the completed improvements from `improve-plan.md` and the acceptance evidence.
 
+## Additional Scope (implementation_plan03)
+
+- Project archive import/export workflow (including compatibility import for legacy archive layouts)
+- Project-level segment/full-audio asset recovery
+- Partial TTS regeneration (`/tts/synthesize/segments`)
+- Segment stale-report with reason codes
+- Frontend workflow updates:
+  - Text input page archive import entry
+  - Synthesis page "select segments to regenerate" interaction
+  - Inline segment editing in synthesis page
+
 ## Delivered
 
 - P0 completed

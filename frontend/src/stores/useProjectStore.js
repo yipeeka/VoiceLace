@@ -8,8 +8,10 @@ export const useProjectStore = create((set) => ({
   currentProject: null,
   projects: [],
   projectEvents: [],
+  importWarnings: [],
   isLoading: false,
   setCurrentProject: (project) => set({ currentProject: project }),
+  clearImportWarnings: () => set({ importWarnings: [] }),
   setProjects: (projects) => set({ projects }),
   loadProjects: async () => {
     set({ isLoading: true });
@@ -27,6 +29,7 @@ export const useProjectStore = create((set) => ({
     const project = await api.post("/projects", { name });
     set((state) => ({
       currentProject: project,
+      importWarnings: [],
       projects: [
         { id: project.id, name: project.name, status: project.status, updated_at: project.updated_at },
         ...state.projects.filter((item) => item.id !== project.id),
@@ -37,7 +40,7 @@ export const useProjectStore = create((set) => ({
   },
   selectProject: async (projectId) => {
     const project = await api.get(`/projects/${projectId}`);
-    set({ currentProject: project });
+    set({ currentProject: project, importWarnings: [] });
     useUiStore.getState().pushToast({ title: `已切换到项目：${project.name}`, tone: "default" });
     return project;
   },
@@ -66,9 +69,32 @@ export const useProjectStore = create((set) => ({
       return {
         projects,
         currentProject,
+        importWarnings: currentProject ? state.importWarnings : [],
         projectEvents: currentProject ? state.projectEvents : [],
       };
     });
     useUiStore.getState().pushToast({ title: "项目已删除", tone: "success" });
+  },
+  importArchive: async (file) => {
+    const result = await api.uploadFile("/projects/import/archive", file);
+    const project = await api.get(`/projects/${result.project_id}`);
+    set((state) => ({
+      currentProject: project,
+      importWarnings: Array.isArray(result.warnings) ? result.warnings : [],
+      projects: [
+        { id: project.id, name: project.name, status: project.status, updated_at: project.updated_at },
+        ...state.projects.filter((item) => item.id !== project.id),
+      ],
+    }));
+    useUiStore.getState().pushToast({ title: `工程导入完成：${project.name}`, tone: "success" });
+    if (Array.isArray(result.warnings) && result.warnings.length) {
+      result.warnings.forEach((warning, index) => {
+        useUiStore.getState().pushToast({
+          title: `导入提示 ${index + 1}/${result.warnings.length}：${warning}`,
+          tone: "warning",
+        });
+      });
+    }
+    return result;
   },
 }));

@@ -147,6 +147,22 @@ export default function OrchestratorConfigCard({ form, isSaving, onSetField, onS
           >
             <input
               type="checkbox"
+              checked={Boolean(form.debug_stale_report ?? false)}
+              onChange={(e) => onSetField("debug_stale_report", e.target.checked)}
+              style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
+            />
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontSize: 13.5, color: "var(--text-primary)", fontWeight: 500 }}>启用 stale-report 调试日志</span>
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>输出缺失音频、stale 原因和 fingerprint 匹配详情，默认关闭</span>
+            </div>
+          </label>
+
+          <label
+            className="controlRow"
+            style={{ cursor: "pointer", padding: "10px 12px", background: "var(--bg-elevated)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-default)" }}
+          >
+            <input
+              type="checkbox"
               checked={Boolean(form.enable_llama_cpp_think_mode ?? true)}
               onChange={(e) => onSetField("enable_llama_cpp_think_mode", e.target.checked)}
               style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}

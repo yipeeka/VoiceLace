@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test tests/errors.test.mjs tests/api.test.mjs tests/taskChannel.test.mjs tests/taskChannelBridge.test.mjs"
+    "test": "node --test tests/errors.test.mjs tests/api.test.mjs tests/taskChannel.test.mjs tests/taskChannelBridge.test.mjs tests/stale.test.mjs tests/segmentDraft.test.mjs tests/scriptEditorState.test.mjs tests/scriptDiff.test.mjs tests/scriptEditorDirty.test.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

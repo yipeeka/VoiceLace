@@ -1,4 +1,4 @@
-import { BookOpen, ChevronDown, ChevronUp, RefreshCw, Square, Trash2 } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronUp, RefreshCw, Square, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import EmptyState from "../components/shared/EmptyState";
@@ -19,8 +19,9 @@ export default function TextInputPage({ onNavigate }) {
   const [promptOpen, setPromptOpen] = useState(false);
   const [prompt, setPrompt] = useState("");
   const streamRef = useRef(null);
+  const archiveInputRef = useRef(null);
 
-  const { currentProject, projects, createProject, selectProject, refreshCurrentProject, deleteProject } =
+  const { currentProject, projects, createProject, selectProject, refreshCurrentProject, deleteProject, importArchive, importWarnings } =
     useProjectStore();
   const {
     sourceText,
@@ -92,6 +93,20 @@ export default function TextInputPage({ onNavigate }) {
     reader.readAsText(file, "utf-8");
   }
 
+  async function handleImportArchive(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const result = await importArchive(file);
+    if (!result?.project_id) {
+      return;
+    }
+    const project = await selectProject(result.project_id);
+    setScript(project.script);
+    const s = await loadProjectScript(project.id);
+    setSourceText(s.source_text || "");
+  }
+
   const wordCount = sourceText.length;
   const estimatedSegments = sourceText.split(/\n/).filter((l) => l.trim()).length;
 
@@ -140,7 +155,24 @@ export default function TextInputPage({ onNavigate }) {
           <Button variant="danger" icon={Trash2} disabled={!currentProject} onClick={handleDeleteProject}>
             删除
           </Button>
+          <Button variant="secondary" icon={Upload} onClick={() => archiveInputRef.current?.click()} disabled={isParsing}>
+            导入工程 ZIP
+          </Button>
+          <input
+            ref={archiveInputRef}
+            type="file"
+            accept=".zip,application/zip"
+            style={{ display: "none" }}
+            onChange={handleImportArchive}
+          />
         </div>
+        {importWarnings?.length ? (
+          <div className="statusBadge warning" style={{ marginBottom: 10, display: "block", textAlign: "left" }}>
+            {importWarnings.map((warning, idx) => (
+              <div key={`${idx}-${warning}`}>导入提示 {idx + 1}: {warning}</div>
+            ))}
+          </div>
+        ) : null}
 
         {/* File drop zone */}
         {!sourceText && (

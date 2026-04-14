@@ -1000,6 +1000,11 @@ select.textInput option {
 .synthSegmentRow.running { border-left: 2px solid var(--warning); }
 .synthSegmentRow.pending { border-left: 2px solid var(--border-default); }
 .synthSegmentRow.error { border-left: 2px solid var(--danger); }
+.synthSegmentRow.stale { border-left: 2px solid var(--warning); background: color-mix(in srgb, var(--warning-dim) 35%, transparent); }
+.synthSegmentRow.missing { border-left: 2px solid var(--danger); background: color-mix(in srgb, var(--danger-dim) 28%, transparent); }
+.synthSegmentRow.updated {
+  animation: synthRowFlash 1.8s ease-out;
+}
 
 .synthSegmentMeta {
   display: flex;
@@ -1015,6 +1020,17 @@ select.textInput option {
   flex-shrink: 0;
   width: 20px;
   text-align: center;
+}
+
+@keyframes synthRowFlash {
+  0% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.6);
+    background: color-mix(in srgb, var(--success-dim) 42%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+    background: var(--bg-elevated);
+  }
 }
 
 /* ─────────────────────────────────────────────────────────────

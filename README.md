@@ -116,10 +116,14 @@ npm run dev
 Base URL: `http://localhost:8000/api/v1`
 
 - 系统状态：`GET /system/status`
+- 工程导入：`POST /projects/import/archive`
 - LLM 解析任务：`POST /llm/parse`，查询：`GET /llm/parse/{task_id}`
 - LLM 取消：`POST /llm/parse/{task_id}/cancel`
 - TTS 合成任务：`POST /tts/synthesize`，查询：`GET /tts/synthesize/{task_id}`
+- TTS 局部重新生成：`POST /tts/synthesize/segments`
 - TTS 取消：`POST /tts/synthesize/{task_id}/cancel`
+- 项目待重新生成报告：`GET /tts/projects/{project_id}/stale-report`
+- 项目分段音频：`GET /tts/projects/{project_id}/segments/{segment_id}/audio`
 - 声音试听：`POST /voices/preview`
 - 参考音频转写：`POST /voices/transcribe`
 - 项目事件日志：`GET /projects/{project_id}/events`
@@ -132,6 +136,31 @@ Base URL: `http://localhost:8000/api/v1`
 - 系统事件：`/api/v1/ws/system-events`
 
 LLM/TTS 任务会推送 `task_status`、`model_loading`、`progress`、`complete`、`error`，并支持刷新后事件回放。
+
+## 导入与重新生成工作流
+
+当前推荐工作流：
+
+1. 在“文本输入”页点击“导入工程 ZIP”，恢复项目
+2. 在“剧本编辑”页修改片段内容
+3. 到“合成导出”页查看“已修改待重新生成/配置变化待重新生成/缺失音频”标识
+4. 点击“选择段落重新生成”自动勾选推荐段
+5. 点击“重新生成已选段落”执行局部重建并自动更新整本音频与字幕
+
+说明：
+
+- 合成导出页支持每段“编辑 + 保存 + 重新生成”快捷闭环
+- `stale-report` 返回 `reasons`（例如 `text_changed`、`tts_overrides_changed`、`missing_audio`）用于前端提示与推荐勾选
+
+## 兼容性说明（工程 ZIP）
+
+- 优先支持 v2 归档结构（`project/project.json`、`audio/full`、`audio/segments`、`subtitles`、`voices/presets.json`）
+- 兼容旧归档常见结构：
+  - 根目录 `project.json`
+  - `audio/*`
+  - `segments/*`
+  - 根目录 `{project_id}.srt/.lrc`
+- 兼容导入会通过 `warnings` 返回提示（前端会展示）
 
 ## P0 验收项对应
 
@@ -176,6 +205,12 @@ npm test
 cd frontend
 npm test
 ```
+
+## implementation_plan03 验收清单
+
+可使用以下文档做逐项打勾验收：
+
+- [implementation03-acceptance-checklist.md](/E:/softs/BeautyVoiceTTS/docs/implementation03-acceptance-checklist.md)
 
 ## 依赖注意事项
 

@@ -64,6 +64,9 @@ class Settings:
     default_auto_load_tts_before_synth: bool = field(
         default_factory=lambda: os.getenv("BV_AUTO_LOAD_TTS_BEFORE_SYNTH", "true").lower() == "true"
     )
+    default_debug_stale_report: bool = field(
+        default_factory=lambda: os.getenv("BV_DEBUG_STALE_REPORT", "false").lower() == "true"
+    )
     allow_mock_fallback: bool = field(default_factory=lambda: os.getenv("BV_ALLOW_MOCK_FALLBACK", "true").lower() == "true")
     data_dir: Path = field(init=False)
     runtime_config_path: Path = field(init=False)

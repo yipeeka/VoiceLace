@@ -25,6 +25,7 @@ class OrchestratorConfig:
     auto_serial: bool = settings.default_auto_serial
     auto_unload_llm_after_parse: bool = settings.default_auto_unload_llm_after_parse
     auto_load_tts_before_synth: bool = settings.default_auto_load_tts_before_synth
+    debug_stale_report: bool = settings.default_debug_stale_report
     enable_llama_cpp_think_mode: bool = settings.default_enable_llama_cpp_think_mode
     llm_backend: str = settings.default_llm_backend
     llm_model_path: str = settings.default_llm_model_path

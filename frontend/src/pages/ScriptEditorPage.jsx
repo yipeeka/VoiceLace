@@ -2,37 +2,35 @@ import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, us
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Pencil, Save, Trash2, Users } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import CharacterBadge, { getCharColor } from "../components/shared/CharacterBadge";
 import EmptyState from "../components/shared/EmptyState";
 import GlassCard from "../components/shared/GlassCard";
+import SegmentEditorFields from "../components/script/SegmentEditorFields";
 import Button from "../components/ui/Button";
 import Select from "../components/ui/Select";
+import { EMOTION_OPTIONS, TYPE_OPTIONS } from "../constants/scriptOptions";
 import { useProjectStore } from "../stores/useProjectStore";
 import { useScriptStore } from "../stores/useScriptStore";
 import { useUiStore } from "../stores/useUiStore";
 import { formatError } from "../utils/errors";
+import { hasEditingDraftChanges } from "../utils/scriptEditorDirty";
+import { parseCsvList, parseOverridesJson } from "../utils/segmentDraft";
+import { computeScriptDiff, normalizeDraftScript } from "../utils/scriptDiff";
 
-const TYPE_OPTIONS = [
-  { value: "dialogue",  label: "对话 (dialogue)" },
-  { value: "narration", label: "旁白 (narration)" },
-  { value: "direction", label: "舞台指示 (direction)" },
-];
-
-const EMOTION_OPTIONS = [
-  { value: "neutral",    label: "neutral" },
-  { value: "happy",      label: "happy" },
-  { value: "sad",        label: "sad" },
-  { value: "angry",      label: "angry" },
-  { value: "gentle",     label: "gentle" },
-  { value: "fearful",    label: "fearful" },
-  { value: "surprised",  label: "surprised" },
-  { value: "disgusted",  label: "disgusted" },
-  { value: "apologetic", label: "apologetic" },
-];
-
-function SortableSegmentCard({ segment, isEditing, draft, canEdit, isSaving, onBeginEdit, onUpdateDraft, onSaveDraft, onCancelEdit, onDelete }) {
+function SortableSegmentCard({
+  segment,
+  isEditing,
+  draft,
+  canEdit,
+  isSaving,
+  onBeginEdit,
+  onUpdateDraft,
+  onApplyDraft,
+  onCancelEdit,
+  onDelete,
+}) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: segment.id });
 
   const style = {
@@ -59,47 +57,20 @@ function SortableSegmentCard({ segment, isEditing, draft, canEdit, isSaving, onB
       <div className="segmentBody">
         {isEditing ? (
           <>
-            <div className="editorGrid" style={{ marginBottom: 8 }}>
-              <div className="formGroup">
-                <label className="formLabel">角色</label>
-                <input
-                  className="textInput"
-                  value={draft?.speaker ?? ""}
-                  onChange={(e) => onUpdateDraft(segment.id, "speaker", e.target.value)}
-                  placeholder="角色名（空 = narrator）"
-                />
-              </div>
-              <div className="formGroup">
-                <label className="formLabel">类型</label>
-                <Select
-                  value={draft?.type ?? "dialogue"}
-                  onValueChange={(v) => onUpdateDraft(segment.id, "type", v)}
-                  options={TYPE_OPTIONS}
-                />
-              </div>
-            </div>
-            <div className="formGroup" style={{ marginBottom: 8 }}>
-              <label className="formLabel">情感</label>
-              <Select
-                value={draft?.emotion ?? "neutral"}
-                onValueChange={(v) => onUpdateDraft(segment.id, "emotion", v)}
-                options={EMOTION_OPTIONS}
-              />
-            </div>
-            <textarea
-              className="textArea compactArea"
-              value={draft?.text ?? ""}
-              onChange={(e) => onUpdateDraft(segment.id, "text", e.target.value)}
-              style={{ marginBottom: 8 }}
+            <SegmentEditorFields
+              draft={draft}
+              includeAdvanced
+              onFieldChange={(field, value) => onUpdateDraft(segment.id, field, value)}
+              textMinHeight={56}
             />
             <div className="controlRow">
               <Button
                 variant="primary"
                 size="sm"
                 disabled={isSaving || !draft?.text?.trim()}
-                onClick={() => onSaveDraft(segment.id)}
+                onClick={() => onApplyDraft(segment.id)}
               >
-                {isSaving ? "保存中..." : "💾 保存"}
+                {isSaving ? "处理中..." : "应用到草稿"}
               </Button>
               <Button variant="ghost" size="sm" onClick={() => onCancelEdit(segment.id)}>
                 取消
@@ -149,33 +120,86 @@ function SortableSegmentCard({ segment, isEditing, draft, canEdit, isSaving, onB
 }
 
 function createSegmentDraft(index) {
-  return { id: crypto.randomUUID(), index, type: "dialogue", speaker: "", text: "", emotion: "neutral", non_verbal: [], tts_overrides: {} };
+  return {
+    id: crypto.randomUUID(),
+    index,
+    type: "dialogue",
+    speaker: "",
+    text: "",
+    emotion: "neutral",
+    non_verbal: [],
+    tts_overrides: {},
+    nonVerbalText: "",
+    ttsOverridesText: "{}",
+  };
+}
+
+function normalizeSegmentFromEditorDraft(draft) {
+  const parsed = parseOverridesJson(draft?.ttsOverridesText || "{}");
+  if (!parsed.ok) {
+    return { ok: false, error: parsed.error };
+  }
+  return {
+    ok: true,
+    value: {
+      ...draft,
+      nonVerbalText: undefined,
+      ttsOverridesText: undefined,
+      speaker: (draft?.speaker || "").trim() || "narrator",
+      text: (draft?.text || "").trim(),
+      type: draft?.type || "dialogue",
+      emotion: draft?.emotion || "neutral",
+      non_verbal: parseCsvList(draft?.nonVerbalText),
+      tts_overrides: parsed.value,
+    },
+  };
 }
 
 export default function ScriptEditorPage() {
   const { currentProject, refreshCurrentProject } = useProjectStore();
-  const { script, updateSegment, addSegment, deleteSegment, replaceScript, saveScript, isSaving, error } = useScriptStore();
+  const { script, replaceScript, saveScript, isSaving, error } = useScriptStore();
   const fileInputRef = useRef(null);
+  const lastProjectIdRef = useRef(null);
+
+  const [savedScript, setSavedScript] = useState(() => normalizeDraftScript(script));
+  const [draftScript, setDraftScript] = useState(() => normalizeDraftScript(script));
   const [editingId, setEditingId] = useState(null);
-  const [drafts, setDrafts] = useState({});
+  const [segmentDraft, setSegmentDraft] = useState(null);
   const [newSegment, setNewSegment] = useState(() => createSegmentDraft(0));
-  const [segmentOrder, setSegmentOrder] = useState(null); // local drag order
 
   const canEdit = Boolean(currentProject?.id);
-  const segments = useMemo(() => {
-    const base = script.segments ?? [];
-    if (!segmentOrder) return base;
-    const map = Object.fromEntries(base.map((s) => [s.id, s]));
-    return segmentOrder.map((id) => map[id]).filter(Boolean);
-  }, [script.segments, segmentOrder]);
-  const hasDraftChanges = useMemo(() => Object.keys(drafts).length > 0, [drafts]);
-  const hasOrderChanges = useMemo(() => {
-    if (!segmentOrder) return false;
-    const baseIds = (script.segments ?? []).map((s) => s.id);
-    if (baseIds.length !== segmentOrder.length) return true;
-    return segmentOrder.some((id, idx) => id !== baseIds[idx]);
-  }, [segmentOrder, script.segments]);
-  const hasUnsavedChanges = hasDraftChanges || hasOrderChanges;
+  const segments = draftScript?.segments ?? [];
+  const scriptDiff = useMemo(
+    () => computeScriptDiff(savedScript, draftScript),
+    [savedScript, draftScript]
+  );
+  const editingDraftDirty = useMemo(() => {
+    if (!editingId || !segmentDraft) {
+      return false;
+    }
+    const base = (draftScript?.segments || []).find((segment) => segment.id === editingId);
+    return hasEditingDraftChanges(base, segmentDraft);
+  }, [draftScript?.segments, editingId, segmentDraft]);
+  const hasUnsavedChanges = scriptDiff.hasChanges || editingDraftDirty;
+
+  useEffect(() => {
+    const projectId = currentProject?.id || null;
+    const normalized = normalizeDraftScript(script);
+    if (lastProjectIdRef.current !== projectId) {
+      setSavedScript(normalized);
+      setDraftScript(normalized);
+      setEditingId(null);
+      setSegmentDraft(null);
+      setNewSegment(createSegmentDraft(normalized.segments.length));
+      lastProjectIdRef.current = projectId;
+      return;
+    }
+    if (!computeScriptDiff(savedScript, draftScript).hasChanges) {
+      setSavedScript(normalized);
+      setDraftScript(normalized);
+      setNewSegment((current) => ({ ...current, index: normalized.segments.length }));
+    }
+  }, [currentProject?.id, script]);
 
   // Character stats
   const characters = useMemo(() => {
@@ -197,75 +221,161 @@ export default function ScriptEditorPage() {
   function handleDragEnd(event) {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    setSegmentOrder((order) => {
-      const ids = order ?? segments.map((s) => s.id);
-      const oldIdx = ids.indexOf(active.id);
-      const newIdx = ids.indexOf(over.id);
-      return arrayMove(ids, oldIdx, newIdx);
+    setDraftScript((current) => {
+      const list = current.segments ?? [];
+      const oldIdx = list.findIndex((item) => item.id === active.id);
+      const newIdx = list.findIndex((item) => item.id === over.id);
+      if (oldIdx < 0 || newIdx < 0 || oldIdx === newIdx) {
+        return current;
+      }
+      const reordered = arrayMove(list, oldIdx, newIdx).map((segment, index) => ({ ...segment, index }));
+      return { ...current, segments: reordered };
     });
   }
 
   function beginEdit(segment) {
     setEditingId(segment.id);
-    setDrafts((s) => ({ ...s, [segment.id]: { ...segment } }));
+    setSegmentDraft({
+      ...segment,
+      nonVerbalText: Array.isArray(segment.non_verbal) ? segment.non_verbal.join(", ") : "",
+      ttsOverridesText: JSON.stringify(segment.tts_overrides || {}, null, 2),
+    });
   }
 
   function cancelEdit(id) {
-    setEditingId((c) => (c === id ? null : c));
-    setDrafts((s) => { const n = { ...s }; delete n[id]; return n; });
+    setEditingId((current) => (current === id ? null : current));
+    setSegmentDraft((current) => (current?.id === id ? null : current));
   }
 
   function updateDraft(id, field, value) {
-    setDrafts((s) => ({ ...s, [id]: { ...s[id], [field]: value } }));
+    setSegmentDraft((current) => {
+      if (!current || current.id !== id) {
+        return current;
+      }
+      return { ...current, [field]: value };
+    });
   }
 
-  async function saveDraft(id) {
-    const draft = drafts[id];
-    if (!draft || !currentProject?.id) return;
-    await updateSegment({ projectId: currentProject.id, segmentId: id, segment: { ...draft, speaker: draft.speaker.trim() || "narrator", text: draft.text.trim() } });
-    await refreshCurrentProject(currentProject.id);
+  function applyDraft(id) {
+    const draft = segmentDraft;
+    if (!draft || draft.id !== id) return;
+    const normalized = normalizeSegmentFromEditorDraft(draft);
+    if (!normalized.ok) {
+      useUiStore.getState().pushToast({
+        title: `tts_overrides JSON 格式错误：${normalized.error}`,
+        tone: "error",
+      });
+      return;
+    }
+    const updated = normalized.value;
+    setDraftScript((current) => ({
+      ...current,
+      segments: (current.segments || []).map((segment, index) =>
+        segment.id === id ? { ...updated, index } : { ...segment, index }
+      ),
+    }));
     cancelEdit(id);
+    useUiStore.getState().pushToast({
+      title: "已加入草稿，点击“保存剧本”后生效",
+      tone: "default",
+    });
   }
 
-  async function handleAddSegment() {
-    if (!currentProject?.id || !newSegment.text.trim()) return;
-    await addSegment({ projectId: currentProject.id, segment: { ...newSegment, index: segments.length, speaker: newSegment.speaker.trim() || "narrator", text: newSegment.text.trim() } });
-    await refreshCurrentProject(currentProject.id);
+  function handleAddSegment() {
+    if (!newSegment.text.trim()) return;
+    const parsed = parseOverridesJson(newSegment.ttsOverridesText || "{}");
+    if (!parsed.ok) {
+      useUiStore.getState().pushToast({
+        title: `新增片段 tts_overrides JSON 格式错误：${parsed.error}`,
+        tone: "error",
+      });
+      return;
+    }
+    const toAdd = {
+      id: crypto.randomUUID(),
+      index: segments.length,
+      type: newSegment.type || "dialogue",
+      speaker: (newSegment.speaker || "").trim() || "narrator",
+      text: (newSegment.text || "").trim(),
+      emotion: newSegment.emotion || "neutral",
+      non_verbal: parseCsvList(newSegment.nonVerbalText),
+      tts_overrides: parsed.value,
+    };
+    setDraftScript((current) => ({
+      ...current,
+      segments: [...(current.segments || []), toAdd].map((segment, index) => ({ ...segment, index })),
+    }));
     setNewSegment(createSegmentDraft(segments.length + 1));
+    useUiStore.getState().pushToast({
+      title: "已加入草稿，点击“保存剧本”后生效",
+      tone: "default",
+    });
   }
 
-  async function handleDelete(id) {
-    if (!currentProject?.id) return;
-    await deleteSegment({ projectId: currentProject.id, segmentId: id });
-    await refreshCurrentProject(currentProject.id);
+  function handleDelete(id) {
+    setDraftScript((current) => ({
+      ...current,
+      segments: (current.segments || [])
+        .filter((segment) => segment.id !== id)
+        .map((segment, index) => ({ ...segment, index })),
+    }));
+    setEditingId((current) => (current === id ? null : current));
+    setSegmentDraft((current) => (current?.id === id ? null : current));
+    useUiStore.getState().pushToast({
+      title: "已加入草稿，点击“保存剧本”后生效",
+      tone: "default",
+    });
   }
 
   async function handleSaveScript() {
     if (!currentProject?.id) return;
-    const mergedSegments = segments.map((segment, index) => {
-      const draft = drafts[segment.id];
-      const merged = draft ? { ...segment, ...draft } : segment;
-      return {
-        ...merged,
-        index,
-        speaker: (merged.speaker || "").trim() || "narrator",
-        text: (merged.text || "").trim(),
+    let workingDraftScript = draftScript;
+    if (editingId && segmentDraft?.id === editingId) {
+      const normalized = normalizeSegmentFromEditorDraft(segmentDraft);
+      if (!normalized.ok) {
+        useUiStore.getState().pushToast({
+          title: `当前编辑片段 tts_overrides JSON 格式错误：${normalized.error}`,
+          tone: "error",
+        });
+        return;
+      }
+      workingDraftScript = {
+        ...draftScript,
+        segments: (draftScript.segments || []).map((segment, index) =>
+          segment.id === editingId ? { ...normalized.value, index } : { ...segment, index }
+        ),
       };
-    });
+    }
+
+    const mergedSegments = (workingDraftScript.segments || []).map((segment, index) => ({
+      ...segment,
+      index,
+      speaker: (segment.speaker || "").trim() || "narrator",
+      text: (segment.text || "").trim(),
+      type: segment.type || "dialogue",
+      emotion: segment.emotion || "neutral",
+      non_verbal: Array.isArray(segment.non_verbal) ? segment.non_verbal : [],
+      tts_overrides: segment.tts_overrides && typeof segment.tts_overrides === "object" && !Array.isArray(segment.tts_overrides)
+        ? segment.tts_overrides
+        : {},
+    }));
     const payload = {
-      ...script,
+      ...savedScript,
+      ...workingDraftScript,
       segments: mergedSegments,
     };
-    await saveScript({ projectId: currentProject.id, script: payload });
+    const updated = await saveScript({ projectId: currentProject.id, script: payload });
     await refreshCurrentProject(currentProject.id);
+    const normalized = normalizeDraftScript(updated);
+    setSavedScript(normalized);
+    setDraftScript(normalized);
     setEditingId(null);
-    setDrafts({});
-    setSegmentOrder(null);
+    setSegmentDraft(null);
   }
 
   function handleExportJson() {
-    if (!script) return;
-    const blob = new Blob([JSON.stringify(script, null, 2)], { type: "application/json" });
+    if (!draftScript) return;
+    const blob = new Blob([JSON.stringify(draftScript, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -284,8 +394,14 @@ export default function ScriptEditorPage() {
     try {
       const text = await file.text();
       const imported = JSON.parse(text);
-      await replaceScript({ projectId: currentProject.id, script: imported });
+      const updated = await replaceScript({ projectId: currentProject.id, script: imported });
       await refreshCurrentProject(currentProject.id);
+      const normalized = normalizeDraftScript(updated);
+      setSavedScript(normalized);
+      setDraftScript(normalized);
+      setEditingId(null);
+      setSegmentDraft(null);
+      setNewSegment(createSegmentDraft(normalized.segments.length));
     } catch (err) {
       useUiStore.getState().pushToast({ title: formatError("导入失败", err), tone: "error" });
     }
@@ -399,12 +515,12 @@ export default function ScriptEditorPage() {
                     key={segment.id}
                     segment={segment}
                     isEditing={editingId === segment.id}
-                    draft={drafts[segment.id]}
+                    draft={segmentDraft?.id === segment.id ? segmentDraft : null}
                     canEdit={canEdit}
                     isSaving={isSaving}
                     onBeginEdit={beginEdit}
                     onUpdateDraft={updateDraft}
-                    onSaveDraft={saveDraft}
+                    onApplyDraft={applyDraft}
                     onCancelEdit={cancelEdit}
                     onDelete={handleDelete}
                   />

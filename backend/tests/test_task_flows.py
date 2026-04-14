@@ -178,6 +178,49 @@ class TaskFlowTest(unittest.TestCase):
             self.assertEqual(archive_resp.status_code, 200)
             self.assertIn("application/zip", archive_resp.headers.get("content-type", ""))
 
+    def test_partial_synthesis_single_segment_without_rebuild_full(self) -> None:
+        project_id = self._create_project("tts-partial-single")
+        self._update_script(
+            project_id,
+            {
+                "title": "tts-partial",
+                "source_text": "tts-partial",
+                "segments": [
+                    {"id": "seg-a", "index": 0, "type": "narration", "speaker": "narrator", "text": "A"},
+                    {"id": "seg-b", "index": 1, "type": "dialogue", "speaker": "B", "text": "B"},
+                ],
+                "characters": [],
+                "metadata": {},
+            },
+        )
+
+        async def fake_synthesize(text, output_path: Path, preset=None, config=None):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with wave.open(str(output_path), "wb") as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(22050)
+                wav_file.writeframes(b"\x00\x00" * 2205)
+            return output_path
+
+        with (
+            patch.object(self.app_state.orchestrator, "ensure_tts_ready", new=AsyncMock(return_value=None)),
+            patch.object(self.app_state.tts_engine, "synthesize_to_file", new=AsyncMock(side_effect=fake_synthesize)),
+        ):
+            started = self.client.post(
+                "/api/v1/tts/synthesize/segments",
+                json={"project_id": project_id, "segment_ids": ["seg-a"], "rebuild_full": False},
+            )
+            self.assertEqual(started.status_code, 200)
+            task_id = started.json()["task_id"]
+
+            status_code, body = self._wait_for_tts(task_id)
+            self.assertEqual(status_code, 200)
+            self.assertEqual(body["status"], "done")
+            self.assertEqual(body["progress"]["total"], 1)
+            self.assertIn("seg-a", body["segments"])
+            self.assertNotIn("seg-b", body["segments"])
+
     def test_transcribe_success_with_mocked_asr(self) -> None:
         audio_path = self.app_state.settings.voices_dir / f"asr-{uuid.uuid4().hex[:8]}.wav"
         with wave.open(str(audio_path), "wb") as wav_file:
