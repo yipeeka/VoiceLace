@@ -21,7 +21,14 @@ export default function AudioPlayer({ audioUrl, height = 60, compact = false }) 
   useEffect(() => {
     if (!containerRef.current || !audioUrl) return;
 
+    let disposed = false;
     let ws = null;
+    setHasLoadError(false);
+    setIsReady(false);
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+
     try {
       ws = WaveSurfer.create({
         container: containerRef.current,
@@ -35,29 +42,47 @@ export default function AudioPlayer({ audioUrl, height = 60, compact = false }) 
         normalize: true,
         interact: true,
       });
-      ws.load(audioUrl);
-      setHasLoadError(false);
     } catch {
       setHasLoadError(true);
       return undefined;
     }
 
     ws.on("ready", () => {
+      if (disposed) return;
       setDuration(ws.getDuration());
       setIsReady(true);
       setHasLoadError(false);
     });
-    ws.on("audioprocess", () => setCurrentTime(ws.getCurrentTime()));
-    ws.on("seeking", () => setCurrentTime(ws.getCurrentTime()));
-    ws.on("finish", () => setIsPlaying(false));
-    ws.on("error", () => {
+    ws.on("audioprocess", () => {
+      if (disposed) return;
+      setCurrentTime(ws.getCurrentTime());
+    });
+    ws.on("seeking", () => {
+      if (disposed) return;
+      setCurrentTime(ws.getCurrentTime());
+    });
+    ws.on("finish", () => {
+      if (disposed) return;
+      setIsPlaying(false);
+    });
+    ws.on("error", (err) => {
+      if (disposed) return;
+      const message = String(err?.message || err || "").toLowerCase();
+      // Ignore teardown/abort noise from rapid remounts.
+      if (message.includes("abort") || message.includes("destroy")) {
+        return;
+      }
       setHasLoadError(true);
       setIsReady(false);
     });
+    ws.load(audioUrl);
 
     wavesurferRef.current = ws;
     return () => {
+      disposed = true;
+      ws?.unAll?.();
       ws?.destroy();
+      wavesurferRef.current = null;
       setIsPlaying(false);
       setIsReady(false);
       setCurrentTime(0);

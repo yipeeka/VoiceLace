@@ -4,7 +4,13 @@ import { EMOTION_OPTIONS, TYPE_OPTIONS } from "../../constants/scriptOptions";
 export default function SegmentEditorFields({ draft, onFieldChange, includeAdvanced = true, textMinHeight = 64 }) {
   return (
     <div style={{ display: "grid", gap: 6 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "120px 1fr 120px", gap: 6 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(110px, 1fr) minmax(120px, 0.8fr) minmax(190px, 1.35fr)",
+          gap: 6,
+        }}
+      >
         <input
           className="textInput"
           value={draft?.speaker || ""}

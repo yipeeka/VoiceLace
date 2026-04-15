@@ -209,7 +209,9 @@ export default function SynthesisPage() {
         status: baseStatus,
         display_status: displayStatus,
         duration_ms: taskSegment?.duration_ms ?? asset?.duration_ms ?? 0,
-        audio_url: taskSegment?.audio_url || (asset ? `/api/v1/tts/projects/${currentProject.id}/segments/${segment.id}/audio` : null),
+        audio_url: asset
+          ? `/api/v1/tts/projects/${currentProject.id}/segments/${segment.id}/audio`
+          : (taskSegment?.audio_url || null),
       };
     });
   }, [currentProject, segmentResults, staleBySegmentId]);
@@ -598,7 +600,10 @@ export default function SynthesisPage() {
                 <div
                   key={seg.segment_id}
                   className={`synthSegmentRow ${STATUS_ROW_CLS[segStatus] ?? "pending"} ${recentlyUpdatedSegmentId === seg.segment_id ? "updated" : ""}`}
-                  style={currentSegmentId === seg.segment_id ? { borderColor: "var(--accent-primary)" } : undefined}
+                  style={{
+                    ...(currentSegmentId === seg.segment_id ? { borderColor: "var(--accent-primary)" } : {}),
+                    ...(isEditing ? { alignItems: "flex-start", flexWrap: "wrap" } : {}),
+                  }}
                 >
                   <label className="controlRow" style={{ gap: 6 }}>
                     <input
@@ -638,7 +643,7 @@ export default function SynthesisPage() {
                   </div>
 
                   {isEditing ? (
-                    <div style={{ minWidth: 260 }}>
+                    <div style={{ minWidth: 420, maxWidth: 760, flex: "1 1 560px" }}>
                       <SegmentEditorFields
                         draft={segmentDraft}
                         includeAdvanced

@@ -5,13 +5,16 @@ export const TYPE_OPTIONS = [
 ];
 
 export const EMOTION_OPTIONS = [
-  { value: "neutral", label: "neutral" },
-  { value: "happy", label: "happy" },
-  { value: "sad", label: "sad" },
-  { value: "angry", label: "angry" },
-  { value: "gentle", label: "gentle" },
-  { value: "fearful", label: "fearful" },
-  { value: "surprised", label: "surprised" },
-  { value: "disgusted", label: "disgusted" },
-  { value: "apologetic", label: "apologetic" },
+  { value: "neutral", label: "neutral（中性）" },
+  { value: "cheerful", label: "cheerful（愉快）" },
+  { value: "sad", label: "sad（悲伤）" },
+  { value: "angry", label: "angry（愤怒）" },
+  { value: "fearful", label: "fearful（恐惧）" },
+  { value: "surprise", label: "surprise（惊讶）" },
+  { value: "melancholy", label: "melancholy（忧郁）" },
+  { value: "tender", label: "tender（温柔）" },
+  { value: "serious", label: "serious（严肃）" },
+  { value: "playful", label: "playful（俏皮）" },
+  { value: "concern", label: "concern（关切）" },
+  { value: "excited", label: "excited（兴奋）" },
 ];
