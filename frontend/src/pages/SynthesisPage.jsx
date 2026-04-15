@@ -30,7 +30,7 @@ const STATUS_ROW_CLS = { done: "done", running: "running", pending: "pending", e
 
 function formatTimeMs(ms) {
   if (!ms || isNaN(ms)) return "0:00";
-  const totalSeconds = Math.floor(ms / 1000);
+  const totalSeconds = Math.max(0, Math.round(Number(ms) / 1000));
   const m = Math.floor(totalSeconds / 60);
   const s = totalSeconds % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
@@ -49,6 +49,7 @@ export default function SynthesisPage() {
   const [editingSegmentId, setEditingSegmentId] = useState(null);
   const [segmentDraft, setSegmentDraft] = useState(null);
   const [recentlyUpdatedSegmentId, setRecentlyUpdatedSegmentId] = useState(null);
+  const [resolvedSegmentDurations, setResolvedSegmentDurations] = useState({});
   const updatedRowTimerRef = useRef(null);
   const { updateSegment, isSaving: isScriptSaving } = useScriptStore();
 
@@ -74,6 +75,7 @@ export default function SynthesisPage() {
     setEditingSegmentId(null);
     setSegmentDraft(null);
     setRecentlyUpdatedSegmentId(null);
+    setResolvedSegmentDurations({});
     if (updatedRowTimerRef.current) {
       clearTimeout(updatedRowTimerRef.current);
       updatedRowTimerRef.current = null;
@@ -212,19 +214,62 @@ export default function SynthesisPage() {
     });
   }, [currentProject, segmentResults, staleBySegmentId]);
 
+  useEffect(() => {
+    let canceled = false;
+    const needsResolve = segments.filter(
+      (seg) =>
+        seg.status === "done" &&
+        Boolean(seg.audio_url) &&
+        Number(seg.duration_ms || 0) <= 0 &&
+        Number(resolvedSegmentDurations[seg.segment_id] || 0) <= 0
+    );
+    if (!needsResolve.length) {
+      return () => {
+        canceled = true;
+      };
+    }
+
+    needsResolve.forEach((seg) => {
+      const audio = new Audio(`${API_ORIGIN}${seg.audio_url}`);
+      audio.preload = "metadata";
+      audio.onloadedmetadata = () => {
+        if (canceled) {
+          return;
+        }
+        const durationMs = Number.isFinite(audio.duration) ? Math.round(audio.duration * 1000) : 0;
+        if (durationMs > 0) {
+          setResolvedSegmentDurations((prev) => {
+            if (prev[seg.segment_id] === durationMs) {
+              return prev;
+            }
+            return { ...prev, [seg.segment_id]: durationMs };
+          });
+        }
+      };
+      audio.onerror = () => {};
+      audio.load();
+    });
+
+    return () => {
+      canceled = true;
+    };
+  }, [segments, resolvedSegmentDurations]);
+
   const segmentTimings = useMemo(() => {
     let cursor = 0;
     const gapMs = Number(config.gap_duration_ms || 500);
     const timings = {};
     segments.forEach(seg => {
-      const durationMs = seg.duration_ms || 0;
+      const durationMs = Number(seg.duration_ms || 0) > 0
+        ? Number(seg.duration_ms || 0)
+        : Number(resolvedSegmentDurations[seg.segment_id] || 0);
       const start = cursor;
       const end = cursor + durationMs;
       timings[seg.segment_id] = { start, end };
       cursor = end + gapMs;
     });
     return timings;
-  }, [segments, config.gap_duration_ms]);
+  }, [segments, config.gap_duration_ms, resolvedSegmentDurations]);
 
   const { isAutoPlay, currentSegmentId, playFrom, stop } = usePlaybackQueue(segments);
 
