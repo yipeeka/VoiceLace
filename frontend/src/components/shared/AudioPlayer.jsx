@@ -1,6 +1,7 @@
 import { Pause, Play, Volume2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import WaveSurfer from "wavesurfer.js";
+
+import { API_ORIGIN } from "../../utils/api";
 
 function formatTime(seconds) {
   if (!seconds || isNaN(seconds)) return "0:00";
@@ -9,115 +10,188 @@ function formatTime(seconds) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export default function AudioPlayer({ audioUrl, height = 60, compact = false }) {
-  const containerRef = useRef(null);
-  const wavesurferRef = useRef(null);
+const peaksCache = new Map();
+
+function normalizePeaksData(peaks) {
+  if (!peaks || !Array.isArray(peaks.data) || peaks.data.length < 2) {
+    return [];
+  }
+  const data = peaks.data;
+  const bars = [];
+  for (let i = 0; i + 1 < data.length; i += 2) {
+    const min = Number(data[i]) / 32768;
+    const max = Number(data[i + 1]) / 32768;
+    bars.push({
+      min: Number.isFinite(min) ? Math.max(-1, Math.min(1, min)) : 0,
+      max: Number.isFinite(max) ? Math.max(-1, Math.min(1, max)) : 0,
+    });
+  }
+  return bars;
+}
+
+function resolveUrl(path) {
+  if (!path) return "";
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+  return `${API_ORIGIN}${path}`;
+}
+
+export default function AudioPlayer({ audioUrl, peaks = null, peaksUrl = null, height = 60, compact = false }) {
+  const audioRef = useRef(null);
+  const canvasRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isReady, setIsReady] = useState(false);
-  const [hasLoadError, setHasLoadError] = useState(false);
+  const [resolvedPeaks, setResolvedPeaks] = useState(peaks || null);
 
   useEffect(() => {
-    if (!containerRef.current || !audioUrl) return;
+    setResolvedPeaks(peaks || null);
+  }, [peaks]);
 
-    let disposed = false;
-    let ws = null;
-    setHasLoadError(false);
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !audioUrl) return;
+
     setIsReady(false);
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
 
-    try {
-      ws = WaveSurfer.create({
-        container: containerRef.current,
-        waveColor: "rgba(161, 161, 170, 0.4)",
-        progressColor: "var(--accent-primary)",
-        cursorColor: "var(--accent-secondary)",
-        height,
-        barWidth: 2,
-        barGap: 1,
-        barRadius: 2,
-        normalize: true,
-        interact: true,
-      });
-    } catch {
-      setHasLoadError(true);
-      return undefined;
-    }
-
-    ws.on("ready", () => {
-      if (disposed) return;
-      setDuration(ws.getDuration());
+    const onLoadedMetadata = () => {
+      setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
+    };
+    const onCanPlay = () => {
       setIsReady(true);
-      setHasLoadError(false);
-    });
-    ws.on("audioprocess", () => {
-      if (disposed) return;
-      setCurrentTime(ws.getCurrentTime());
-    });
-    ws.on("seeking", () => {
-      if (disposed) return;
-      setCurrentTime(ws.getCurrentTime());
-    });
-    ws.on("finish", () => {
-      if (disposed) return;
+    };
+    const onTimeUpdate = () => {
+      setCurrentTime(audio.currentTime || 0);
+    };
+    const onEnded = () => {
       setIsPlaying(false);
-    });
-    ws.on("error", (err) => {
-      if (disposed) return;
-      const message = String(err?.message || err || "").toLowerCase();
-      // Ignore teardown/abort noise from rapid remounts.
-      if (message.includes("abort") || message.includes("destroy")) {
-        return;
-      }
-      setHasLoadError(true);
-      setIsReady(false);
-    });
-    ws.load(audioUrl);
+    };
 
-    wavesurferRef.current = ws;
+    audio.addEventListener("loadedmetadata", onLoadedMetadata);
+    audio.addEventListener("canplay", onCanPlay);
+    audio.addEventListener("timeupdate", onTimeUpdate);
+    audio.addEventListener("ended", onEnded);
+    audio.load();
+
     return () => {
-      disposed = true;
-      ws?.unAll?.();
-      ws?.destroy();
-      wavesurferRef.current = null;
+      audio.pause();
+      audio.removeEventListener("loadedmetadata", onLoadedMetadata);
+      audio.removeEventListener("canplay", onCanPlay);
+      audio.removeEventListener("timeupdate", onTimeUpdate);
+      audio.removeEventListener("ended", onEnded);
       setIsPlaying(false);
       setIsReady(false);
       setCurrentTime(0);
       setDuration(0);
     };
-  }, [audioUrl, height]);
+  }, [audioUrl]);
 
-  const togglePlay = () => {
-    if (!wavesurferRef.current || !isReady) return;
-    wavesurferRef.current.playPause();
-    setIsPlaying((p) => !p);
+  useEffect(() => {
+    let canceled = false;
+    async function loadPeaks() {
+      if (!peaksUrl || resolvedPeaks) {
+        return;
+      }
+      const url = resolveUrl(peaksUrl);
+      if (!url) return;
+      if (peaksCache.has(url)) {
+        setResolvedPeaks(peaksCache.get(url));
+        return;
+      }
+      try {
+        const response = await fetch(url);
+        if (!response.ok) return;
+        const payload = await response.json();
+        const normalized = {
+          format: payload.format || "minmax_i16",
+          bins: Number(payload.level || payload.bins || 0),
+          data: Array.isArray(payload.data) ? payload.data : [],
+        };
+        if (!canceled) {
+          peaksCache.set(url, normalized);
+          setResolvedPeaks(normalized);
+        }
+      } catch {
+        // Silent fallback: keep player usable without waveform peaks.
+      }
+    }
+    loadPeaks();
+    return () => {
+      canceled = true;
+    };
+  }, [peaksUrl, resolvedPeaks]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const cssWidth = canvas.clientWidth || 320;
+    const cssHeight = canvas.clientHeight || height;
+    const ratio = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.floor(cssWidth * ratio));
+    canvas.height = Math.max(1, Math.floor(cssHeight * ratio));
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
+    ctx.fillStyle = "rgba(161, 161, 170, 0.16)";
+    ctx.fillRect(0, 0, cssWidth, cssHeight);
+
+    const bars = normalizePeaksData(resolvedPeaks);
+    if (!bars.length) {
+      ctx.strokeStyle = "rgba(161, 161, 170, 0.55)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, cssHeight / 2);
+      ctx.lineTo(cssWidth, cssHeight / 2);
+      ctx.stroke();
+      return;
+    }
+
+    const progressRatio = duration > 0 ? Math.max(0, Math.min(1, currentTime / duration)) : 0;
+    const progressX = cssWidth * progressRatio;
+    const mid = cssHeight / 2;
+    const barWidth = compact ? 2 : 2.5;
+    const barGap = compact ? 1 : 1.5;
+    const step = barWidth + barGap;
+    const visibleBars = Math.max(1, Math.floor(cssWidth / step));
+    const stride = Math.max(1, Math.floor(bars.length / visibleBars));
+    let x = 0;
+
+    for (let i = 0; i < bars.length && x < cssWidth; i += stride) {
+      const item = bars[i];
+      const minY = mid + item.min * mid * 0.92;
+      const maxY = mid + item.max * mid * 0.92;
+      const top = Math.min(minY, maxY);
+      const bottom = Math.max(minY, maxY);
+      const h = Math.max(1, bottom - top);
+      ctx.fillStyle = x <= progressX ? "rgba(92, 211, 255, 0.95)" : "rgba(161, 161, 170, 0.55)";
+      ctx.fillRect(x, top, barWidth, h);
+      x += step;
+    }
+  }, [resolvedPeaks, currentTime, duration, height, compact]);
+
+  const togglePlay = async () => {
+    const audio = audioRef.current;
+    if (!audio || !isReady) return;
+    if (audio.paused) {
+      try {
+        await audio.play();
+        setIsPlaying(true);
+      } catch {
+        setIsPlaying(false);
+      }
+      return;
+    }
+    audio.pause();
+    setIsPlaying(false);
   };
 
   if (!audioUrl) return null;
-  if (hasLoadError) {
-    return (
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-          width: "100%",
-          background: "var(--bg-elevated)",
-          padding: compact ? "8px 10px" : "10px 14px",
-          borderRadius: "var(--radius-md)",
-          border: "1px solid var(--border-default)",
-        }}
-      >
-        <audio controls src={audioUrl} style={{ width: "100%" }} />
-        <span style={{ color: "var(--text-muted)", fontSize: 12 }}>
-          波形加载失败，已切换为基础播放器。
-        </span>
-      </div>
-    );
-  }
 
   return (
     <div
@@ -156,7 +230,25 @@ export default function AudioPlayer({ audioUrl, height = 60, compact = false }) 
         )}
       </button>
 
-      <div ref={containerRef} style={{ flex: 1, minWidth: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <canvas
+          ref={canvasRef}
+          style={{
+            width: "100%",
+            height,
+            borderRadius: 8,
+            cursor: isReady ? "pointer" : "default",
+          }}
+          onClick={(event) => {
+            const audio = audioRef.current;
+            if (!audio || !duration) return;
+            const rect = event.currentTarget.getBoundingClientRect();
+            const ratio = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
+            audio.currentTime = Math.max(0, Math.min(duration, duration * ratio));
+            setCurrentTime(audio.currentTime || 0);
+          }}
+        />
+      </div>
 
       <span
         style={{
@@ -174,6 +266,7 @@ export default function AudioPlayer({ audioUrl, height = 60, compact = false }) 
       {!compact && (
         <Volume2 size={14} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
       )}
+      <audio ref={audioRef} src={audioUrl} preload="metadata" style={{ display: "none" }} />
     </div>
   );
 }

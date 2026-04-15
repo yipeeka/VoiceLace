@@ -198,6 +198,10 @@ export default function SynthesisPage() {
       const staleStatus = staleBySegmentId[segment.id];
       const baseStatus = taskSegment?.status || (asset ? "done" : "pending");
       const displayStatus = resolveSegmentDisplayStatus(baseStatus, staleStatus);
+      const segmentAudioBaseUrl = `/api/v1/tts/projects/${currentProject.id}/segments/${segment.id}/audio`;
+      const segmentAudioVersion =
+        encodeURIComponent(asset?.created_at || asset?.fingerprint || `${taskSegment?.duration_ms || 0}`);
+      const segmentAudioUrl = `${segmentAudioBaseUrl}?v=${segmentAudioVersion}`;
 
       return {
         segment_id: segment.id,
@@ -210,8 +214,10 @@ export default function SynthesisPage() {
         display_status: displayStatus,
         duration_ms: taskSegment?.duration_ms ?? asset?.duration_ms ?? 0,
         audio_url: asset
-          ? `/api/v1/tts/projects/${currentProject.id}/segments/${segment.id}/audio`
-          : (taskSegment?.audio_url || null),
+          ? segmentAudioUrl
+          : (taskSegment?.audio_url ? `${taskSegment.audio_url}${taskSegment.audio_url.includes("?") ? "&" : "?"}v=${segmentAudioVersion}` : null),
+        peaks: taskSegment?.peaks || null,
+        peaks_url: `/api/v1/tts/projects/${currentProject.id}/segments/${segment.id}/peaks`,
       };
     });
   }, [currentProject, segmentResults, staleBySegmentId]);
@@ -546,6 +552,7 @@ export default function SynthesisPage() {
         <GlassCard>
           <h2 className="cardTitle">完整音频</h2>
           <SynthesisWaveSurfer 
+            projectId={currentProject?.id}
             audioUrl={fullAudioUrl} 
             segments={segments} 
             gapDurationMs={Number(config.gap_duration_ms || 500)}
@@ -672,6 +679,8 @@ export default function SynthesisPage() {
                     <div style={{ width: 200, flexShrink: 0 }}>
                       <AudioPlayer
                         audioUrl={`${API_ORIGIN}${seg.audio_url}`}
+                        peaks={seg.peaks}
+                        peaksUrl={seg.peaks_url}
                         height={32}
                         compact
                       />

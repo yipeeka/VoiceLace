@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from backend.engine.mixer_engine import MixerEngine, TimelineEntry
 from backend.engine.subtitle_gen import timeline_to_lrc, timeline_to_srt
+from backend.engine.waveform_peaks import build_peaks_payload, compute_file_sha256
 from backend.models import ExportRequest, SegmentAsset, SynthesizeRequest
 from backend.persistence import append_project_event, load_project, project_path, read_project_events, save_project
 from backend.state import get_app_state
@@ -87,6 +88,14 @@ def _project_subtitles_dir(state, project_id: str) -> Path:
     return _project_output_root(state, project_id) / "subtitles"
 
 
+def _project_waveforms_dir(state, project_id: str) -> Path:
+    return _project_output_root(state, project_id) / "waveforms"
+
+
+def _project_segment_waveforms_dir(state, project_id: str) -> Path:
+    return _project_waveforms_dir(state, project_id) / "segments"
+
+
 def _to_output_relpath(state, path: Path) -> str:
     return path.resolve().relative_to(state.settings.output_dir.resolve()).as_posix()
 
@@ -102,6 +111,16 @@ def _resolve_segment_asset_path(state, project, segment_id: str) -> Path | None:
     if asset is None:
         return None
     candidate = _from_output_relpath(state, asset.audio_relpath)
+    if candidate and candidate.exists():
+        return candidate
+    return None
+
+
+def _resolve_segment_peaks_path(state, project, segment_id: str) -> Path | None:
+    asset = project.audio_assets.segments.get(segment_id)
+    if asset is None or not asset.peaks_relpath:
+        return None
+    candidate = _from_output_relpath(state, asset.peaks_relpath)
     if candidate and candidate.exists():
         return candidate
     return None
@@ -396,6 +415,10 @@ async def _run_synthesis_task(task_id: str, payload: SynthesizeRequest, state) -
     project_full_dir.mkdir(parents=True, exist_ok=True)
     project_subtitles_dir = _project_subtitles_dir(state, payload.project_id)
     project_subtitles_dir.mkdir(parents=True, exist_ok=True)
+    project_waveforms_dir = _project_waveforms_dir(state, payload.project_id)
+    project_waveforms_dir.mkdir(parents=True, exist_ok=True)
+    project_segment_waveforms_dir = _project_segment_waveforms_dir(state, payload.project_id)
+    project_segment_waveforms_dir.mkdir(parents=True, exist_ok=True)
 
     cache_dir = state.settings.data_dir / "cache" / "tts"
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -560,6 +583,10 @@ async def _run_synthesis_task(task_id: str, payload: SynthesizeRequest, state) -
 
             project_segment_path = project_segments_dir / f"{segment.id}.wav"
             shutil.copyfile(segment_path, project_segment_path)
+            segment_peaks_path = project_segment_waveforms_dir / f"{segment.id}.peaks.json"
+            segment_peaks_payload = build_peaks_payload(wav_path=project_segment_path, bins=96)
+            segment_peaks_path.write_text(json.dumps(segment_peaks_payload, ensure_ascii=False), encoding="utf-8")
+            segment_audio_sha256 = compute_file_sha256(project_segment_path)
             segment_assets[segment.id] = SegmentAsset(
                 segment_id=segment.id,
                 audio_relpath=_to_output_relpath(state, project_segment_path),
@@ -578,6 +605,11 @@ async def _run_synthesis_task(task_id: str, payload: SynthesizeRequest, state) -
                 source_task_id=task_id,
                 created_at=datetime.now(timezone.utc).isoformat(),
                 status="ready",
+                peaks_relpath=_to_output_relpath(state, segment_peaks_path),
+                peaks_version=int(segment_peaks_payload.get("version", 1)),
+                peaks_bins=int(segment_peaks_payload.get("bins", 0)),
+                peaks_format=str(segment_peaks_payload.get("format", "minmax_i16")),
+                audio_sha256=segment_audio_sha256,
             )
 
             segment_result = {
@@ -590,6 +622,11 @@ async def _run_synthesis_task(task_id: str, payload: SynthesizeRequest, state) -
                 "duration_ms": duration_ms,
                 "cached": bool(cache_hit),
                 "reused": reused,
+                "peaks": {
+                    "format": segment_peaks_payload.get("format", "minmax_i16"),
+                    "bins": int(segment_peaks_payload.get("bins", 0)),
+                    "data": (segment_peaks_payload.get("levels", {}) or {}).get(str(segment_peaks_payload.get("bins", 0)), []),
+                },
             }
             task["segments"][segment.id] = segment_result
             segment_inputs.append(
@@ -617,6 +654,7 @@ async def _run_synthesis_task(task_id: str, payload: SynthesizeRequest, state) -
         mp3_export_path = project_full_dir / "mix.mp3"
         srt_path = project_subtitles_dir / "book.srt"
         lrc_path = project_subtitles_dir / "book.lrc"
+        full_peaks_path = project_waveforms_dir / "full.peaks.json"
 
         if rebuild_full:
             timeline: list[TimelineEntry] | None = None
@@ -640,6 +678,9 @@ async def _run_synthesis_task(task_id: str, payload: SynthesizeRequest, state) -
 
             legacy_wav = state.settings.output_dir / f"{payload.project_id}.wav"
             shutil.copyfile(wav_export_path, legacy_wav)
+
+            full_peaks_payload = build_peaks_payload(wav_path=wav_export_path, levels=[1024, 2048, 4096])
+            full_peaks_path.write_text(json.dumps(full_peaks_payload, ensure_ascii=False), encoding="utf-8")
 
             srt_path.write_text(timeline_to_srt(timeline or []), encoding="utf-8")
             lrc_path.write_text(timeline_to_lrc(timeline or []), encoding="utf-8")
@@ -694,6 +735,10 @@ async def _run_synthesis_task(task_id: str, payload: SynthesizeRequest, state) -
             project.audio_assets.full_mp3_relpath = _to_output_relpath(state, mp3_export_path) if mp3_export_path.exists() else None
             project.audio_assets.subtitle_srt_relpath = _to_output_relpath(state, srt_path)
             project.audio_assets.subtitle_lrc_relpath = _to_output_relpath(state, lrc_path)
+            if full_peaks_path.exists():
+                project.audio_assets.full_peaks_relpath = _to_output_relpath(state, full_peaks_path)
+                project.audio_assets.full_peaks_version = 1
+                project.audio_assets.full_peaks_levels = [1024, 2048, 4096]
             project.audio_assets.segments = segment_assets
         else:
             project.audio_assets.latest_task_id = task_id
@@ -800,6 +845,49 @@ async def get_project_segment_audio(project_id: str, segment_id: str, state=Depe
     return FileResponse(audio_path, media_type="audio/wav", filename=f"{segment_id}.wav")
 
 
+@router.get("/projects/{project_id}/segments/{segment_id}/peaks")
+async def get_project_segment_peaks(project_id: str, segment_id: str, state=Depends(get_app_state)):
+    project = load_project(state.settings.projects_dir, project_id)
+    peaks_path = _resolve_segment_peaks_path(state, project, segment_id)
+    if peaks_path is None or not peaks_path.exists():
+        raise HTTPException(status_code=404, detail="Project segment peaks not found")
+    payload = json.loads(peaks_path.read_text(encoding="utf-8"))
+    return {
+        "project_id": project_id,
+        "segment_id": segment_id,
+        **payload,
+    }
+
+
+@router.get("/projects/{project_id}/waveform")
+async def get_project_waveform(project_id: str, level: int | None = Query(None), state=Depends(get_app_state)):
+    project = load_project(state.settings.projects_dir, project_id)
+    peaks_path = _from_output_relpath(state, project.audio_assets.full_peaks_relpath)
+    if peaks_path is None or not peaks_path.exists():
+        raise HTTPException(status_code=404, detail="Project full waveform peaks not found")
+    payload = json.loads(peaks_path.read_text(encoding="utf-8"))
+    levels = payload.get("levels", {}) or {}
+    requested_level = int(level) if level else int(payload.get("bins", 0) or 0)
+    if requested_level <= 0:
+        requested_level = int(next(iter(levels.keys()), "0") or 0)
+    data = levels.get(str(requested_level))
+    if data is None and levels:
+        first_key = next(iter(levels.keys()))
+        requested_level = int(first_key)
+        data = levels[first_key]
+    return {
+        "project_id": project_id,
+        "version": int(payload.get("version", 1)),
+        "format": str(payload.get("format", "minmax_i16")),
+        "duration_ms": int(payload.get("duration_ms", 0)),
+        "sample_rate": int(payload.get("sample_rate", 0)),
+        "channels": int(payload.get("channels", 1)),
+        "level": requested_level,
+        "data": data or [],
+        "levels": sorted(int(k) for k in levels.keys()),
+    }
+
+
 @router.post("/export")
 async def export_audio(payload: ExportRequest, state=Depends(get_app_state)):
     req_format = (payload.format or "wav").lower()
@@ -869,6 +957,7 @@ async def export_archive(project_id: str, state=Depends(get_app_state)):
     full_mp3 = _from_output_relpath(state, project.audio_assets.full_mp3_relpath)
     subtitle_srt = _from_output_relpath(state, project.audio_assets.subtitle_srt_relpath)
     subtitle_lrc = _from_output_relpath(state, project.audio_assets.subtitle_lrc_relpath)
+    full_peaks = _from_output_relpath(state, project.audio_assets.full_peaks_relpath)
     segment_assets = list(project.audio_assets.segments.values())
     audio_candidates = [path for path in [full_wav, full_mp3] if path and path.exists()]
     subtitle_candidates = [path for path in [subtitle_srt, subtitle_lrc] if path and path.exists()]
@@ -876,7 +965,7 @@ async def export_archive(project_id: str, state=Depends(get_app_state)):
     used_preset_ids = {preset_id for preset_id in project.voice_assignments.values() if preset_id}
     used_presets = [preset for preset in presets if preset.id in used_preset_ids]
     manifest = {
-        "schema_version": 2,
+        "schema_version": 3,
         "project_id": project.id,
         "project_name": project.name,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -884,6 +973,7 @@ async def export_archive(project_id: str, state=Depends(get_app_state)):
         "audio_files": [p.name for p in audio_candidates if p.exists()],
         "subtitle_files": [p.name for p in subtitle_candidates if p.exists()],
         "segment_count": len(segment_assets),
+        "waveform_files": [p.name for p in [full_peaks] if p and p.exists()],
         "preset_count": len(used_presets),
         "has_reference_audio": any(bool(p.ref_audio_path) for p in used_presets),
     }
@@ -895,10 +985,15 @@ async def export_archive(project_id: str, state=Depends(get_app_state)):
         for path in subtitle_candidates:
             if path.exists():
                 zf.write(path, arcname=f"subtitles/{path.name}")
+        if full_peaks and full_peaks.exists():
+            zf.write(full_peaks, arcname="waveforms/full.peaks.json")
         for asset in segment_assets:
             segment_path = _from_output_relpath(state, asset.audio_relpath)
             if segment_path and segment_path.exists():
                 zf.write(segment_path, arcname=f"audio/segments/{segment_path.name}")
+            segment_peaks_path = _from_output_relpath(state, asset.peaks_relpath)
+            if segment_peaks_path and segment_peaks_path.exists():
+                zf.write(segment_peaks_path, arcname=f"waveforms/segments/{asset.segment_id}.peaks.json")
         project_json = project_path(state.settings.projects_dir, project_id)
         if project_json.exists():
             zf.write(project_json, arcname="project/project.json")

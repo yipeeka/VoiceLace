@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import time
 import unittest
 import uuid
 import wave
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
+import zipfile
 
 from fastapi.testclient import TestClient
 
@@ -177,6 +179,38 @@ class TaskFlowTest(unittest.TestCase):
             archive_resp = self.client.get(f"/api/v1/tts/export/{project_id}/archive")
             self.assertEqual(archive_resp.status_code, 200)
             self.assertIn("application/zip", archive_resp.headers.get("content-type", ""))
+
+            project_resp = self.client.get(f"/api/v1/projects/{project_id}")
+            self.assertEqual(project_resp.status_code, 200)
+            project = project_resp.json()
+            self.assertTrue(project["audio_assets"].get("full_peaks_relpath"))
+            self.assertEqual(project["audio_assets"].get("full_peaks_levels"), [1024, 2048, 4096])
+            seg_asset = project["audio_assets"]["segments"]["seg-a"]
+            self.assertTrue(seg_asset.get("peaks_relpath"))
+            self.assertGreater(seg_asset.get("peaks_bins", 0), 0)
+            self.assertTrue(seg_asset.get("audio_sha256"))
+
+            seg_peaks_resp = self.client.get(f"/api/v1/tts/projects/{project_id}/segments/seg-a/peaks")
+            self.assertEqual(seg_peaks_resp.status_code, 200)
+            seg_peaks = seg_peaks_resp.json()
+            self.assertEqual(seg_peaks["segment_id"], "seg-a")
+            self.assertEqual(seg_peaks["format"], "minmax_i16")
+            self.assertGreater(seg_peaks["bins"], 0)
+            self.assertTrue(seg_peaks["levels"])
+
+            full_waveform_resp = self.client.get(f"/api/v1/tts/projects/{project_id}/waveform?level=1024")
+            self.assertEqual(full_waveform_resp.status_code, 200)
+            full_waveform = full_waveform_resp.json()
+            self.assertEqual(full_waveform["project_id"], project_id)
+            self.assertEqual(full_waveform["format"], "minmax_i16")
+            self.assertGreaterEqual(full_waveform["level"], 1024)
+            self.assertTrue(full_waveform["data"])
+
+            with zipfile.ZipFile(io.BytesIO(archive_resp.content), "r") as zf:
+                names = set(zf.namelist())
+            self.assertIn("waveforms/full.peaks.json", names)
+            self.assertIn("waveforms/segments/seg-a.peaks.json", names)
+            self.assertIn("waveforms/segments/seg-b.peaks.json", names)
 
     def test_partial_synthesis_single_segment_without_rebuild_full(self) -> None:
         project_id = self._create_project("tts-partial-single")

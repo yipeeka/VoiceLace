@@ -358,9 +358,13 @@ async def import_project_archive(file: UploadFile = File(...), state=Depends(get
         full_dir = project_root / "full"
         seg_dir = project_root / "segments"
         sub_dir = project_root / "subtitles"
+        waveform_dir = project_root / "waveforms"
+        waveform_seg_dir = waveform_dir / "segments"
         full_dir.mkdir(parents=True, exist_ok=True)
         seg_dir.mkdir(parents=True, exist_ok=True)
         sub_dir.mkdir(parents=True, exist_ok=True)
+        waveform_dir.mkdir(parents=True, exist_ok=True)
+        waveform_seg_dir.mkdir(parents=True, exist_ok=True)
 
         imported_project.audio_assets.latest_task_id = None
         imported_project.audio_assets.segments = {}
@@ -368,7 +372,10 @@ async def import_project_archive(file: UploadFile = File(...), state=Depends(get
         imported_project.audio_assets.full_mp3_relpath = None
         imported_project.audio_assets.subtitle_srt_relpath = None
         imported_project.audio_assets.subtitle_lrc_relpath = None
-        imported_project.audio_assets.archive_schema_version = 2
+        imported_project.audio_assets.full_peaks_relpath = None
+        imported_project.audio_assets.full_peaks_version = 1
+        imported_project.audio_assets.full_peaks_levels = []
+        imported_project.audio_assets.archive_schema_version = 3
 
         arc_full_dir = _first_existing_path(
             [
@@ -417,6 +424,26 @@ async def import_project_archive(file: UploadFile = File(...), state=Depends(get
                 shutil.copyfile(src, dst)
                 setattr(imported_project.audio_assets, attr, _to_output_relpath(state, dst))
 
+        arc_waveform_dir = _first_existing_path(
+            [
+                extract_dir / "waveforms",
+            ]
+        )
+        if arc_waveform_dir:
+            full_peaks_src = arc_waveform_dir / "full.peaks.json"
+            if full_peaks_src.exists() and full_peaks_src.is_file():
+                dst = waveform_dir / "full.peaks.json"
+                shutil.copyfile(full_peaks_src, dst)
+                imported_project.audio_assets.full_peaks_relpath = _to_output_relpath(state, dst)
+                try:
+                    payload = json.loads(dst.read_text(encoding="utf-8"))
+                    levels = payload.get("levels", {}) or {}
+                    imported_project.audio_assets.full_peaks_version = int(payload.get("version", 1))
+                    imported_project.audio_assets.full_peaks_levels = sorted(int(key) for key in levels.keys())
+                except Exception:
+                    imported_project.audio_assets.full_peaks_version = 1
+                    imported_project.audio_assets.full_peaks_levels = []
+
         arc_seg_dir = _first_existing_path(
             [
                 extract_dir / "audio" / "segments",
@@ -430,10 +457,36 @@ async def import_project_archive(file: UploadFile = File(...), state=Depends(get
         else:
             warnings.append("Archive has no segment audio folder, related segments may require regeneration.")
 
+        arc_waveform_seg_dir = _first_existing_path(
+            [
+                extract_dir / "waveforms" / "segments",
+            ]
+        )
+        if arc_waveform_seg_dir:
+            for src in sorted(arc_waveform_seg_dir.glob("*.peaks.json")):
+                dst = waveform_seg_dir / src.name
+                shutil.copyfile(src, dst)
+
         for segment in imported_project.script.segments:
             seg_file = seg_dir / f"{segment.id}.wav"
             if not seg_file.exists():
                 continue
+            seg_peaks = waveform_seg_dir / f"{segment.id}.peaks.json"
+            peaks_relpath = None
+            peaks_bins = 0
+            peaks_version = 1
+            peaks_format = "minmax_i16"
+            if seg_peaks.exists():
+                peaks_relpath = _to_output_relpath(state, seg_peaks)
+                try:
+                    peaks_payload = json.loads(seg_peaks.read_text(encoding="utf-8"))
+                    peaks_bins = int(peaks_payload.get("bins", 0))
+                    peaks_version = int(peaks_payload.get("version", 1))
+                    peaks_format = str(peaks_payload.get("format", "minmax_i16"))
+                except Exception:
+                    peaks_bins = 0
+                    peaks_version = 1
+                    peaks_format = "minmax_i16"
             imported_project.audio_assets.segments[segment.id] = SegmentAsset(
                 segment_id=segment.id,
                 audio_relpath=_to_output_relpath(state, seg_file),
@@ -442,6 +495,11 @@ async def import_project_archive(file: UploadFile = File(...), state=Depends(get
                 source_task_id=None,
                 created_at=datetime.now(timezone.utc).isoformat(),
                 status="ready",
+                peaks_relpath=peaks_relpath,
+                peaks_version=peaks_version,
+                peaks_bins=peaks_bins,
+                peaks_format=peaks_format,
+                audio_sha256=_compute_file_hash(seg_file) or "",
             )
 
         saved = save_project(state.settings.projects_dir, imported_project)

@@ -175,6 +175,7 @@ export const useSynthesisStore = create((set) => ({
                     status: msg.status,
                     duration_ms: msg.duration_ms,
                     audio_url: msg.audio_url,
+                    peaks: msg.peaks || null,
                   },
                 },
               }));
@@ -377,6 +378,7 @@ export const useSynthesisStore = create((set) => ({
                     status: msg.status,
                     duration_ms: msg.duration_ms,
                     audio_url: msg.audio_url,
+                    peaks: msg.peaks || null,
                   },
                 },
               }));
