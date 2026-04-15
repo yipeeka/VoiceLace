@@ -222,6 +222,12 @@ export default function SynthesisPage() {
     });
   }, [currentProject, segmentResults, staleBySegmentId]);
 
+  const hasAnySegmentAudio = useMemo(
+    () => segments.some((segment) => Boolean(segment.audio_url)),
+    [segments],
+  );
+  const shouldShowSegmentTimeline = hasAnySegmentAudio || isRunning;
+
   useEffect(() => {
     let canceled = false;
     const needsResolve = segments.filter(
@@ -593,7 +599,7 @@ export default function SynthesisPage() {
             </Button>
           </div>
         ) : null}
-        {segments.length ? (
+        {segments.length && shouldShowSegmentTimeline ? (
           <div className="synthesisTimeline">
             {segments.map((seg) => {
               const segStatus = seg.display_status ?? seg.status ?? "pending";
@@ -748,10 +754,17 @@ export default function SynthesisPage() {
             })}
           </div>
         ) : (
-          <EmptyState
-            title="还没有分段结果"
-            description="点击「开始合成」后每段音频完成时会在此显示"
-          />
+          shouldShowSegmentTimeline ? (
+            <EmptyState
+              title="还没有分段结果"
+              description="点击「开始合成」后每段音频完成时会在此显示"
+            />
+          ) : (
+            <EmptyState
+              title="缺失音频文件"
+              description="当前项目尚未生成任何分段音频，请先执行合成后再查看分段时间线。"
+            />
+          )
         )}
         {isAutoPlay ? (
           <div className="controlRow" style={{ marginTop: 12 }}>
