@@ -10,6 +10,7 @@ import zipfile
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from backend.models import VoicePreset
 from backend.state import get_app_state_from_app
 
 
@@ -23,6 +24,17 @@ class ApiSmokeTest(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         cls._client_ctx.__exit__(None, None, None)
+
+    @staticmethod
+    def _build_import_archive(project_payload: dict, presets: list[dict], ref_files: dict[str, bytes] | None = None) -> io.BytesIO:
+        archive_bytes = io.BytesIO()
+        with zipfile.ZipFile(archive_bytes, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("project/project.json", json.dumps(project_payload, ensure_ascii=False))
+            zf.writestr("voices/presets.json", json.dumps(presets, ensure_ascii=False))
+            for filename, content in (ref_files or {}).items():
+                zf.writestr(f"voices/ref/{filename}", content)
+        archive_bytes.seek(0)
+        return archive_bytes
 
     def test_root(self) -> None:
         response = self.client.get("/")
@@ -327,6 +339,184 @@ class ApiSmokeTest(unittest.TestCase):
             self.assertIn("voices/presets.json", warning_text)
         finally:
             self.client.delete(f"/api/v1/projects/{source_id}")
+
+    def test_import_archive_reuses_existing_preset_and_ref_audio(self) -> None:
+        presets_file = self.app_state.voice_manager.presets_file
+        presets_backup = presets_file.read_text(encoding="utf-8") if presets_file.exists() else None
+        existing_ref_path = self.app_state.settings.voices_dir / f"existing-ref-{uuid.uuid4().hex[:6]}.wav"
+        source_id = None
+        imported_project_id = None
+        try:
+            existing_ref_bytes = b"RIFFexisting-audio"
+            existing_ref_path.write_bytes(existing_ref_bytes)
+            existing_preset_id = f"existing-{uuid.uuid4().hex[:8]}"
+            self.app_state.voice_manager.save_presets(
+                [
+                    VoicePreset(
+                        id=existing_preset_id,
+                        name="Warm Female",
+                        voice_mode="design",
+                        ref_audio_path=str(existing_ref_path),
+                        ref_text="示例台词",
+                        gender="female",
+                        style="warm",
+                        speed=1.0,
+                        description="warm-desc",
+                    )
+                ]
+            )
+
+            created = self.client.post("/api/v1/projects", json={"name": f"import-src-{uuid.uuid4().hex[:6]}"})
+            self.assertEqual(created.status_code, 200)
+            source_id = created.json()["id"]
+
+            script_update = self.client.put(
+                f"/api/v1/projects/{source_id}/script",
+                json={
+                    "title": "import-script",
+                    "source_text": "角色A：测试",
+                    "segments": [
+                        {"id": "seg-import-1", "index": 0, "type": "dialogue", "speaker": "角色A", "text": "测试"},
+                    ],
+                    "characters": [],
+                    "metadata": {},
+                },
+            )
+            self.assertEqual(script_update.status_code, 200)
+            self.assertEqual(
+                self.client.put(
+                    f"/api/v1/projects/{source_id}/voice-assignments",
+                    json={"assignments": {"角色A": "archive-preset-1"}},
+                ).status_code,
+                200,
+            )
+            source_project = self.client.get(f"/api/v1/projects/{source_id}").json()
+            archive = self._build_import_archive(
+                source_project,
+                [
+                    {
+                        "id": "archive-preset-1",
+                        "name": "Warm Female",
+                        "voice_mode": "design",
+                        "ref_audio_path": "warm.wav",
+                        "ref_text": "示例台词",
+                        "gender": "female",
+                        "style": "warm",
+                        "speed": 1.0,
+                        "description": "warm-desc",
+                    }
+                ],
+                {"warm.wav": existing_ref_bytes},
+            )
+            response = self.client.post(
+                "/api/v1/projects/import/archive",
+                files={"file": ("import.zip", archive, "application/zip")},
+            )
+            self.assertEqual(response.status_code, 200)
+            body = response.json()
+            imported_project_id = body["project_id"]
+            self.assertEqual(body["created_presets"], 0)
+            self.assertEqual(body["reused_presets"], 1)
+            self.assertEqual(body["reused_ref_audios"], 1)
+            self.assertEqual(body["copied_ref_audios"], 0)
+
+            imported_project = self.client.get(f"/api/v1/projects/{imported_project_id}").json()
+            self.assertEqual(imported_project["voice_assignments"].get("角色A"), existing_preset_id)
+            self.assertEqual(len(self.app_state.voice_manager.list_presets()), 1)
+        finally:
+            if imported_project_id:
+                self.client.delete(f"/api/v1/projects/{imported_project_id}")
+            if source_id:
+                self.client.delete(f"/api/v1/projects/{source_id}")
+            existing_ref_path.unlink(missing_ok=True)
+            if presets_backup is None:
+                presets_file.unlink(missing_ok=True)
+            else:
+                presets_file.write_text(presets_backup, encoding="utf-8")
+
+    def test_import_archive_repeat_does_not_keep_creating_presets(self) -> None:
+        presets_file = self.app_state.voice_manager.presets_file
+        presets_backup = presets_file.read_text(encoding="utf-8") if presets_file.exists() else None
+        source_id = None
+        imported_project_ids: list[str] = []
+        try:
+            self.app_state.voice_manager.save_presets([])
+
+            created = self.client.post("/api/v1/projects", json={"name": f"import-repeat-{uuid.uuid4().hex[:6]}"})
+            self.assertEqual(created.status_code, 200)
+            source_id = created.json()["id"]
+
+            script_update = self.client.put(
+                f"/api/v1/projects/{source_id}/script",
+                json={
+                    "title": "repeat-script",
+                    "source_text": "角色A：测试",
+                    "segments": [
+                        {"id": "seg-repeat-1", "index": 0, "type": "dialogue", "speaker": "角色A", "text": "测试"},
+                    ],
+                    "characters": [],
+                    "metadata": {},
+                },
+            )
+            self.assertEqual(script_update.status_code, 200)
+            self.assertEqual(
+                self.client.put(
+                    f"/api/v1/projects/{source_id}/voice-assignments",
+                    json={"assignments": {"角色A": "archive-repeat-1"}},
+                ).status_code,
+                200,
+            )
+            source_project = self.client.get(f"/api/v1/projects/{source_id}").json()
+            archive = self._build_import_archive(
+                source_project,
+                [
+                    {
+                        "id": "archive-repeat-1",
+                        "name": "Repeat Voice",
+                        "voice_mode": "design",
+                        "gender": "female",
+                        "style": "calm",
+                        "speed": 1.0,
+                        "description": "repeat-desc",
+                    }
+                ],
+            )
+
+            first = self.client.post(
+                "/api/v1/projects/import/archive",
+                files={"file": ("repeat.zip", archive, "application/zip")},
+            )
+            self.assertEqual(first.status_code, 200)
+            first_body = first.json()
+            imported_project_ids.append(first_body["project_id"])
+            self.assertEqual(first_body["created_presets"], 1)
+            self.assertEqual(first_body["reused_presets"], 0)
+            created_preset_id = self.client.get(f"/api/v1/projects/{first_body['project_id']}").json()["voice_assignments"]["角色A"]
+            preset_count_after_first = len(self.app_state.voice_manager.list_presets())
+
+            archive.seek(0)
+            second = self.client.post(
+                "/api/v1/projects/import/archive",
+                files={"file": ("repeat.zip", archive, "application/zip")},
+            )
+            self.assertEqual(second.status_code, 200)
+            second_body = second.json()
+            imported_project_ids.append(second_body["project_id"])
+            self.assertEqual(second_body["created_presets"], 0)
+            self.assertEqual(second_body["reused_presets"], 1)
+            self.assertEqual(len(self.app_state.voice_manager.list_presets()), preset_count_after_first)
+
+            second_project = self.client.get(f"/api/v1/projects/{second_body['project_id']}").json()
+            self.assertEqual(second_project["voice_assignments"]["角色A"], created_preset_id)
+        finally:
+            for project_id in imported_project_ids:
+                self.client.delete(f"/api/v1/projects/{project_id}")
+            if source_id:
+                self.client.delete(f"/api/v1/projects/{source_id}")
+            if presets_backup is None:
+                presets_file.unlink(missing_ok=True)
+            else:
+                presets_file.write_text(presets_backup, encoding="utf-8")
 
     def test_partial_synthesis_requires_segment_ids(self) -> None:
         project_name = f"partial-{uuid.uuid4().hex[:8]}"

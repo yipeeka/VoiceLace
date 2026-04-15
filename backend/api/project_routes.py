@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 import shutil
 import tempfile
+from typing import Any
 from uuid import uuid4
 import zipfile
 
@@ -79,6 +81,77 @@ def _load_archive_manifest(extract_dir: Path) -> tuple[int, dict]:
         return 1, {}
 
 
+def _compute_file_hash(path: Path) -> str | None:
+    try:
+        hasher = hashlib.sha256()
+        with path.open("rb") as handle:
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                hasher.update(chunk)
+        return hasher.hexdigest()
+    except Exception:
+        return None
+
+
+def _normalize_match_text(value: str | None) -> str:
+    return (value or "").strip()
+
+
+def _resolve_archive_ref_audio_path(ref_dir: Path, preset: VoicePreset) -> Path | None:
+    if not preset.ref_audio_path:
+        return None
+    candidate = ref_dir / Path(preset.ref_audio_path).name
+    if candidate.exists() and candidate.is_file():
+        return candidate
+    return None
+
+
+def _normalize_preset_for_match(preset: VoicePreset, ref_audio_hash: str | None) -> dict[str, Any]:
+    return {
+        "voice_mode": preset.voice_mode,
+        "gender": _normalize_match_text(preset.gender),
+        "age": _normalize_match_text(preset.age),
+        "pitch": _normalize_match_text(preset.pitch),
+        "style": _normalize_match_text(preset.style),
+        "accent": _normalize_match_text(preset.accent),
+        "dialect": _normalize_match_text(preset.dialect),
+        "custom_instruct": _normalize_match_text(preset.custom_instruct),
+        "description": _normalize_match_text(preset.description),
+        "speed": float(preset.speed),
+        "ref_text": _normalize_match_text(preset.ref_text),
+        "ref_audio_hash": ref_audio_hash or "",
+    }
+
+
+def _build_preset_fingerprint(preset: VoicePreset, ref_audio_hash: str | None) -> str:
+    normalized = _normalize_preset_for_match(preset, ref_audio_hash)
+    payload = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _build_weak_keys(preset: VoicePreset, ref_audio_hash: str | None) -> tuple[tuple[str, str, str, str], tuple[str, str]]:
+    name = _normalize_match_text(preset.name).lower()
+    mode = _normalize_match_text(preset.voice_mode).lower()
+    gender = _normalize_match_text(preset.gender).lower()
+    return (
+        (name, mode, gender, ref_audio_hash or ""),
+        (name, mode),
+    )
+
+
+def _make_unique_preset_name(base_name: str, used_names: set[str]) -> str:
+    name = base_name
+    if name not in used_names:
+        return name
+    while True:
+        suffix = uuid4().hex[:6]
+        candidate = f"{base_name} (Imported-{suffix})"
+        if candidate not in used_names:
+            return candidate
+
+
 @router.get("")
 async def list_projects(state=Depends(get_app_state)):
     projects = []
@@ -138,8 +211,36 @@ async def import_project_archive(file: UploadFile = File(...), state=Depends(get
         existing_presets = state.voice_manager.list_presets()
         existing_preset_ids = {preset.id for preset in existing_presets}
         existing_preset_names = {preset.name for preset in existing_presets}
+        local_preset_by_id = {preset.id: preset for preset in existing_presets}
+
+        local_ref_audio_hash: dict[str, str] = {}
+        ref_audio_index: dict[str, str] = {}
+        local_preset_fingerprints: dict[str, list[str]] = {}
+        local_weak_full: dict[tuple[str, str, str, str], list[str]] = {}
+        local_weak_simple: dict[tuple[str, str], list[str]] = {}
+
+        for preset in existing_presets:
+            ref_hash = None
+            if preset.ref_audio_path:
+                ref_path = Path(preset.ref_audio_path)
+                if ref_path.exists() and ref_path.is_file():
+                    ref_hash = _compute_file_hash(ref_path)
+                    if ref_hash:
+                        local_ref_audio_hash[preset.id] = ref_hash
+                        ref_audio_index.setdefault(ref_hash, str(ref_path))
+            fingerprint = _build_preset_fingerprint(preset, ref_hash)
+            local_preset_fingerprints.setdefault(fingerprint, []).append(preset.id)
+            weak_full, weak_simple = _build_weak_keys(preset, ref_hash)
+            local_weak_full.setdefault(weak_full, []).append(preset.id)
+            local_weak_simple.setdefault(weak_simple, []).append(preset.id)
+
         preset_id_map: dict[str, str] = {}
-        imported_presets: list[VoicePreset] = []
+        new_presets: list[VoicePreset] = []
+        reused_presets = 0
+        created_presets = 0
+        reused_ref_audios = 0
+        copied_ref_audios = 0
+        processed_presets = 0
 
         presets_json = extract_dir / "voices" / "presets.json"
         if presets_json.exists():
@@ -161,43 +262,92 @@ async def import_project_archive(file: UploadFile = File(...), state=Depends(get
                     continue
                 if preset.id not in used_preset_ids:
                     continue
-                old_id = preset.id
-                new_id = old_id
-                if new_id in existing_preset_ids or new_id in preset_id_map.values():
-                    new_id = str(uuid4())
+                processed_presets += 1
 
-                new_name = preset.name
-                if new_name in existing_preset_names:
-                    suffix = uuid4().hex[:6]
-                    new_name = f"{new_name} (Imported-{suffix})"
-
+                archive_ref = _resolve_archive_ref_audio_path(ref_dir, preset)
+                archive_ref_hash = _compute_file_hash(archive_ref) if archive_ref else None
+                pending_copy_ref = archive_ref
                 ref_audio_path = None
-                if preset.ref_audio_path:
-                    candidate = ref_dir / Path(preset.ref_audio_path).name
-                    if candidate.exists() and candidate.is_file():
-                        target_name = f"import_{uuid4().hex[:8]}_{candidate.name}"
-                        target_path = state.settings.voices_dir / target_name
-                        shutil.copyfile(candidate, target_path)
-                        ref_audio_path = str(target_path)
-                    else:
-                        warnings.append(f"Reference audio not found for preset {preset.name}")
+                if archive_ref:
+                    if archive_ref_hash and archive_ref_hash in ref_audio_index:
+                        ref_audio_path = ref_audio_index[archive_ref_hash]
+                        pending_copy_ref = None
+                        reused_ref_audios += 1
+                elif preset.ref_audio_path:
+                    warnings.append(f"Reference audio not found for preset {preset.name}")
 
-                imported = preset.model_copy(
-                    update={
-                        "id": new_id,
-                        "name": new_name,
-                        "ref_audio_path": ref_audio_path,
-                    }
-                )
-                preset_id_map[old_id] = new_id
-                imported_presets.append(imported)
-                existing_preset_ids.add(new_id)
-                existing_preset_names.add(new_name)
+                if archive_ref_hash:
+                    resolved_ref_hash = archive_ref_hash
+                elif ref_audio_path:
+                    resolved_ref_hash = _compute_file_hash(Path(ref_audio_path))
+                else:
+                    resolved_ref_hash = None
+
+                local_id: str | None = None
+                same_id = local_preset_by_id.get(preset.id)
+                if same_id:
+                    same_id_hash = local_ref_audio_hash.get(same_id.id)
+                    if _normalize_preset_for_match(same_id, same_id_hash) == _normalize_preset_for_match(preset, resolved_ref_hash):
+                        local_id = same_id.id
+
+                if local_id is None:
+                    fingerprint = _build_preset_fingerprint(preset, resolved_ref_hash)
+                    matched_ids = local_preset_fingerprints.get(fingerprint, [])
+                    if matched_ids:
+                        local_id = matched_ids[0]
+
+                if local_id is None:
+                    weak_full, weak_simple = _build_weak_keys(preset, resolved_ref_hash)
+                    matched_ids = local_weak_full.get(weak_full, [])
+                    if not matched_ids:
+                        matched_ids = local_weak_simple.get(weak_simple, [])
+                    if matched_ids:
+                        local_id = matched_ids[0]
+                        warnings.append(f"已复用本地近似匹配预设：{preset.name}（同名/同模式）")
+
+                if local_id is None:
+                    if ref_audio_path is None and pending_copy_ref is not None:
+                        target_name = f"import_{uuid4().hex[:8]}_{pending_copy_ref.name}"
+                        target_path = state.settings.voices_dir / target_name
+                        shutil.copyfile(pending_copy_ref, target_path)
+                        ref_audio_path = str(target_path)
+                        copied_ref_audios += 1
+                        if resolved_ref_hash:
+                            ref_audio_index.setdefault(resolved_ref_hash, ref_audio_path)
+                    new_id = preset.id if preset.id not in existing_preset_ids else str(uuid4())
+                    new_name = _make_unique_preset_name(preset.name, existing_preset_names)
+                    created = preset.model_copy(
+                        update={
+                            "id": new_id,
+                            "name": new_name,
+                            "ref_audio_path": ref_audio_path,
+                        }
+                    )
+                    existing_presets.append(created)
+                    new_presets.append(created)
+                    local_preset_by_id[new_id] = created
+                    existing_preset_ids.add(new_id)
+                    existing_preset_names.add(new_name)
+                    if resolved_ref_hash:
+                        local_ref_audio_hash[new_id] = resolved_ref_hash
+                        if ref_audio_path:
+                            ref_audio_index.setdefault(resolved_ref_hash, ref_audio_path)
+                    fingerprint = _build_preset_fingerprint(created, resolved_ref_hash)
+                    local_preset_fingerprints.setdefault(fingerprint, []).append(new_id)
+                    weak_full, weak_simple = _build_weak_keys(created, resolved_ref_hash)
+                    local_weak_full.setdefault(weak_full, []).append(new_id)
+                    local_weak_simple.setdefault(weak_simple, []).append(new_id)
+                    local_id = new_id
+                    created_presets += 1
+                else:
+                    reused_presets += 1
+
+                preset_id_map[preset.id] = local_id
         else:
             warnings.append("Archive has no voices/presets.json, skipped preset snapshot import.")
 
-        if imported_presets:
-            state.voice_manager.save_presets(existing_presets + imported_presets)
+        if new_presets:
+            state.voice_manager.save_presets(existing_presets)
 
         imported_project.voice_assignments = {
             character: preset_id_map.get(preset_id, preset_id)
@@ -299,7 +449,12 @@ async def import_project_archive(file: UploadFile = File(...), state=Depends(get
             "project_id": saved.id,
             "project_name": saved.name,
             "from_project_id": old_project_id,
-            "imported_presets": len(imported_presets),
+            "imported_presets": len(new_presets),
+            "processed_presets": processed_presets,
+            "reused_presets": reused_presets,
+            "created_presets": created_presets,
+            "reused_ref_audios": reused_ref_audios,
+            "copied_ref_audios": copied_ref_audios,
             "imported_segments": len(saved.audio_assets.segments),
             "has_full_audio": bool(saved.audio_assets.full_wav_relpath or saved.audio_assets.full_mp3_relpath),
             "warnings": warnings,
