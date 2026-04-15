@@ -15,9 +15,8 @@ function formatTime(seconds) {
 }
 
 function pickWaveformLevel(zoom) {
-  if (zoom >= 67) return 4096;
-  if (zoom >= 34) return 2048;
-  return 1024;
+  if (zoom >= 50) return 4096;
+  return 2048;
 }
 
 function buildChannelDataFromMinMax(data) {
@@ -137,8 +136,8 @@ export default function SynthesisWaveSurfer({ projectId, audioUrl, segments = []
         cursorColor: "var(--accent-secondary)",
         hideScrollbar: false,
         height,
-        barWidth: 2,
-        barGap: 1,
+        barWidth: 1.2,
+        barGap: 0,
         barRadius: 2,
         normalize: true,
         plugins: [
@@ -171,6 +170,7 @@ export default function SynthesisWaveSurfer({ projectId, audioUrl, segments = []
     ws.on("ready", () => {
       setDuration(ws.getDuration());
       setIsReady(true);
+      setWaveformError("");
       regionConfig.forEach((config) => {
         const region = regionsPlugin.addRegion(config);
         const contentEl = region.element.querySelector(".wavesurfer-region-content");
@@ -189,7 +189,11 @@ export default function SynthesisWaveSurfer({ projectId, audioUrl, segments = []
     ws.on("audioprocess", () => setCurrentTime(ws.getCurrentTime()));
     ws.on("seeking", () => setCurrentTime(ws.getCurrentTime()));
     ws.on("finish", () => setIsPlaying(false));
-    ws.on("error", () => {
+    ws.on("error", (err) => {
+      const message = String(err?.message || err || "").toLowerCase();
+      if (message.includes("abort") || message.includes("destroy")) {
+        return;
+      }
       setWaveformError("WaveSurfer 初始化失败，建议重试或刷新页面。");
     });
 

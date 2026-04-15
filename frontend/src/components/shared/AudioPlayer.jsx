@@ -29,6 +29,22 @@ function normalizePeaksData(peaks) {
   return bars;
 }
 
+function extractPeaksData(payload) {
+  if (!payload || typeof payload !== "object") return [];
+  if (Array.isArray(payload.data) && payload.data.length) return payload.data;
+  const levels = payload.levels;
+  if (!levels || typeof levels !== "object") return [];
+  const preferredKey = String(payload.bins || payload.level || "");
+  if (preferredKey && Array.isArray(levels[preferredKey]) && levels[preferredKey].length) {
+    return levels[preferredKey];
+  }
+  const firstKey = Object.keys(levels)[0];
+  if (firstKey && Array.isArray(levels[firstKey])) {
+    return levels[firstKey];
+  }
+  return [];
+}
+
 function resolveUrl(path) {
   if (!path) return "";
   if (path.startsWith("http://") || path.startsWith("https://")) return path;
@@ -105,10 +121,11 @@ export default function AudioPlayer({ audioUrl, peaks = null, peaksUrl = null, h
         const response = await fetch(url);
         if (!response.ok) return;
         const payload = await response.json();
+        const extractedData = extractPeaksData(payload);
         const normalized = {
           format: payload.format || "minmax_i16",
           bins: Number(payload.level || payload.bins || 0),
-          data: Array.isArray(payload.data) ? payload.data : [],
+          data: extractedData,
         };
         if (!canceled) {
           peaksCache.set(url, normalized);
