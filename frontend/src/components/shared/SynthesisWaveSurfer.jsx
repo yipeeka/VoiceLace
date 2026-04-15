@@ -75,6 +75,7 @@ export default function SynthesisWaveSurfer({ audioUrl, segments = [], gapDurati
         waveColor: "rgba(161, 161, 170, 0.4)",
         progressColor: "var(--accent-primary)",
         cursorColor: "var(--accent-secondary)",
+        hideScrollbar: false,
         height,
         barWidth: 2,
         barGap: 1,
@@ -163,7 +164,7 @@ export default function SynthesisWaveSurfer({ audioUrl, segments = [], gapDurati
   if (!audioUrl) return null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+    <div className="synthesisWaveformShell" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {/* Controls row */}
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
         <button
