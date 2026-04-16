@@ -10,6 +10,7 @@ TEST_MODULES = [
     "backend.tests.test_persistence",
     "backend.tests.test_state_factory",
     "backend.tests.test_model_orchestrator",
+    "backend.tests.test_tts_overrides",
 ]
 
 

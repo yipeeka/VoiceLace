@@ -18,4 +18,7 @@ test("parseOverridesJson validates object JSON", () => {
 
   const badSyntax = parseOverridesJson("{");
   assert.equal(badSyntax.ok, false);
+
+  const badField = parseOverridesJson('{"temperature":0.3}');
+  assert.equal(badField.ok, false);
 });

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.config import settings
+from backend.engine.tts_overrides import normalize_tts_overrides
 from backend.models import SynthesisConfig, VoicePreset
 
 
@@ -84,6 +85,7 @@ class TTSEngine:
         output_path: Path,
         preset: VoicePreset | None = None,
         config: SynthesisConfig | None = None,
+        tts_overrides: dict[str, Any] | None = None,
     ) -> Path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         if self.backend_name == "omnivoice" and self._model is not None and self._torch is not None:
@@ -103,6 +105,8 @@ class TTSEngine:
                         kwargs["instruct"] = instruct
                 if preset.speed and preset.speed != 1.0:
                     kwargs["speed"] = preset.speed
+            normalized_tts_overrides = normalize_tts_overrides(tts_overrides)
+            kwargs.update(normalized_tts_overrides)
 
             try:
                 audio = self._model.generate(**kwargs)

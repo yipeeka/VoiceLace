@@ -141,7 +141,7 @@ class TaskFlowTest(unittest.TestCase):
             },
         )
 
-        async def fake_synthesize(text, output_path: Path, preset=None, config=None):
+        async def fake_synthesize(text, output_path: Path, preset=None, config=None, tts_overrides=None):
             output_path.parent.mkdir(parents=True, exist_ok=True)
             with wave.open(str(output_path), "wb") as wav_file:
                 wav_file.setnchannels(1)
@@ -228,7 +228,7 @@ class TaskFlowTest(unittest.TestCase):
             },
         )
 
-        async def fake_synthesize(text, output_path: Path, preset=None, config=None):
+        async def fake_synthesize(text, output_path: Path, preset=None, config=None, tts_overrides=None):
             output_path.parent.mkdir(parents=True, exist_ok=True)
             with wave.open(str(output_path), "wb") as wav_file:
                 wav_file.setnchannels(1)
@@ -254,6 +254,97 @@ class TaskFlowTest(unittest.TestCase):
             self.assertEqual(body["progress"]["total"], 1)
             self.assertIn("seg-a", body["segments"])
             self.assertNotIn("seg-b", body["segments"])
+
+    def test_tts_overrides_are_forwarded_to_engine(self) -> None:
+        project_id = self._create_project("tts-overrides-pass")
+        self._update_script(
+            project_id,
+            {
+                "title": "tts-overrides",
+                "source_text": "tts-overrides",
+                "segments": [
+                    {
+                        "id": "seg-o1",
+                        "index": 0,
+                        "type": "narration",
+                        "speaker": "narrator",
+                        "text": "A",
+                        "tts_overrides": {
+                            "speed": 1,
+                            "duration": 3.5,
+                            "denoise": False,
+                            "num_step": 24,
+                            "guidance_scale": 2,
+                        },
+                    },
+                ],
+                "characters": [],
+                "metadata": {},
+            },
+        )
+
+        captured_overrides: list[dict] = []
+
+        async def fake_synthesize(text, output_path: Path, preset=None, config=None, tts_overrides=None):
+            captured_overrides.append(tts_overrides or {})
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with wave.open(str(output_path), "wb") as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(22050)
+                wav_file.writeframes(b"\x00\x00" * 2205)
+            return output_path
+
+        with (
+            patch.object(self.app_state.orchestrator, "ensure_tts_ready", new=AsyncMock(return_value=None)),
+            patch.object(self.app_state.tts_engine, "synthesize_to_file", new=AsyncMock(side_effect=fake_synthesize)),
+        ):
+            started = self.client.post("/api/v1/tts/synthesize", json={"project_id": project_id})
+            self.assertEqual(started.status_code, 200)
+            status_code, body = self._wait_for_tts(started.json()["task_id"])
+            self.assertEqual(status_code, 200)
+            self.assertEqual(body["status"], "done")
+
+        self.assertEqual(len(captured_overrides), 1)
+        self.assertEqual(
+            captured_overrides[0],
+            {
+                "speed": 1.0,
+                "duration": 3.5,
+                "denoise": False,
+                "num_step": 24,
+                "guidance_scale": 2.0,
+            },
+        )
+
+    def test_tts_overrides_unknown_field_fails_task(self) -> None:
+        project_id = self._create_project("tts-overrides-invalid")
+        self._update_script(
+            project_id,
+            {
+                "title": "tts-overrides-invalid",
+                "source_text": "tts-overrides-invalid",
+                "segments": [
+                    {
+                        "id": "seg-invalid",
+                        "index": 0,
+                        "type": "narration",
+                        "speaker": "narrator",
+                        "text": "A",
+                        "tts_overrides": {"temperature": 0.3},
+                    },
+                ],
+                "characters": [],
+                "metadata": {},
+            },
+        )
+
+        with patch.object(self.app_state.orchestrator, "ensure_tts_ready", new=AsyncMock(return_value=None)):
+            started = self.client.post("/api/v1/tts/synthesize", json={"project_id": project_id})
+            self.assertEqual(started.status_code, 200)
+            status_code, body = self._wait_for_tts(started.json()["task_id"])
+            self.assertEqual(status_code, 500)
+            self.assertIn("invalid tts_overrides", body["detail"])
 
     def test_transcribe_success_with_mocked_asr(self) -> None:
         audio_path = self.app_state.settings.voices_dir / f"asr-{uuid.uuid4().hex[:8]}.wav"
@@ -291,7 +382,7 @@ class TaskFlowTest(unittest.TestCase):
             },
         )
 
-        async def fake_synthesize(text, output_path: Path, preset=None, config=None):
+        async def fake_synthesize(text, output_path: Path, preset=None, config=None, tts_overrides=None):
             output_path.parent.mkdir(parents=True, exist_ok=True)
             with wave.open(str(output_path), "wb") as wav_file:
                 wav_file.setnchannels(1)

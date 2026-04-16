@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from backend.engine.mixer_engine import MixerEngine, TimelineEntry
 from backend.engine.subtitle_gen import timeline_to_lrc, timeline_to_srt
+from backend.engine.tts_overrides import normalize_tts_overrides
 from backend.engine.waveform_peaks import build_peaks_payload, compute_file_sha256
 from backend.models import ExportRequest, SegmentAsset, SynthesizeRequest
 from backend.persistence import append_project_event, load_project, project_path, read_project_events, save_project
@@ -65,6 +66,17 @@ def _segment_cache_key(
         sort_keys=True,
     )
     return hashlib.md5(blob.encode("utf-8")).hexdigest()
+
+
+def _normalize_segment_tts_overrides(segment, *, strict: bool = True) -> dict:
+    try:
+        return normalize_tts_overrides(segment.tts_overrides)
+    except ValueError as exc:
+        if strict:
+            raise RuntimeError(
+                f"segment #{segment.index + 1} ({segment.id}) has invalid tts_overrides: {exc}"
+            ) from exc
+        return {}
 
 
 def _hash_payload(payload: dict) -> str:
@@ -157,6 +169,7 @@ def _build_stale_report(state, project, config=None) -> dict:
     debug_stale_report = _should_log_stale_report(state)
 
     for segment in project.script.segments:
+        normalized_overrides = _normalize_segment_tts_overrides(segment, strict=False)
         preset_id = project.voice_assignments.get(segment.speaker)
         preset = presets_by_id.get(preset_id) if preset_id else None
         preset_payload = {}
@@ -172,7 +185,7 @@ def _build_stale_report(state, project, config=None) -> dict:
             config=config,
             tts_backend=tts_backend,
             tts_model_path=tts_model_path,
-            tts_overrides=segment.tts_overrides,
+            tts_overrides=normalized_overrides,
         )
         asset = project.audio_assets.segments.get(segment.id)
         current_fingerprint = asset.fingerprint if asset else ""
@@ -212,7 +225,7 @@ def _build_stale_report(state, project, config=None) -> dict:
                         reasons.append("type_changed")
                     if (asset.source_emotion or "") != (segment.emotion or ""):
                         reasons.append("emotion_changed")
-                    if (asset.source_tts_overrides or {}) != (segment.tts_overrides or {}):
+                    if (asset.source_tts_overrides or {}) != normalized_overrides:
                         reasons.append("tts_overrides_changed")
                     if (asset.source_voice_preset_id or None) != (preset_id or None):
                         reasons.append("voice_assignment_changed")
@@ -471,6 +484,7 @@ async def _run_synthesis_task(task_id: str, payload: SynthesizeRequest, state) -
                 config_payload = {}
         config_hash = _hash_payload(config_payload)
         for segment in run_segments:
+            normalized_overrides = _normalize_segment_tts_overrides(segment)
             preset_id = project.voice_assignments.get(segment.speaker)
             preset = presets_by_id.get(preset_id) if preset_id else None
             preset_payload = {}
@@ -486,7 +500,7 @@ async def _run_synthesis_task(task_id: str, payload: SynthesizeRequest, state) -
                 config=config,
                 tts_backend=tts_backend,
                 tts_model_path=tts_model_path,
-                tts_overrides=segment.tts_overrides,
+                tts_overrides=normalized_overrides,
             )
             cached_path = cache_dir / f"{key}.wav"
             hit = cached_path.exists() and cached_path.is_file() and cached_path.stat().st_size > 0
@@ -505,7 +519,20 @@ async def _run_synthesis_task(task_id: str, payload: SynthesizeRequest, state) -
                 cached_count += 1
             else:
                 to_generate_count += 1
-            scan_items.append((segment, preset, cached_path, hit, can_reuse, project_asset_path, key))
+            scan_items.append(
+                (
+                    segment,
+                    preset,
+                    preset_id,
+                    preset_hash,
+                    normalized_overrides,
+                    cached_path,
+                    hit,
+                    can_reuse,
+                    project_asset_path,
+                    key,
+                )
+            )
 
         if is_partial and rebuild_full and unresolved_non_target_ids:
             unresolved_preview = ", ".join(unresolved_non_target_ids[:8])
@@ -545,7 +572,18 @@ async def _run_synthesis_task(task_id: str, payload: SynthesizeRequest, state) -
                 },
             )
             segment_path = output_dir / f"{segment.id}.wav"
-            _, preset, cached_path, cache_hit, can_reuse, project_asset_path, fingerprint = scan_items[index]
+            (
+                _,
+                preset,
+                preset_id,
+                preset_hash,
+                normalized_overrides,
+                cached_path,
+                cache_hit,
+                can_reuse,
+                project_asset_path,
+                fingerprint,
+            ) = scan_items[index]
             reused = False
             if can_reuse and project_asset_path is not None:
                 shutil.copyfile(project_asset_path, segment_path)
@@ -553,7 +591,13 @@ async def _run_synthesis_task(task_id: str, payload: SynthesizeRequest, state) -
             elif cache_hit:
                 shutil.copyfile(cached_path, segment_path)
             else:
-                await state.tts_engine.synthesize_to_file(segment.text, segment_path, preset, config)
+                await state.tts_engine.synthesize_to_file(
+                    segment.text,
+                    segment_path,
+                    preset,
+                    config,
+                    tts_overrides=normalized_overrides,
+                )
                 if segment_path.exists() and segment_path.stat().st_size > 0:
                     shutil.copyfile(segment_path, cached_path)
                 generated_count += 1
@@ -566,7 +610,13 @@ async def _run_synthesis_task(task_id: str, payload: SynthesizeRequest, state) -
                     combined_frames.extend(segment_wav.readframes(frame_count))
             except Exception:
                 if cache_hit:
-                    await state.tts_engine.synthesize_to_file(segment.text, segment_path, preset, config)
+                    await state.tts_engine.synthesize_to_file(
+                        segment.text,
+                        segment_path,
+                        preset,
+                        config,
+                        tts_overrides=normalized_overrides,
+                    )
                     if segment_path.exists() and segment_path.stat().st_size > 0:
                         shutil.copyfile(segment_path, cached_path)
                     with wave.open(str(segment_path), "rb") as segment_wav:
@@ -596,7 +646,7 @@ async def _run_synthesis_task(task_id: str, payload: SynthesizeRequest, state) -
                 source_speaker=segment.speaker or "",
                 source_type=segment.type or "",
                 source_emotion=segment.emotion or "",
-                source_tts_overrides=segment.tts_overrides or {},
+                source_tts_overrides=normalized_overrides,
                 source_voice_preset_id=preset_id,
                 source_preset_hash=preset_hash,
                 source_config_hash=config_hash,
