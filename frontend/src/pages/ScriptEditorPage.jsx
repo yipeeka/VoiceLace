@@ -1,7 +1,7 @@
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Pencil, Save, Trash2, Users } from "lucide-react";
+import { GripVertical, Pencil, Plus, Save, Trash2, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import CharacterBadge, { getCharColor } from "../components/shared/CharacterBadge";
@@ -23,6 +23,7 @@ import { computeScriptDiff, normalizeDraftScript } from "../utils/scriptDiff";
 function SortableSegmentCard({
   segment,
   isEditing,
+  isInsertAnchor,
   draft,
   canEdit,
   isSaving,
@@ -30,6 +31,7 @@ function SortableSegmentCard({
   onUpdateDraft,
   onApplyDraft,
   onCancelEdit,
+  onSetInsertAnchor,
   onDelete,
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: segment.id });
@@ -43,7 +45,7 @@ function SortableSegmentCard({
   const charColor = getCharColor(segment.speaker);
 
   return (
-    <div ref={setNodeRef} style={style} className={`segmentCard ${isEditing ? "editing" : ""}`}>
+    <div ref={setNodeRef} style={style} className={`segmentCard ${isEditing ? "editing" : ""} ${isInsertAnchor ? "insertAnchor" : ""}`}>
       {/* Drag handle */}
       {canEdit && !isEditing && (
         <div className="dragHandle" {...attributes} {...listeners}>
@@ -114,6 +116,14 @@ function SortableSegmentCard({
           >
             <Trash2 size={13} />
           </button>
+          <button
+            className="btn btn-ghost btn-sm btn-icon"
+            disabled={!canEdit || isSaving}
+            onClick={() => onSetInsertAnchor(segment.id)}
+            title="新增片段插入到此段后"
+          >
+            <Plus size={13} />
+          </button>
         </div>
       )}
     </div>
@@ -125,7 +135,7 @@ function createSegmentDraft(index) {
     id: crypto.randomUUID(),
     index,
     type: "dialogue",
-    speaker: "",
+    speaker: "narrator",
     text: "",
     emotion: "neutral",
     non_verbal: [],
@@ -167,6 +177,9 @@ export default function ScriptEditorPage() {
   const [editingId, setEditingId] = useState(null);
   const [segmentDraft, setSegmentDraft] = useState(null);
   const [newSegment, setNewSegment] = useState(() => createSegmentDraft(0));
+  const [isCustomNewSpeaker, setIsCustomNewSpeaker] = useState(false);
+  const [customNewSpeakerName, setCustomNewSpeakerName] = useState("");
+  const [insertAfterSegmentId, setInsertAfterSegmentId] = useState(null);
   const setProjectSaveAction = useUiStore((state) => state.setProjectSaveAction);
   const clearProjectSaveAction = useUiStore((state) => state.clearProjectSaveAction);
 
@@ -193,7 +206,10 @@ export default function ScriptEditorPage() {
       setDraftScript(normalized);
       setEditingId(null);
       setSegmentDraft(null);
+      setInsertAfterSegmentId(null);
       setNewSegment(createSegmentDraft(normalized.segments.length));
+      setIsCustomNewSpeaker(false);
+      setCustomNewSpeakerName("");
       lastProjectIdRef.current = projectId;
       return;
     }
@@ -215,6 +231,15 @@ export default function ScriptEditorPage() {
       .sort((a, b) => b[1] - a[1])
       .map(([name, count]) => ({ name, count }));
   }, [segments]);
+  const newSegmentSpeakerOptions = useMemo(() => {
+    const existing = characters.map((item) => item.name).filter(Boolean);
+    const withoutNarrator = existing.filter((name) => name !== "narrator");
+    return [
+      { value: "narrator", label: "narrator（默认）" },
+      ...withoutNarrator.map((name) => ({ value: name, label: name })),
+      { value: "__new__", label: "+ 添加新角色" },
+    ];
+  }, [characters]);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -296,9 +321,9 @@ export default function ScriptEditorPage() {
     }
     const toAdd = {
       id: crypto.randomUUID(),
-      index: segments.length,
+      index: 0,
       type: newSegment.type || "dialogue",
-      speaker: (newSegment.speaker || "").trim() || "narrator",
+      speaker: (isCustomNewSpeaker ? customNewSpeakerName : newSegment.speaker || "").trim() || "narrator",
       text: (newSegment.text || "").trim(),
       emotion: newSegment.emotion || "neutral",
       non_verbal: parseCsvList(newSegment.nonVerbalText),
@@ -306,9 +331,20 @@ export default function ScriptEditorPage() {
     };
     setDraftScript((current) => ({
       ...current,
-      segments: [...(current.segments || []), toAdd].map((segment, index) => ({ ...segment, index })),
+      segments: (() => {
+        const list = [...(current.segments || [])];
+        const insertIndex = insertAfterSegmentId
+          ? Math.max(0, list.findIndex((segment) => segment.id === insertAfterSegmentId) + 1)
+          : list.length;
+        const safeIndex = insertAfterSegmentId && insertIndex === 0 ? list.length : insertIndex;
+        list.splice(safeIndex, 0, toAdd);
+        return list.map((segment, index) => ({ ...segment, index }));
+      })(),
     }));
     setNewSegment(createSegmentDraft(segments.length + 1));
+    setIsCustomNewSpeaker(false);
+    setCustomNewSpeakerName("");
+    setInsertAfterSegmentId(null);
     useUiStore.getState().pushToast({
       title: "已加入草稿，点击“保存剧本”后生效",
       tone: "default",
@@ -324,6 +360,7 @@ export default function ScriptEditorPage() {
     }));
     setEditingId((current) => (current === id ? null : current));
     setSegmentDraft((current) => (current?.id === id ? null : current));
+    setInsertAfterSegmentId((current) => (current === id ? null : current));
     useUiStore.getState().pushToast({
       title: "已加入草稿，点击“保存剧本”后生效",
       tone: "default",
@@ -500,14 +537,41 @@ export default function ScriptEditorPage() {
         {/* Add segment */}
         <GlassCard>
           <h2 className="cardTitle">新增片段</h2>
+          <div className="controlRow" style={{ justifyContent: "space-between" }}>
+            <span className="muted">
+              {insertAfterSegmentId
+                ? `将插入到 #${(segments.find((item) => item.id === insertAfterSegmentId)?.index ?? 0) + 1} 之后`
+                : "默认追加到末尾"}
+            </span>
+            {insertAfterSegmentId ? (
+              <Button variant="ghost" size="sm" onClick={() => setInsertAfterSegmentId(null)}>
+                改为追加到末尾
+              </Button>
+            ) : null}
+          </div>
           <div className="formGroup">
             <label className="formLabel">角色</label>
-            <input
-              className="textInput"
-              value={newSegment.speaker}
-              onChange={(e) => setNewSegment((s) => ({ ...s, speaker: e.target.value }))}
-              placeholder="角色名（空 = narrator）"
+            <Select
+              value={isCustomNewSpeaker ? "__new__" : newSegment.speaker}
+              onValueChange={(value) => {
+                if (value === "__new__") {
+                  setIsCustomNewSpeaker(true);
+                  return;
+                }
+                setIsCustomNewSpeaker(false);
+                setCustomNewSpeakerName("");
+                setNewSegment((s) => ({ ...s, speaker: value || "narrator" }));
+              }}
+              options={newSegmentSpeakerOptions}
             />
+            {isCustomNewSpeaker ? (
+              <input
+                className="textInput"
+                value={customNewSpeakerName}
+                onChange={(e) => setCustomNewSpeakerName(e.target.value)}
+                placeholder="输入新角色名（留空将使用 narrator）"
+              />
+            ) : null}
           </div>
           <div className="formGroup">
             <label className="formLabel">类型</label>
@@ -553,6 +617,7 @@ export default function ScriptEditorPage() {
                     key={segment.id}
                     segment={segment}
                     isEditing={editingId === segment.id}
+                    isInsertAnchor={insertAfterSegmentId === segment.id}
                     draft={segmentDraft?.id === segment.id ? segmentDraft : null}
                     canEdit={canEdit}
                     isSaving={isSaving}
@@ -560,6 +625,7 @@ export default function ScriptEditorPage() {
                     onUpdateDraft={updateDraft}
                     onApplyDraft={applyDraft}
                     onCancelEdit={cancelEdit}
+                    onSetInsertAnchor={setInsertAfterSegmentId}
                     onDelete={handleDelete}
                   />
                 ))}
