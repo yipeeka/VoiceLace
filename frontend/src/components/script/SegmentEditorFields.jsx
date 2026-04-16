@@ -39,8 +39,10 @@ export default function SegmentEditorFields({ draft, onFieldChange, includeAdvan
           <input
             className="textInput"
             value={draft?.nonVerbalText || ""}
-            onChange={(e) => onFieldChange("nonVerbalText", e.target.value)}
-            placeholder="non_verbal，逗号分隔，例如：laugh, sigh"
+            readOnly
+            aria-readonly="true"
+            placeholder="non_verbal（只读）"
+            title="non_verbal 当前为只读显示"
           />
           <textarea
             className="textArea compactArea"
