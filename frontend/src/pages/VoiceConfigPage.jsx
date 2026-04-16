@@ -63,6 +63,9 @@ const emptyForm = {
   dialect: "",
   custom_instruct: "",
   speed: 1.0,
+  clone_denoise: true,
+  clone_num_step: 32,
+  clone_guidance_scale: 2.0,
 };
 
 function SortablePresetCard({
@@ -181,6 +184,9 @@ export default function VoiceConfigPage() {
       ...emptyForm,
       ...selectedPreset,
       speed: Number(selectedPreset.speed ?? 1),
+      clone_denoise: selectedPreset.clone_denoise ?? true,
+      clone_num_step: Number(selectedPreset.clone_num_step ?? 32),
+      clone_guidance_scale: Number(selectedPreset.clone_guidance_scale ?? 2.0),
     });
     useVoiceStore.setState({
       uploadedRefAudioPath: selectedPreset.ref_audio_path || "",
@@ -201,9 +207,15 @@ export default function VoiceConfigPage() {
     if (payload.voice_mode === "clone") {
       payload.ref_audio_path = uploadedRefAudioPath || null;
       payload.ref_text = transcribedRefText || null;
+      payload.clone_denoise = Boolean(form.clone_denoise);
+      payload.clone_num_step = Math.max(1, Math.min(128, Math.round(Number(form.clone_num_step) || 32)));
+      payload.clone_guidance_scale = Math.max(0, Math.min(10, Number(form.clone_guidance_scale) || 2));
     } else {
       payload.ref_audio_path = null;
       payload.ref_text = null;
+      payload.clone_denoise = null;
+      payload.clone_num_step = null;
+      payload.clone_guidance_scale = null;
     }
     return payload;
   }
@@ -386,11 +398,55 @@ export default function VoiceConfigPage() {
                 <label className="formLabel">参考文本（转写或手动输入）</label>
                 <textarea
                   className="textArea compactArea"
-              value={transcribedRefText}
-              onChange={(e) => useVoiceStore.setState({ transcribedRefText: e.target.value })}
-              placeholder="参考音频的对应文本内容..."
-            />
+                  value={transcribedRefText}
+                  onChange={(e) => useVoiceStore.setState({ transcribedRefText: e.target.value })}
+                  placeholder="参考音频的对应文本内容..."
+                />
               </div>
+              <details style={{ border: "1px solid var(--lineSoft)", borderRadius: 10, padding: "8px 10px" }}>
+                <summary style={{ cursor: "pointer", color: "var(--textMain)" }}>
+                  高级默认推理参数（可选，仅克隆模式）
+                </summary>
+                <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+                  <label className="checkRow" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(form.clone_denoise)}
+                      onChange={(e) => setField("clone_denoise", e.target.checked)}
+                    />
+                    <span>默认 denoise</span>
+                  </label>
+                  <div className="editorGrid">
+                    <div className="formGroup">
+                      <label className="formLabel">默认 num_step (1-128)</label>
+                      <input
+                        className="textInput"
+                        type="number"
+                        min={1}
+                        max={128}
+                        step={1}
+                        value={Number(form.clone_num_step ?? 32)}
+                        onChange={(e) => setField("clone_num_step", e.target.value)}
+                      />
+                    </div>
+                    <div className="formGroup">
+                      <label className="formLabel">默认 guidance_scale (0-10)</label>
+                      <input
+                        className="textInput"
+                        type="number"
+                        min={0}
+                        max={10}
+                        step={0.1}
+                        value={Number(form.clone_guidance_scale ?? 2)}
+                        onChange={(e) => setField("clone_guidance_scale", e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+                    优先级：片段 tts_overrides {'>'} 预设高级默认 {'>'} 项目合成配置。
+                  </p>
+                </div>
+              </details>
             </TabsContent>
 
             <TabsContent value="auto" style={{ paddingTop: 12 }}>

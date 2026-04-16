@@ -99,6 +99,14 @@ class TTSEngine:
                     kwargs["ref_audio"] = preset.ref_audio_path
                     if preset.ref_text:
                         kwargs["ref_text"] = preset.ref_text
+                    # Clone preset-level defaults for inference params.
+                    # These can still be overridden by segment tts_overrides.
+                    if preset.clone_denoise is not None:
+                        kwargs["denoise"] = bool(preset.clone_denoise)
+                    if preset.clone_num_step is not None:
+                        kwargs["num_step"] = int(preset.clone_num_step)
+                    if preset.clone_guidance_scale is not None:
+                        kwargs["guidance_scale"] = float(preset.clone_guidance_scale)
                 else:
                     instruct = self._sanitize_instruct(preset.to_instruct_string())
                     if instruct:
