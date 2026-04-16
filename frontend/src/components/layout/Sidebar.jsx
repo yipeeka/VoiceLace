@@ -4,12 +4,14 @@ import {
   ChevronLeft,
   ChevronRight,
   Mic,
+  Save,
   Settings,
   SlidersHorizontal,
   Sparkles,
   Volume2,
 } from "lucide-react";
 import { Tooltip } from "../ui/Tooltip";
+import { useUiStore } from "../../stores/useUiStore";
 
 const NAV_ITEMS = [
   { id: "text",    label: "文本输入",  icon: BookOpen,          step: 1 },
@@ -19,6 +21,10 @@ const NAV_ITEMS = [
 ];
 
 export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCollapse, completedPages = [] }) {
+  const projectSaveAction = useUiStore((state) => state.projectSaveAction);
+  const canShowProjectSave = ["text", "script", "voice"].includes(activePage);
+  const canSaveProject = typeof projectSaveAction === "function";
+
   return (
     <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
       {/* Brand */}
@@ -92,15 +98,46 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
             </button>
           );
 
-          if (collapsed) {
-            return (
-              <Tooltip key={item.id} content={item.label} side="right">
-                {button}
-              </Tooltip>
-            );
+          const renderedButton = collapsed ? (
+            <Tooltip key={item.id} content={item.label} side="right">
+              {button}
+            </Tooltip>
+          ) : (
+            button
+          );
+
+          if (item.id !== "synth") {
+            return renderedButton;
           }
 
-          return button;
+          return (
+            <div key={item.id} className="sidebarNavGroup">
+              {renderedButton}
+              {canShowProjectSave ? (
+                collapsed ? (
+                  <Tooltip content={canSaveProject ? "保存项目" : "当前页面不可保存"} side="right">
+                    <button
+                      className="navItem navItemSubAction"
+                      onClick={() => projectSaveAction?.()}
+                      disabled={!canSaveProject}
+                      title="保存项目"
+                    >
+                      <Save className="navItemIcon" size={18} />
+                    </button>
+                  </Tooltip>
+                ) : (
+                  <button
+                    className="navItem navItemSubAction"
+                    onClick={() => projectSaveAction?.()}
+                    disabled={!canSaveProject}
+                  >
+                    <Save className="navItemIcon" size={16} />
+                    <span className="navItemLabel">保存项目</span>
+                  </button>
+                )
+              ) : null}
+            </div>
+          );
         })}
 
         <div className="sidebarDivider" />

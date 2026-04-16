@@ -2,6 +2,9 @@ import { create } from "zustand";
 
 export const useUiStore = create((set) => ({
   toasts: [],
+  projectSaveAction: null,
+  setProjectSaveAction: (action) => set({ projectSaveAction: action }),
+  clearProjectSaveAction: () => set({ projectSaveAction: null }),
   pushToast: ({ title, tone = "default", description, duration }) => {
     const id = crypto.randomUUID();
     set((state) => ({

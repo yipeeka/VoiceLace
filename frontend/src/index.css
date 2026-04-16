@@ -216,6 +216,31 @@ pre, code {
   margin: 6px 8px;
 }
 
+.sidebarNavGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.navItemSubAction {
+  margin-left: 0;
+  color: var(--accent-secondary);
+  background: color-mix(in srgb, var(--accent-secondary-dim) 32%, transparent);
+  border: none;
+}
+
+.navItemSubAction:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-secondary-dim) 46%, transparent);
+  color: var(--accent-secondary);
+}
+
+.sidebar.collapsed .navItemSubAction {
+  margin-left: 0;
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
 .sidebarCollapseBtn {
   display: flex;
   align-items: center;

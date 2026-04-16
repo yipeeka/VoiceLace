@@ -518,6 +518,64 @@ class ApiSmokeTest(unittest.TestCase):
             else:
                 presets_file.write_text(presets_backup, encoding="utf-8")
 
+    def test_export_and_import_project_file(self) -> None:
+        created = self.client.post("/api/v1/projects", json={"name": f"project-file-{uuid.uuid4().hex[:6]}"})
+        self.assertEqual(created.status_code, 200)
+        source_id = created.json()["id"]
+        imported_id = None
+        try:
+            update_script = self.client.put(
+                f"/api/v1/projects/{source_id}/script",
+                json={
+                    "title": "project-file-title",
+                    "source_text": "旁白：这是轻量项目文件测试文本。",
+                    "segments": [
+                        {"id": "seg-pf-1", "index": 0, "type": "narration", "speaker": "narrator", "text": "测试片段"},
+                    ],
+                    "characters": [],
+                    "metadata": {"tag": "project-file"},
+                },
+            )
+            self.assertEqual(update_script.status_code, 200)
+            assign_resp = self.client.put(
+                f"/api/v1/projects/{source_id}/voice-assignments",
+                json={"assignments": {"narrator": "preset-001"}},
+            )
+            self.assertEqual(assign_resp.status_code, 200)
+
+            export_resp = self.client.get(f"/api/v1/projects/{source_id}/export/project-file")
+            self.assertEqual(export_resp.status_code, 200)
+            self.assertEqual(export_resp.headers.get("x-bvt-project-file"), "1")
+            exported = export_resp.json()
+            self.assertEqual(exported["file_type"], "beautyvoice_project")
+            self.assertEqual(exported["schema_version"], 1)
+            self.assertEqual(exported["project"]["name"], created.json()["name"])
+            self.assertEqual(exported["script"]["source_text"], "旁白：这是轻量项目文件测试文本。")
+
+            file_bytes = io.BytesIO(json.dumps(exported, ensure_ascii=False).encode("utf-8"))
+            import_resp = self.client.post(
+                "/api/v1/projects/import/project-file",
+                files={"file": ("project.bvtproject.json", file_bytes, "application/json")},
+            )
+            self.assertEqual(import_resp.status_code, 200)
+            imported_id = import_resp.json()["project_id"]
+            self.assertNotEqual(imported_id, source_id)
+
+            imported_project = self.client.get(f"/api/v1/projects/{imported_id}")
+            self.assertEqual(imported_project.status_code, 200)
+            body = imported_project.json()
+            self.assertEqual(body["name"], created.json()["name"])
+            self.assertEqual(body["script"]["source_text"], "旁白：这是轻量项目文件测试文本。")
+            self.assertEqual(len(body["script"]["segments"]), 1)
+            self.assertEqual(body["voice_assignments"].get("narrator"), "preset-001")
+            self.assertIsNone(body["audio_assets"]["full_wav_relpath"])
+            self.assertIsNone(body["audio_assets"]["full_mp3_relpath"])
+            self.assertEqual(body["audio_assets"]["segments"], {})
+        finally:
+            if imported_id:
+                self.client.delete(f"/api/v1/projects/{imported_id}")
+            self.client.delete(f"/api/v1/projects/{source_id}")
+
     def test_partial_synthesis_requires_segment_ids(self) -> None:
         project_name = f"partial-{uuid.uuid4().hex[:8]}"
         created = self.client.post("/api/v1/projects", json={"name": project_name})

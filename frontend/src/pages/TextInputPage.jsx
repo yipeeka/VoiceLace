@@ -1,5 +1,5 @@
-import { BookOpen, ChevronDown, ChevronUp, RefreshCw, Square, Trash2, Upload } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { BookOpen, ChevronDown, ChevronUp, FolderOpen, RefreshCw, Square, Trash2, Upload } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import EmptyState from "../components/shared/EmptyState";
 import FileDropZone from "../components/shared/FileDropZone";
@@ -8,6 +8,8 @@ import Button from "../components/ui/Button";
 import Select from "../components/ui/Select";
 import { useProjectStore } from "../stores/useProjectStore";
 import { useScriptStore } from "../stores/useScriptStore";
+import { useUiStore } from "../stores/useUiStore";
+import { buildProjectFilePayload, openProjectFileWithPicker, saveProjectFile } from "../utils/projectFile";
 
 const DEMO_TEXT = `旁白：暮色渐浓，庭院里只剩下风吹竹叶的细响。
 林黛玉：宝哥哥，你今日怎么来得这样晚？
@@ -20,8 +22,21 @@ export default function TextInputPage({ onNavigate }) {
   const [prompt, setPrompt] = useState("");
   const streamRef = useRef(null);
   const archiveInputRef = useRef(null);
+  const projectFileInputRef = useRef(null);
 
-  const { currentProject, projects, createProject, selectProject, refreshCurrentProject, deleteProject, importArchive, importWarnings } =
+  const {
+    currentProject,
+    currentProjectFileHandle,
+    projects,
+    createProject,
+    selectProject,
+    refreshCurrentProject,
+    deleteProject,
+    importArchive,
+    importProjectFile,
+    importWarnings,
+    bindCurrentProjectFile,
+  } =
     useProjectStore();
   const {
     sourceText,
@@ -36,9 +51,12 @@ export default function TextInputPage({ onNavigate }) {
     lastSyncError,
     parseProgress,
     error,
+    script,
     setScript,
     loadProjectScript,
   } = useScriptStore();
+  const setProjectSaveAction = useUiStore((state) => state.setProjectSaveAction);
+  const clearProjectSaveAction = useUiStore((state) => state.clearProjectSaveAction);
 
   // Auto-scroll stream output
   useEffect(() => {
@@ -107,6 +125,94 @@ export default function TextInputPage({ onNavigate }) {
     setSourceText(s.source_text || "");
   }
 
+  async function importProjectFileAndSelect(file, options = {}) {
+    if (!file) return;
+    const result = await importProjectFile(file, options);
+    if (!result?.project_id) {
+      return;
+    }
+    const project = await selectProject(result.project_id);
+    if (options.handle) {
+      bindCurrentProjectFile({ handle: options.handle, fileName: options.fileName || file.name });
+    }
+    setScript(project.script);
+    const s = await loadProjectScript(project.id);
+    setSourceText(s.source_text || "");
+  }
+
+  async function handleOpenProjectFile(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    await importProjectFileAndSelect(file, { fileName: file?.name || "" });
+  }
+
+  async function handleOpenProjectFileClick() {
+    try {
+      const picked = await openProjectFileWithPicker();
+      if (!picked?.file) {
+        projectFileInputRef.current?.click();
+        return;
+      }
+      await importProjectFileAndSelect(picked.file, { handle: picked.handle, fileName: picked.file.name });
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        return;
+      }
+      useUiStore.getState().pushToast({
+        title: `打开项目文件失败：${error?.message || "未知错误"}`,
+        tone: "error",
+      });
+    }
+  }
+
+  const handleSaveProjectFile = useCallback(async () => {
+    const fallbackName = projectName.trim() || "未命名项目";
+    const fallbackProject = currentProject || {
+      name: fallbackName,
+      status: sourceText.trim() ? "draft" : "draft",
+      voice_assignments: {},
+      synthesis_config: undefined,
+    };
+    const payload = buildProjectFilePayload({
+      project: fallbackProject,
+      script: script || {
+        title: "",
+        source_text: "",
+        segments: [],
+        characters: [],
+        metadata: {},
+      },
+      sourceText,
+    });
+    try {
+      const result = await saveProjectFile({
+        payload,
+        preferredName: fallbackProject.name,
+        existingHandle: currentProjectFileHandle || null,
+      });
+      if (result?.handle) {
+        bindCurrentProjectFile({ handle: result.handle, fileName: result.fileName || "" });
+      }
+      useUiStore.getState().pushToast({
+        title: result?.mode === "inplace" ? "项目文件已保存" : "项目文件已导出",
+        tone: "success",
+      });
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        return;
+      }
+      useUiStore.getState().pushToast({
+        title: `保存项目失败：${error?.message || "未知错误"}`,
+        tone: "error",
+      });
+    }
+  }, [projectName, currentProject, script, sourceText, currentProjectFileHandle, bindCurrentProjectFile]);
+
+  useEffect(() => {
+    setProjectSaveAction(handleSaveProjectFile);
+    return () => clearProjectSaveAction();
+  }, [setProjectSaveAction, clearProjectSaveAction, handleSaveProjectFile]);
+
   const wordCount = sourceText.length;
   const estimatedSegments = sourceText.split(/\n/).filter((l) => l.trim()).length;
 
@@ -158,12 +264,22 @@ export default function TextInputPage({ onNavigate }) {
           <Button variant="secondary" icon={Upload} onClick={() => archiveInputRef.current?.click()} disabled={isParsing}>
             导入工程 ZIP
           </Button>
+          <Button variant="secondary" icon={FolderOpen} onClick={handleOpenProjectFileClick} disabled={isParsing}>
+            打开项目文件
+          </Button>
           <input
             ref={archiveInputRef}
             type="file"
             accept=".zip,application/zip"
             style={{ display: "none" }}
             onChange={handleImportArchive}
+          />
+          <input
+            ref={projectFileInputRef}
+            type="file"
+            accept=".bvtproject.json,.json,application/json"
+            style={{ display: "none" }}
+            onChange={handleOpenProjectFile}
           />
         </div>
         {importWarnings?.length ? (

@@ -7,11 +7,13 @@ import json
 from pathlib import Path
 import shutil
 import tempfile
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 import zipfile
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from backend.models import (
     Character,
@@ -29,6 +31,26 @@ from backend.persistence import load_project, project_event_log_path, project_pa
 from backend.state import get_app_state
 
 router = APIRouter()
+
+
+ProjectStatus = Literal["draft", "parsed", "voices_configured", "synthesizing", "done"]
+
+
+class ProjectFileProjectMeta(BaseModel):
+    name: str
+    status: ProjectStatus = "draft"
+
+
+class ProjectFilePayload(BaseModel):
+    file_type: Literal["beautyvoice_project"] = "beautyvoice_project"
+    schema_version: int = 1
+    exported_at: datetime | None = None
+    source_project_id: str | None = None
+    project: ProjectFileProjectMeta
+    script: Script
+    voice_assignments: dict[str, str] = Field(default_factory=dict)
+    synthesis_config: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 def _sync_script_metadata(script: Script) -> Script:
@@ -152,6 +174,25 @@ def _make_unique_preset_name(base_name: str, used_names: set[str]) -> str:
             return candidate
 
 
+def _build_project_file_payload(project: Project) -> ProjectFilePayload:
+    lightweight_script = project.script.model_copy(deep=True)
+    return ProjectFilePayload(
+        project={
+            "name": project.name,
+            "status": project.status,
+        },
+        script=lightweight_script,
+        voice_assignments=dict(project.voice_assignments or {}),
+        synthesis_config=project.synthesis_config,
+        source_project_id=project.id,
+        exported_at=datetime.now(timezone.utc),
+        metadata={
+            "format": "lightweight",
+            "includes_audio_assets": False,
+        },
+    )
+
+
 @router.get("")
 async def list_projects(state=Depends(get_app_state)):
     projects = []
@@ -165,6 +206,62 @@ async def list_projects(state=Depends(get_app_state)):
 async def create_project(payload: CreateProjectRequest, state=Depends(get_app_state)):
     project = Project(name=payload.name)
     return save_project(state.settings.projects_dir, project)
+
+
+@router.get("/{project_id}/export/project-file")
+async def export_project_file(project_id: str, state=Depends(get_app_state)):
+    project = load_project(state.settings.projects_dir, project_id)
+    payload = _build_project_file_payload(project).model_dump(mode="json")
+    safe_name = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in project.name).strip("_") or "project"
+    filename = f"{safe_name}.bvtproject.json"
+    return JSONResponse(
+        content=payload,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-BVT-Project-File": "1",
+        },
+    )
+
+
+@router.post("/import/project-file")
+async def import_project_file(file: UploadFile = File(...), state=Depends(get_app_state)):
+    try:
+        raw_payload = json.loads((await file.read()).decode("utf-8"))
+        payload = ProjectFilePayload.model_validate(raw_payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid project file: {exc}") from exc
+
+    imported_script = _sync_script_metadata(payload.script.model_copy(deep=True))
+    imported_script.source_text = payload.script.source_text or ""
+    imported_project = Project(
+        name=payload.project.name,
+        script=imported_script,
+        voice_assignments=dict(payload.voice_assignments or {}),
+        synthesis_config=payload.synthesis_config,
+        status=payload.project.status,
+    )
+    imported_project.audio_assets = imported_project.audio_assets.model_copy(
+        update={
+            "latest_task_id": None,
+            "full_wav_relpath": None,
+            "full_mp3_relpath": None,
+            "subtitle_srt_relpath": None,
+            "subtitle_lrc_relpath": None,
+            "segments": {},
+            "full_peaks_relpath": None,
+            "full_peaks_version": 1,
+            "full_peaks_levels": [],
+            "archive_schema_version": 3,
+        }
+    )
+
+    saved = save_project(state.settings.projects_dir, imported_project)
+    return {
+        "project_id": saved.id,
+        "project_name": saved.name,
+        "source_project_id": payload.source_project_id,
+        "warnings": [],
+    }
 
 
 @router.post("/import/archive")

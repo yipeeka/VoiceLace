@@ -2,7 +2,7 @@ import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, us
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Pencil, Save, Trash2, Users } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import CharacterBadge, { getCharColor } from "../components/shared/CharacterBadge";
 import EmptyState from "../components/shared/EmptyState";
@@ -15,6 +15,7 @@ import { useProjectStore } from "../stores/useProjectStore";
 import { useScriptStore } from "../stores/useScriptStore";
 import { useUiStore } from "../stores/useUiStore";
 import { formatError } from "../utils/errors";
+import { buildProjectFilePayload, saveProjectFile } from "../utils/projectFile";
 import { hasEditingDraftChanges } from "../utils/scriptEditorDirty";
 import { parseCsvList, parseOverridesJson } from "../utils/segmentDraft";
 import { computeScriptDiff, normalizeDraftScript } from "../utils/scriptDiff";
@@ -156,7 +157,7 @@ function normalizeSegmentFromEditorDraft(draft) {
 }
 
 export default function ScriptEditorPage() {
-  const { currentProject, refreshCurrentProject } = useProjectStore();
+  const { currentProject, currentProjectFileHandle, bindCurrentProjectFile, refreshCurrentProject } = useProjectStore();
   const { script, replaceScript, saveScript, isSaving, error } = useScriptStore();
   const fileInputRef = useRef(null);
   const lastProjectIdRef = useRef(null);
@@ -166,6 +167,8 @@ export default function ScriptEditorPage() {
   const [editingId, setEditingId] = useState(null);
   const [segmentDraft, setSegmentDraft] = useState(null);
   const [newSegment, setNewSegment] = useState(() => createSegmentDraft(0));
+  const setProjectSaveAction = useUiStore((state) => state.setProjectSaveAction);
+  const clearProjectSaveAction = useUiStore((state) => state.clearProjectSaveAction);
 
   const canEdit = Boolean(currentProject?.id);
   const segments = draftScript?.segments ?? [];
@@ -386,6 +389,41 @@ export default function ScriptEditorPage() {
     URL.revokeObjectURL(url);
     useUiStore.getState().pushToast({ title: "已导出剧本 JSON", tone: "success" });
   }
+
+  const handleSaveProjectFile = useCallback(async () => {
+    if (!currentProject) {
+      return;
+    }
+    const payload = buildProjectFilePayload({
+      project: currentProject,
+      script: draftScript || script,
+      sourceText: draftScript?.source_text || script?.source_text || "",
+    });
+    try {
+      const result = await saveProjectFile({
+        payload,
+        preferredName: currentProject.name,
+        existingHandle: currentProjectFileHandle || null,
+      });
+      if (result?.handle) {
+        bindCurrentProjectFile({ handle: result.handle, fileName: result.fileName || "" });
+      }
+      useUiStore.getState().pushToast({
+        title: result?.mode === "inplace" ? "项目文件已保存" : "项目文件已导出",
+        tone: "success",
+      });
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        return;
+      }
+      useUiStore.getState().pushToast({ title: formatError("保存项目失败", error), tone: "error" });
+    }
+  }, [currentProject, draftScript, script, currentProjectFileHandle, bindCurrentProjectFile]);
+
+  useEffect(() => {
+    setProjectSaveAction(handleSaveProjectFile);
+    return () => clearProjectSaveAction();
+  }, [setProjectSaveAction, clearProjectSaveAction, handleSaveProjectFile]);
 
   async function handleImportJson(e) {
     const file = e.target.files?.[0];

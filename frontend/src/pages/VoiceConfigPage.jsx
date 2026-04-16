@@ -1,5 +1,5 @@
 import { GripVertical, Mic, Plus, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, rectSortingStrategy, SortableContext, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -15,7 +15,10 @@ import Select from "../components/ui/Select";
 import Slider from "../components/ui/Slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/Tabs";
 import { useProjectStore } from "../stores/useProjectStore";
+import { useScriptStore } from "../stores/useScriptStore";
+import { useUiStore } from "../stores/useUiStore";
 import { useVoiceStore } from "../stores/useVoiceStore";
+import { buildProjectFilePayload, saveProjectFile } from "../utils/projectFile";
 
 const GENDER_OPTIONS = [
   { value: "", label: "未指定" },
@@ -135,7 +138,10 @@ function SortablePresetCard({
 }
 
 export default function VoiceConfigPage() {
-  const { currentProject, refreshCurrentProject } = useProjectStore();
+  const { currentProject, currentProjectFileHandle, bindCurrentProjectFile, refreshCurrentProject } = useProjectStore();
+  const { script } = useScriptStore();
+  const setProjectSaveAction = useUiStore((state) => state.setProjectSaveAction);
+  const clearProjectSaveAction = useUiStore((state) => state.clearProjectSaveAction);
   const {
     presets, assignments, previewAudioUrl,
     isLoading, isSaving, error,
@@ -254,6 +260,44 @@ export default function VoiceConfigPage() {
     const nextOrder = arrayMove(presetIds, oldIndex, newIndex);
     await reorderPresets(nextOrder);
   }
+
+  const handleSaveProjectFile = useCallback(async () => {
+    if (!currentProject) {
+      return;
+    }
+    const payload = buildProjectFilePayload({
+      project: currentProject,
+      script,
+      sourceText: script?.source_text || "",
+    });
+    try {
+      const result = await saveProjectFile({
+        payload,
+        preferredName: currentProject.name,
+        existingHandle: currentProjectFileHandle || null,
+      });
+      if (result?.handle) {
+        bindCurrentProjectFile({ handle: result.handle, fileName: result.fileName || "" });
+      }
+      useUiStore.getState().pushToast({
+        title: result?.mode === "inplace" ? "项目文件已保存" : "项目文件已导出",
+        tone: "success",
+      });
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        return;
+      }
+      useUiStore.getState().pushToast({
+        title: `保存项目失败：${error?.message || "未知错误"}`,
+        tone: "error",
+      });
+    }
+  }, [currentProject, script, currentProjectFileHandle, bindCurrentProjectFile]);
+
+  useEffect(() => {
+    setProjectSaveAction(handleSaveProjectFile);
+    return () => clearProjectSaveAction();
+  }, [setProjectSaveAction, clearProjectSaveAction, handleSaveProjectFile]);
 
   return (
     <div className="pageGrid twoCols">
