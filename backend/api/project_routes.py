@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 import hashlib
 import json
+import logging
 from pathlib import Path
 import shutil
 import tempfile
@@ -19,6 +20,7 @@ from backend.models import (
     Character,
     CreateProjectRequest,
     Project,
+    ProjectOrigin,
     ProjectSummary,
     ReorderSegmentsRequest,
     Script,
@@ -31,6 +33,7 @@ from backend.persistence import load_project, project_event_log_path, project_pa
 from backend.state import get_app_state
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 ProjectStatus = Literal["draft", "parsed", "voices_configured", "synthesizing", "done"]
@@ -51,6 +54,16 @@ class ProjectFilePayload(BaseModel):
     voice_assignments: dict[str, str] = Field(default_factory=dict)
     synthesis_config: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class DeduplicateProjectFilesRequest(BaseModel):
+    dry_run: bool = True
+    delete_orphan_event_logs: bool = True
+
+
+class MergeProjectFileShadowsRequest(BaseModel):
+    dry_run: bool = True
+    delete_orphan_event_logs: bool = True
 
 
 def _sync_script_metadata(script: Script) -> Script:
@@ -115,6 +128,10 @@ def _compute_file_hash(path: Path) -> str | None:
         return hasher.hexdigest()
     except Exception:
         return None
+
+
+def _compute_payload_fingerprint(raw_bytes: bytes) -> str:
+    return hashlib.sha256(raw_bytes).hexdigest()
 
 
 def _normalize_match_text(value: str | None) -> str:
@@ -193,6 +210,186 @@ def _build_project_file_payload(project: Project) -> ProjectFilePayload:
     )
 
 
+def _reset_imported_audio_assets(project: Project) -> None:
+    project.audio_assets = project.audio_assets.model_copy(
+        update={
+            "latest_task_id": None,
+            "full_wav_relpath": None,
+            "full_mp3_relpath": None,
+            "subtitle_srt_relpath": None,
+            "subtitle_lrc_relpath": None,
+            "segments": {},
+            "full_peaks_relpath": None,
+            "full_peaks_version": 1,
+            "full_peaks_levels": [],
+            "archive_schema_version": 3,
+        }
+    )
+
+
+def _find_project_file_match(
+    projects_dir: Path,
+    *,
+    fingerprint: str,
+    source_project_id: str | None,
+) -> tuple[Project | None, str]:
+    id_match: Project | None = None
+    fingerprint_match: Project | None = None
+    source_match: Project | None = None
+    for file in sorted(projects_dir.glob("*.json")):
+        project = load_project(projects_dir, file.stem)
+        if source_project_id and project.id == source_project_id:
+            id_match = project
+            break
+        if project.project_origin.kind != "project_file":
+            continue
+        if project.project_origin.project_file_fingerprint == fingerprint:
+            fingerprint_match = project
+            break
+        if source_project_id and project.project_origin.source_project_id == source_project_id and source_match is None:
+            source_match = project
+    if id_match is not None:
+        return id_match, "source_project_id"
+    if fingerprint_match is not None:
+        return fingerprint_match, "fingerprint"
+    if source_match is not None:
+        return source_match, "source_project_id"
+    return None, "none"
+
+
+def _deduplicate_project_file_projects(
+    projects_dir: Path,
+    *,
+    dry_run: bool,
+    delete_orphan_event_logs: bool,
+) -> dict[str, Any]:
+    grouped: dict[str, list[Project]] = defaultdict(list)
+    for file in sorted(projects_dir.glob("*.json")):
+        project = load_project(projects_dir, file.stem)
+        if project.project_origin.kind != "project_file":
+            continue
+        fingerprint = (project.project_origin.project_file_fingerprint or "").strip()
+        if not fingerprint:
+            continue
+        grouped[fingerprint].append(project)
+
+    duplicate_groups: list[dict[str, Any]] = []
+    remove_project_ids: list[str] = []
+    for fingerprint, projects in grouped.items():
+        if len(projects) <= 1:
+            continue
+        # Keep the most recently updated project as canonical.
+        ordered = sorted(
+            projects,
+            key=lambda item: (item.updated_at, item.created_at, item.id),
+            reverse=True,
+        )
+        keep = ordered[0]
+        remove = ordered[1:]
+        remove_ids = [item.id for item in remove]
+        duplicate_groups.append(
+            {
+                "fingerprint_prefix": fingerprint[:12],
+                "keep_project_id": keep.id,
+                "remove_project_ids": remove_ids,
+            }
+        )
+        remove_project_ids.extend(remove_ids)
+
+    removed_event_logs = 0
+    if not dry_run:
+        for project_id in remove_project_ids:
+            path = project_path(projects_dir, project_id)
+            if path.exists():
+                path.unlink()
+            if delete_orphan_event_logs:
+                log_path = project_event_log_path(projects_dir, project_id)
+                if log_path.exists():
+                    log_path.unlink()
+                    removed_event_logs += 1
+
+    return {
+        "dry_run": dry_run,
+        "group_count": len(duplicate_groups),
+        "remove_count": len(remove_project_ids),
+        "removed_event_log_count": removed_event_logs,
+        "groups": duplicate_groups,
+    }
+
+
+def _merge_project_file_shadows(
+    projects_dir: Path,
+    *,
+    dry_run: bool,
+    delete_orphan_event_logs: bool,
+) -> dict[str, Any]:
+    by_id: dict[str, Project] = {}
+    for file in sorted(projects_dir.glob("*.json")):
+        project = load_project(projects_dir, file.stem)
+        by_id[project.id] = project
+
+    shadow_pairs: list[dict[str, Any]] = []
+    remove_project_ids: list[str] = []
+    updated_source_ids: list[str] = []
+    removed_event_logs = 0
+
+    for shadow in by_id.values():
+        if shadow.project_origin.kind != "project_file":
+            continue
+        source_id = (shadow.project_origin.source_project_id or "").strip()
+        if not source_id:
+            continue
+        if source_id == shadow.id:
+            continue
+        source = by_id.get(source_id)
+        if source is None:
+            continue
+        if source.name != shadow.name:
+            continue
+
+        shadow_pairs.append(
+            {
+                "source_project_id": source.id,
+                "shadow_project_id": shadow.id,
+                "name": shadow.name,
+                "fingerprint_prefix": (shadow.project_origin.project_file_fingerprint or "")[:12],
+            }
+        )
+        remove_project_ids.append(shadow.id)
+
+        if dry_run:
+            continue
+
+        source.project_origin = source.project_origin.model_copy(
+            update={
+                "kind": "project_file",
+                "source_project_id": source.id,
+                "project_file_name": shadow.project_origin.project_file_name,
+                "project_file_fingerprint": shadow.project_origin.project_file_fingerprint,
+            }
+        )
+        save_project(projects_dir, source)
+        updated_source_ids.append(source.id)
+
+        shadow_path = project_path(projects_dir, shadow.id)
+        if shadow_path.exists():
+            shadow_path.unlink()
+        if delete_orphan_event_logs:
+            log_path = project_event_log_path(projects_dir, shadow.id)
+            if log_path.exists():
+                log_path.unlink()
+                removed_event_logs += 1
+
+    return {
+        "dry_run": dry_run,
+        "pair_count": len(shadow_pairs),
+        "remove_count": len(remove_project_ids),
+        "updated_source_count": len(set(updated_source_ids)),
+        "removed_event_log_count": removed_event_logs,
+        "pairs": shadow_pairs,
+    }
+
+
 @router.get("")
 async def list_projects(state=Depends(get_app_state)):
     projects = []
@@ -206,6 +403,41 @@ async def list_projects(state=Depends(get_app_state)):
 async def create_project(payload: CreateProjectRequest, state=Depends(get_app_state)):
     project = Project(name=payload.name)
     return save_project(state.settings.projects_dir, project)
+
+
+@router.post("/maintenance/deduplicate-project-files")
+async def deduplicate_project_files(payload: DeduplicateProjectFilesRequest, state=Depends(get_app_state)):
+    result = _deduplicate_project_file_projects(
+        state.settings.projects_dir,
+        dry_run=payload.dry_run,
+        delete_orphan_event_logs=payload.delete_orphan_event_logs,
+    )
+    logger.info(
+        "Project deduplication dry_run=%s group_count=%s remove_count=%s removed_event_log_count=%s",
+        payload.dry_run,
+        result["group_count"],
+        result["remove_count"],
+        result["removed_event_log_count"],
+    )
+    return result
+
+
+@router.post("/maintenance/merge-project-file-shadows")
+async def merge_project_file_shadows(payload: MergeProjectFileShadowsRequest, state=Depends(get_app_state)):
+    result = _merge_project_file_shadows(
+        state.settings.projects_dir,
+        dry_run=payload.dry_run,
+        delete_orphan_event_logs=payload.delete_orphan_event_logs,
+    )
+    logger.info(
+        "Project shadow merge dry_run=%s pair_count=%s remove_count=%s updated_source_count=%s removed_event_log_count=%s",
+        payload.dry_run,
+        result["pair_count"],
+        result["remove_count"],
+        result["updated_source_count"],
+        result["removed_event_log_count"],
+    )
+    return result
 
 
 @router.get("/{project_id}/export/project-file")
@@ -226,41 +458,78 @@ async def export_project_file(project_id: str, state=Depends(get_app_state)):
 @router.post("/import/project-file")
 async def import_project_file(file: UploadFile = File(...), state=Depends(get_app_state)):
     try:
-        raw_payload = json.loads((await file.read()).decode("utf-8"))
+        raw_bytes = await file.read()
+        raw_payload = json.loads(raw_bytes.decode("utf-8"))
         payload = ProjectFilePayload.model_validate(raw_payload)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid project file: {exc}") from exc
 
+    fingerprint = _compute_payload_fingerprint(raw_bytes)
     imported_script = _sync_script_metadata(payload.script.model_copy(deep=True))
     imported_script.source_text = payload.script.source_text or ""
-    imported_project = Project(
-        name=payload.project.name,
-        script=imported_script,
-        voice_assignments=dict(payload.voice_assignments or {}),
-        synthesis_config=payload.synthesis_config,
-        status=payload.project.status,
+    matched, match_reason = _find_project_file_match(
+        state.settings.projects_dir,
+        fingerprint=fingerprint,
+        source_project_id=payload.source_project_id,
     )
-    imported_project.audio_assets = imported_project.audio_assets.model_copy(
-        update={
-            "latest_task_id": None,
-            "full_wav_relpath": None,
-            "full_mp3_relpath": None,
-            "subtitle_srt_relpath": None,
-            "subtitle_lrc_relpath": None,
-            "segments": {},
-            "full_peaks_relpath": None,
-            "full_peaks_version": 1,
-            "full_peaks_levels": [],
-            "archive_schema_version": 3,
-        }
-    )
-
-    saved = save_project(state.settings.projects_dir, imported_project)
+    if matched is None:
+        imported_project = Project(
+            name=payload.project.name,
+            script=imported_script,
+            voice_assignments=dict(payload.voice_assignments or {}),
+            synthesis_config=payload.synthesis_config,
+            status=payload.project.status,
+            project_origin=ProjectOrigin(
+                kind="project_file",
+                source_project_id=payload.source_project_id,
+                project_file_name=file.filename or None,
+                project_file_fingerprint=fingerprint,
+            ),
+        )
+        _reset_imported_audio_assets(imported_project)
+        open_mode = "created"
+        saved = save_project(state.settings.projects_dir, imported_project)
+        logger.info(
+            "Project file import created project_id=%s source_project_id=%s match_reason=%s fingerprint_prefix=%s filename=%s",
+            saved.id,
+            payload.source_project_id,
+            match_reason,
+            fingerprint[:12],
+            file.filename or "",
+        )
+    else:
+        matched.name = payload.project.name
+        matched.script = imported_script
+        matched.voice_assignments = dict(payload.voice_assignments or {})
+        matched.synthesis_config = payload.synthesis_config
+        matched.status = payload.project.status
+        matched.project_origin = matched.project_origin.model_copy(
+            update={
+                "kind": "project_file",
+                "source_project_id": payload.source_project_id,
+                "project_file_name": file.filename or matched.project_origin.project_file_name,
+                "project_file_fingerprint": fingerprint,
+            }
+        )
+        _reset_imported_audio_assets(matched)
+        open_mode = "reused"
+        saved = save_project(state.settings.projects_dir, matched)
+        logger.info(
+            "Project file import reused project_id=%s source_project_id=%s match_reason=%s fingerprint_prefix=%s filename=%s",
+            saved.id,
+            payload.source_project_id,
+            match_reason,
+            fingerprint[:12],
+            file.filename or "",
+        )
     return {
         "project_id": saved.id,
         "project_name": saved.name,
         "source_project_id": payload.source_project_id,
         "import_source": "project_file",
+        "open_mode": open_mode,
+        "match_reason": match_reason,
+        "project_file_fingerprint": fingerprint,
         "warnings": [],
     }
 
@@ -303,6 +572,10 @@ async def import_project_archive(file: UploadFile = File(...), state=Depends(get
         imported_project.id = str(uuid4())
         imported_project.created_at = datetime.now(timezone.utc)
         imported_project.updated_at = datetime.now(timezone.utc)
+        imported_project.project_origin = ProjectOrigin(
+            kind="archive_import",
+            source_project_id=old_project_id,
+        )
         imported_project.script = _sync_script_metadata(imported_project.script)
 
         existing_presets = state.voice_manager.list_presets()

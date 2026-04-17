@@ -10,7 +10,8 @@ import zipfile
 from fastapi.testclient import TestClient
 
 from backend.main import app
-from backend.models import VoicePreset
+from backend.models import Project, ProjectOrigin, VoicePreset
+from backend.persistence import load_project, save_project
 from backend.state import get_app_state_from_app
 
 
@@ -196,6 +197,154 @@ class ApiSmokeTest(unittest.TestCase):
         deleted = self.client.delete(f"/api/v1/projects/{project_id}")
         self.assertEqual(deleted.status_code, 200)
         self.assertEqual(deleted.json()["status"], "deleted")
+
+    def test_deduplicate_project_files_dry_run_and_execute(self) -> None:
+        projects_dir = self.app_state.settings.projects_dir
+        dup_name = f"dup-{uuid.uuid4().hex[:6]}"
+        dup_old = Project(
+            name=dup_name,
+            project_origin=ProjectOrigin(
+                kind="project_file",
+                source_project_id="src-dup",
+                project_file_name="dup.bvtproject.json",
+                project_file_fingerprint="fingerprint-dup-001",
+            ),
+        )
+        dup_new = Project(
+            name=dup_name,
+            project_origin=ProjectOrigin(
+                kind="project_file",
+                source_project_id="src-dup",
+                project_file_name="dup.bvtproject.json",
+                project_file_fingerprint="fingerprint-dup-001",
+            ),
+        )
+        unique = Project(
+            name=f"unique-{uuid.uuid4().hex[:6]}",
+            project_origin=ProjectOrigin(
+                kind="project_file",
+                source_project_id="src-unique",
+                project_file_name="unique.bvtproject.json",
+                project_file_fingerprint="fingerprint-unique-001",
+            ),
+        )
+
+        save_project(projects_dir, dup_old)
+        save_project(projects_dir, dup_new)
+        save_project(projects_dir, unique)
+
+        try:
+            dry_run = self.client.post(
+                "/api/v1/projects/maintenance/deduplicate-project-files",
+                json={"dry_run": True},
+            )
+            self.assertEqual(dry_run.status_code, 200)
+            dry_body = dry_run.json()
+            self.assertTrue(dry_body["dry_run"])
+            self.assertEqual(dry_body["group_count"], 1)
+            self.assertEqual(dry_body["remove_count"], 1)
+            self.assertEqual(len(dry_body["groups"]), 1)
+            self.assertEqual(dry_body["groups"][0]["keep_project_id"], dup_new.id)
+            self.assertEqual(dry_body["groups"][0]["remove_project_ids"], [dup_old.id])
+
+            # Dry-run should not remove any file.
+            self.assertEqual(load_project(projects_dir, dup_old.id).id, dup_old.id)
+            self.assertEqual(load_project(projects_dir, dup_new.id).id, dup_new.id)
+
+            execute = self.client.post(
+                "/api/v1/projects/maintenance/deduplicate-project-files",
+                json={"dry_run": False},
+            )
+            self.assertEqual(execute.status_code, 200)
+            exec_body = execute.json()
+            self.assertFalse(exec_body["dry_run"])
+            self.assertEqual(exec_body["group_count"], 1)
+            self.assertEqual(exec_body["remove_count"], 1)
+
+            listed = self.client.get("/api/v1/projects")
+            self.assertEqual(listed.status_code, 200)
+            ids = {item["id"] for item in listed.json()}
+            self.assertNotIn(dup_old.id, ids)
+            self.assertIn(dup_new.id, ids)
+            self.assertIn(unique.id, ids)
+        finally:
+            for project_id in (dup_old.id, dup_new.id, unique.id):
+                self.client.delete(f"/api/v1/projects/{project_id}")
+
+    def test_merge_project_file_shadows_dry_run_and_execute(self) -> None:
+        projects_dir = self.app_state.settings.projects_dir
+        source = Project(name=f"shadow-{uuid.uuid4().hex[:6]}")
+        save_project(projects_dir, source)
+        shadow = Project(
+            name=source.name,
+            project_origin=ProjectOrigin(
+                kind="project_file",
+                source_project_id=source.id,
+                project_file_name="shadow.bvtproject.json",
+                project_file_fingerprint="shadow-fingerprint-001",
+            ),
+        )
+        save_project(projects_dir, shadow)
+
+        try:
+            dry_run = self.client.post(
+                "/api/v1/projects/maintenance/merge-project-file-shadows",
+                json={"dry_run": True},
+            )
+            self.assertEqual(dry_run.status_code, 200)
+            dry_body = dry_run.json()
+            self.assertTrue(dry_body["dry_run"])
+            self.assertEqual(dry_body["pair_count"], 1)
+            self.assertEqual(dry_body["remove_count"], 1)
+            self.assertEqual(dry_body["updated_source_count"], 0)
+            self.assertEqual(dry_body["pairs"][0]["source_project_id"], source.id)
+            self.assertEqual(dry_body["pairs"][0]["shadow_project_id"], shadow.id)
+
+            # Dry-run should keep both projects.
+            self.assertEqual(load_project(projects_dir, source.id).id, source.id)
+            self.assertEqual(load_project(projects_dir, shadow.id).id, shadow.id)
+
+            execute = self.client.post(
+                "/api/v1/projects/maintenance/merge-project-file-shadows",
+                json={"dry_run": False},
+            )
+            self.assertEqual(execute.status_code, 200)
+            exec_body = execute.json()
+            self.assertFalse(exec_body["dry_run"])
+            self.assertEqual(exec_body["pair_count"], 1)
+            self.assertEqual(exec_body["remove_count"], 1)
+            self.assertEqual(exec_body["updated_source_count"], 1)
+
+            source_after = load_project(projects_dir, source.id)
+            self.assertEqual(source_after.project_origin.kind, "project_file")
+            self.assertEqual(source_after.project_origin.source_project_id, source.id)
+            self.assertEqual(source_after.project_origin.project_file_name, "shadow.bvtproject.json")
+            self.assertEqual(source_after.project_origin.project_file_fingerprint, "shadow-fingerprint-001")
+
+            listed = self.client.get("/api/v1/projects")
+            self.assertEqual(listed.status_code, 200)
+            ids = {item["id"] for item in listed.json()}
+            self.assertIn(source.id, ids)
+            self.assertNotIn(shadow.id, ids)
+        finally:
+            self.client.delete(f"/api/v1/projects/{shadow.id}")
+            self.client.delete(f"/api/v1/projects/{source.id}")
+
+    def test_project_list_contains_origin_kind(self) -> None:
+        name = f"origin-{uuid.uuid4().hex[:8]}"
+        created = self.client.post("/api/v1/projects", json={"name": name})
+        self.assertEqual(created.status_code, 200)
+        project_id = created.json()["id"]
+        try:
+            listed = self.client.get("/api/v1/projects")
+            self.assertEqual(listed.status_code, 200)
+            by_id = {item["id"]: item for item in listed.json()}
+            self.assertIn(project_id, by_id)
+            self.assertEqual(by_id[project_id]["origin_kind"], "local")
+            self.assertIn("source_project_id", by_id[project_id])
+            self.assertIn("project_file_name", by_id[project_id])
+        finally:
+            self.client.delete(f"/api/v1/projects/{project_id}")
 
     def test_transcribe_missing_file_returns_404(self) -> None:
         response = self.client.post(
@@ -525,6 +674,7 @@ class ApiSmokeTest(unittest.TestCase):
         self.assertEqual(created.status_code, 200)
         source_id = created.json()["id"]
         imported_id = None
+        reused_id = None
         try:
             update_script = self.client.put(
                 f"/api/v1/projects/{source_id}/script",
@@ -562,9 +712,12 @@ class ApiSmokeTest(unittest.TestCase):
             self.assertEqual(import_resp.status_code, 200)
             import_body = import_resp.json()
             imported_id = import_body["project_id"]
-            self.assertNotEqual(imported_id, source_id)
+            self.assertEqual(imported_id, source_id)
             self.assertEqual(import_body["project_name"], created.json()["name"])
             self.assertEqual(import_body["import_source"], "project_file")
+            self.assertEqual(import_body["open_mode"], "reused")
+            self.assertEqual(import_body["match_reason"], "source_project_id")
+            self.assertTrue(import_body["project_file_fingerprint"])
 
             imported_project = self.client.get(f"/api/v1/projects/{imported_id}")
             self.assertEqual(imported_project.status_code, 200)
@@ -573,11 +726,27 @@ class ApiSmokeTest(unittest.TestCase):
             self.assertEqual(body["script"]["source_text"], "旁白：这是轻量项目文件测试文本。")
             self.assertEqual(len(body["script"]["segments"]), 1)
             self.assertEqual(body["voice_assignments"].get("narrator"), "preset-001")
+            self.assertEqual(body["project_origin"]["kind"], "project_file")
+            self.assertEqual(body["project_origin"]["source_project_id"], source_id)
+            self.assertEqual(body["project_origin"]["project_file_name"], "project.bvtproject.json")
+            self.assertTrue(body["project_origin"]["project_file_fingerprint"])
             self.assertIsNone(body["audio_assets"]["full_wav_relpath"])
             self.assertIsNone(body["audio_assets"]["full_mp3_relpath"])
             self.assertEqual(body["audio_assets"]["segments"], {})
+
+            second_file_bytes = io.BytesIO(json.dumps(exported, ensure_ascii=False).encode("utf-8"))
+            second_import_resp = self.client.post(
+                "/api/v1/projects/import/project-file",
+                files={"file": ("project.bvtproject.json", second_file_bytes, "application/json")},
+            )
+            self.assertEqual(second_import_resp.status_code, 200)
+            second_import_body = second_import_resp.json()
+            reused_id = second_import_body["project_id"]
+            self.assertEqual(reused_id, imported_id)
+            self.assertEqual(second_import_body["open_mode"], "reused")
+            self.assertEqual(second_import_body["match_reason"], "source_project_id")
         finally:
-            if imported_id:
+            if imported_id and imported_id != source_id:
                 self.client.delete(f"/api/v1/projects/{imported_id}")
             self.client.delete(f"/api/v1/projects/{source_id}")
 

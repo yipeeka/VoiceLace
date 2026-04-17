@@ -49,6 +49,7 @@ export default function App() {
       if (!targetId) return;
       if (useProjectStore.getState().currentProject?.id === targetId) return;
       await selectProject(targetId, { suppressToast: true }).catch(() => undefined);
+      await useScriptStore.getState().loadProjectScript(targetId).catch(() => undefined);
     })();
 
     // Keyboard shortcuts

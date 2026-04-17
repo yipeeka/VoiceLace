@@ -31,6 +31,20 @@ class PersistenceTest(unittest.TestCase):
             loaded = load_project(projects_dir, saved.id)
             self.assertEqual(loaded.name, "v2")
 
+    def test_load_project_defaults_origin_for_legacy_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            projects_dir = Path(tmp)
+            project = Project(name="legacy-origin")
+            saved = save_project(projects_dir, project)
+            path = projects_dir / f"{saved.id}.json"
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload.pop("project_origin", None)
+            path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+            loaded = load_project(projects_dir, saved.id)
+            self.assertEqual(loaded.project_origin.kind, "local")
+            self.assertIsNone(loaded.project_origin.source_project_id)
+
 
 if __name__ == "__main__":
     unittest.main()

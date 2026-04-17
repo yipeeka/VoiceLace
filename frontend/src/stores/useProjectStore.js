@@ -1,8 +1,8 @@
 import { create } from "zustand";
 
-import { api } from "../utils/api";
-import { formatError } from "../utils/errors";
-import { useUiStore } from "./useUiStore";
+import { api } from "../utils/api.js";
+import { formatError } from "../utils/errors.js";
+import { useUiStore } from "./useUiStore.js";
 
 const LAST_OPENED_PROJECT_ID_KEY = "beautyvoicetts:lastOpenedProjectId";
 const PROJECT_SOURCES_KEY = "beautyvoicetts:projectSources";
@@ -57,6 +57,9 @@ function toProjectSummary(project) {
     name: project.name,
     status: project.status,
     updated_at: project.updated_at,
+    origin_kind: project?.project_origin?.kind || "local",
+    source_project_id: project?.project_origin?.source_project_id || null,
+    project_file_name: project?.project_origin?.project_file_name || null,
   };
 }
 
@@ -80,6 +83,30 @@ function sortProjectSummaries(projects, lastOpenedProjectId) {
   return list;
 }
 
+function deriveProjectSourceFromProject(project) {
+  const kind = project?.project_origin?.kind;
+  return typeof kind === "string" && kind ? kind : null;
+}
+
+function deriveProjectSourceFromSummary(summary) {
+  const kind = summary?.origin_kind;
+  return typeof kind === "string" && kind ? kind : null;
+}
+
+function mergeProjectSourcesFromSummaries(existingSources, summaries) {
+  const next = { ...(existingSources || {}) };
+  for (const summary of Array.isArray(summaries) ? summaries : []) {
+    if (!summary?.id) continue;
+    const source = deriveProjectSourceFromSummary(summary);
+    if (source) {
+      next[summary.id] = source;
+    } else if (!next[summary.id]) {
+      next[summary.id] = "local";
+    }
+  }
+  return next;
+}
+
 function getBindingForProject(state, projectId) {
   if (!projectId) return null;
   return state.projectFileBindings?.[projectId] || null;
@@ -87,9 +114,13 @@ function getBindingForProject(state, projectId) {
 
 function getCurrentBindingState(state, currentProject) {
   const binding = getBindingForProject(state, currentProject?.id);
+  const originFileName =
+    currentProject?.project_origin?.kind === "project_file"
+      ? currentProject?.project_origin?.project_file_name || ""
+      : "";
   return {
     currentProjectFileHandle: binding?.handle || null,
-    currentProjectFileName: binding?.fileName || "",
+    currentProjectFileName: binding?.fileName || originFileName,
   };
 }
 
@@ -130,8 +161,8 @@ export const useProjectStore = create((set, get) => ({
         projectFileBindings: nextBindings,
         projectSources: (() => {
           const nextSources = {
-          ...(state.projectSources || {}),
-          [projectId]: "project_file",
+            ...(state.projectSources || {}),
+            [projectId]: "project_file",
           };
           safeWriteProjectSources(nextSources);
           return nextSources;
@@ -153,13 +184,25 @@ export const useProjectStore = create((set, get) => ({
       };
     }),
   setProjects: (projects) =>
-    set((state) => ({ projects: sortProjectSummaries(projects, state.lastOpenedProjectId) })),
+    set((state) => {
+      const nextSources = mergeProjectSourcesFromSummaries(state.projectSources, projects);
+      safeWriteProjectSources(nextSources);
+      return {
+        projects: sortProjectSummaries(projects, state.lastOpenedProjectId),
+        projectSources: nextSources,
+      };
+    }),
   loadProjects: async () => {
     set({ isLoading: true });
     try {
       const projects = await api.get("/projects");
       set((state) => ({
         projects: sortProjectSummaries(projects, state.lastOpenedProjectId),
+        projectSources: (() => {
+          const nextSources = mergeProjectSourcesFromSummaries(state.projectSources, projects);
+          safeWriteProjectSources(nextSources);
+          return nextSources;
+        })(),
         isLoading: false,
       }));
       return projects;
@@ -175,7 +218,8 @@ export const useProjectStore = create((set, get) => ({
     set((state) => {
       const summary = toProjectSummary(project);
       const projects = sortProjectSummaries(upsertProjectSummary(state.projects, summary), project.id);
-      const nextSources = { ...(state.projectSources || {}), [project.id]: "local" };
+      const source = deriveProjectSourceFromProject(project) || "local";
+      const nextSources = { ...(state.projectSources || {}), [project.id]: source };
       safeWriteProjectSources(nextSources);
       const nextBindings = { ...(state.projectFileBindings || {}) };
       delete nextBindings[project.id];
@@ -199,9 +243,10 @@ export const useProjectStore = create((set, get) => ({
     set((state) => {
       const summary = toProjectSummary(project);
       const projects = sortProjectSummaries(upsertProjectSummary(state.projects, summary), project.id);
+      const source = deriveProjectSourceFromProject(project) || state.projectSources?.[project.id] || "local";
       const nextSources = {
         ...(state.projectSources || {}),
-        [project.id]: state.projectSources?.[project.id] || "local",
+        [project.id]: source,
       };
       safeWriteProjectSources(nextSources);
       const bindingState = getCurrentBindingState(state, project);
@@ -224,11 +269,19 @@ export const useProjectStore = create((set, get) => ({
     set((state) => {
       const summary = toProjectSummary(project);
       const projects = sortProjectSummaries(upsertProjectSummary(state.projects, summary), state.lastOpenedProjectId);
+      const source = deriveProjectSourceFromProject(project);
+      const nextSources = source
+        ? { ...(state.projectSources || {}), [project.id]: source }
+        : state.projectSources;
+      if (source) {
+        safeWriteProjectSources(nextSources);
+      }
       const isCurrent = state.currentProject?.id === project.id;
       const bindingState = isCurrent ? getCurrentBindingState(state, project) : {};
       return {
         currentProject: isCurrent ? project : state.currentProject,
         projects,
+        projectSources: nextSources,
         ...bindingState,
       };
     });
@@ -279,7 +332,7 @@ export const useProjectStore = create((set, get) => ({
       const projects = sortProjectSummaries(upsertProjectSummary(state.projects, summary), project.id);
       const nextSources = {
         ...(state.projectSources || {}),
-        [project.id]: result?.import_source || "archive_import",
+        [project.id]: deriveProjectSourceFromProject(project) || result?.import_source || "archive_import",
       };
       safeWriteProjectSources(nextSources);
       const nextBindings = { ...(state.projectFileBindings || {}) };
@@ -323,7 +376,7 @@ export const useProjectStore = create((set, get) => ({
       };
       const nextSources = {
         ...(state.projectSources || {}),
-        [project.id]: result?.import_source || "project_file",
+        [project.id]: deriveProjectSourceFromProject(project) || result?.import_source || "project_file",
       };
       safeWriteProjectSources(nextSources);
       return {
@@ -337,7 +390,10 @@ export const useProjectStore = create((set, get) => ({
         currentProjectFileName: binding.fileName,
       };
     });
-    useUiStore.getState().pushToast({ title: `项目文件打开完成：${project.name}`, tone: "success" });
+    useUiStore.getState().pushToast({
+      title: result?.open_mode === "reused" ? `已继续编辑项目：${project.name}` : `项目文件打开完成：${project.name}`,
+      tone: "success",
+    });
     if (Array.isArray(result.warnings) && result.warnings.length) {
       result.warnings.forEach((warning, index) => {
         useUiStore.getState().pushToast({
