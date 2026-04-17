@@ -28,6 +28,7 @@ export default function TextInputPage({ onNavigate }) {
     currentProject,
     currentProjectFileHandle,
     projects,
+    projectSources,
     createProject,
     selectProject,
     refreshCurrentProject,
@@ -116,10 +117,10 @@ export default function TextInputPage({ onNavigate }) {
     event.target.value = "";
     if (!file) return;
     const result = await importArchive(file);
-    if (!result?.project_id) {
+    const project = result?.project;
+    if (!project?.id) {
       return;
     }
-    const project = await selectProject(result.project_id);
     setScript(project.script);
     const s = await loadProjectScript(project.id);
     setSourceText(s.source_text || "");
@@ -128,12 +129,9 @@ export default function TextInputPage({ onNavigate }) {
   async function importProjectFileAndSelect(file, options = {}) {
     if (!file) return;
     const result = await importProjectFile(file, options);
-    if (!result?.project_id) {
+    const project = result?.project;
+    if (!project?.id) {
       return;
-    }
-    const project = await selectProject(result.project_id);
-    if (options.handle) {
-      bindCurrentProjectFile({ handle: options.handle, fileName: options.fileName || file.name });
     }
     setScript(project.script);
     const s = await loadProjectScript(project.id);
@@ -165,7 +163,8 @@ export default function TextInputPage({ onNavigate }) {
     }
   }
 
-  const handleSaveProjectFile = useCallback(async () => {
+  const handleSaveProjectFile = useCallback(async (options = {}) => {
+    const forceSaveAs = Boolean(options?.forceSaveAs);
     const fallbackName = projectName.trim() || "未命名项目";
     const fallbackProject = currentProject || {
       name: fallbackName,
@@ -189,12 +188,13 @@ export default function TextInputPage({ onNavigate }) {
         payload,
         preferredName: fallbackProject.name,
         existingHandle: currentProjectFileHandle || null,
+        forceSaveAs,
       });
       if (result?.handle) {
         bindCurrentProjectFile({ handle: result.handle, fileName: result.fileName || "" });
       }
       useUiStore.getState().pushToast({
-        title: result?.mode === "inplace" ? "项目文件已保存" : "项目文件已导出",
+        title: forceSaveAs ? "项目文件已另存" : result?.mode === "inplace" ? "项目文件已保存" : "项目文件已导出",
         tone: "success",
       });
     } catch (error) {
@@ -216,7 +216,19 @@ export default function TextInputPage({ onNavigate }) {
   const wordCount = sourceText.length;
   const estimatedSegments = sourceText.split(/\n/).filter((l) => l.trim()).length;
 
-  const projectOptions = projects.map((p) => ({ value: p.id, label: p.name }));
+  const sortedProjects = [...projects].sort((a, b) => Date.parse(b.updated_at || "") - Date.parse(a.updated_at || ""));
+  let visibleProjects = sortedProjects.slice(0, 20);
+  if (currentProject?.id && !visibleProjects.some((item) => item.id === currentProject.id)) {
+    const currentSummary = sortedProjects.find((item) => item.id === currentProject.id);
+    if (currentSummary) {
+      visibleProjects = [currentSummary, ...visibleProjects.slice(0, 19)];
+    }
+  }
+  const projectOptions = visibleProjects.map((p) => {
+    const source = projectSources?.[p.id];
+    const icon = source === "archive_import" ? "📦 " : "";
+    return { value: p.id, label: `${icon}${p.name}` };
+  });
 
   return (
     <div className="pageGrid twoCols">

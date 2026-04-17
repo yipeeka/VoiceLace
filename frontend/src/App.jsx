@@ -31,11 +31,25 @@ const PAGE_TRANSITION = {
 export default function App() {
   const [activePage, setActivePage] = useState("text");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const { currentProject, projects, loadProjects } = useProjectStore();
+  const { currentProject, projects, loadProjects, selectProject } = useProjectStore();
   const { script } = useScriptStore();
 
   useEffect(() => {
-    loadProjects().catch(() => undefined);
+    let disposed = false;
+    (async () => {
+      const loaded = await loadProjects().catch(() => null);
+      if (disposed || !Array.isArray(loaded) || loaded.length === 0) {
+        return;
+      }
+      const lastOpenedProjectId = useProjectStore.getState().lastOpenedProjectId;
+      const hasLastOpened = Boolean(lastOpenedProjectId) && loaded.some((item) => item.id === lastOpenedProjectId);
+      const targetId = hasLastOpened
+        ? lastOpenedProjectId
+        : [...loaded].sort((a, b) => Date.parse(b.updated_at || "") - Date.parse(a.updated_at || ""))[0]?.id;
+      if (!targetId) return;
+      if (useProjectStore.getState().currentProject?.id === targetId) return;
+      await selectProject(targetId, { suppressToast: true }).catch(() => undefined);
+    })();
 
     // Keyboard shortcuts
     function handleKeyDown(e) {
@@ -49,8 +63,11 @@ export default function App() {
     }
 
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [loadProjects]);
+    return () => {
+      disposed = true;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [loadProjects, selectProject]);
 
   // Derive which pages are "completed" for step indicators
   const completedPages = [];

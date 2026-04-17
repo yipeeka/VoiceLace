@@ -3,6 +3,7 @@ import {
   BookOpen,
   ChevronLeft,
   ChevronRight,
+  FolderOpen,
   Mic,
   Save,
   Settings,
@@ -114,27 +115,51 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
             <div key={item.id} className="sidebarNavGroup">
               {renderedButton}
               {canShowProjectSave ? (
-                collapsed ? (
-                  <Tooltip content={canSaveProject ? "保存项目" : "当前页面不可保存"} side="right">
-                    <button
-                      className="navItem navItemSubAction"
-                      onClick={() => projectSaveAction?.()}
-                      disabled={!canSaveProject}
-                      title="保存项目"
-                    >
-                      <Save className="navItemIcon" size={18} />
-                    </button>
-                  </Tooltip>
-                ) : (
-                  <button
-                    className="navItem navItemSubAction"
-                    onClick={() => projectSaveAction?.()}
-                    disabled={!canSaveProject}
-                  >
-                    <Save className="navItemIcon" size={16} />
-                    <span className="navItemLabel">保存项目</span>
-                  </button>
-                )
+                <>
+                  {collapsed ? (
+                    <>
+                      <Tooltip content={canSaveProject ? "保存项目" : "当前页面不可保存"} side="right">
+                        <button
+                          className="navItem navItemSubAction"
+                          onClick={() => projectSaveAction?.()}
+                          disabled={!canSaveProject}
+                          title="保存项目"
+                        >
+                          <Save className="navItemIcon" size={18} />
+                        </button>
+                      </Tooltip>
+                      <Tooltip content={canSaveProject ? "另存项目" : "当前页面不可保存"} side="right">
+                        <button
+                          className="navItem navItemSubAction"
+                          onClick={() => projectSaveAction?.({ forceSaveAs: true })}
+                          disabled={!canSaveProject}
+                          title="另存项目"
+                        >
+                          <FolderOpen className="navItemIcon" size={18} />
+                        </button>
+                      </Tooltip>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        className="navItem navItemSubAction"
+                        onClick={() => projectSaveAction?.()}
+                        disabled={!canSaveProject}
+                      >
+                        <Save className="navItemIcon" size={16} />
+                        <span className="navItemLabel">保存项目</span>
+                      </button>
+                      <button
+                        className="navItem navItemSubAction"
+                        onClick={() => projectSaveAction?.({ forceSaveAs: true })}
+                        disabled={!canSaveProject}
+                      >
+                        <FolderOpen className="navItemIcon" size={16} />
+                        <span className="navItemLabel">另存项目</span>
+                      </button>
+                    </>
+                  )}
+                </>
               ) : null}
             </div>
           );

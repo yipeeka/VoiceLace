@@ -260,6 +260,7 @@ async def import_project_file(file: UploadFile = File(...), state=Depends(get_ap
         "project_id": saved.id,
         "project_name": saved.name,
         "source_project_id": payload.source_project_id,
+        "import_source": "project_file",
         "warnings": [],
     }
 
@@ -300,7 +301,6 @@ async def import_project_archive(file: UploadFile = File(...), state=Depends(get
 
         old_project_id = imported_project.id
         imported_project.id = str(uuid4())
-        imported_project.name = f"{imported_project.name} (Imported)"
         imported_project.created_at = datetime.now(timezone.utc)
         imported_project.updated_at = datetime.now(timezone.utc)
         imported_project.script = _sync_script_metadata(imported_project.script)
@@ -604,6 +604,7 @@ async def import_project_archive(file: UploadFile = File(...), state=Depends(get
             "project_id": saved.id,
             "project_name": saved.name,
             "from_project_id": old_project_id,
+            "import_source": "archive_import",
             "imported_presets": len(new_presets),
             "processed_presets": processed_presets,
             "reused_presets": reused_presets,

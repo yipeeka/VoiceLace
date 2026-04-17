@@ -94,13 +94,14 @@ export async function saveProjectFile({
   payload,
   preferredName,
   existingHandle = null,
+  forceSaveAs = false,
 }) {
   if (!isFileSystemAccessAvailable()) {
     downloadProjectFile(payload, preferredName);
     return { mode: "download", handle: existingHandle, fileName: `${sanitizeFilename(preferredName)}.bvtproject.json` };
   }
 
-  let handle = existingHandle;
+  let handle = forceSaveAs ? null : existingHandle;
   if (!handle) {
     handle = await window.showSaveFilePicker({
       suggestedName: `${sanitizeFilename(preferredName)}.bvtproject.json`,

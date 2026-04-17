@@ -333,6 +333,8 @@ class ApiSmokeTest(unittest.TestCase):
             body = response.json()
             self.assertTrue(body["project_id"])
             self.assertEqual(body["from_project_id"], source_id)
+            self.assertEqual(body["project_name"], project_full["name"])
+            self.assertEqual(body["import_source"], "archive_import")
             self.assertGreaterEqual(body["imported_segments"], 1)
             warning_text = " | ".join(body.get("warnings", []))
             self.assertIn("legacy archive layout", warning_text)
@@ -558,8 +560,11 @@ class ApiSmokeTest(unittest.TestCase):
                 files={"file": ("project.bvtproject.json", file_bytes, "application/json")},
             )
             self.assertEqual(import_resp.status_code, 200)
-            imported_id = import_resp.json()["project_id"]
+            import_body = import_resp.json()
+            imported_id = import_body["project_id"]
             self.assertNotEqual(imported_id, source_id)
+            self.assertEqual(import_body["project_name"], created.json()["name"])
+            self.assertEqual(import_body["import_source"], "project_file")
 
             imported_project = self.client.get(f"/api/v1/projects/{imported_id}")
             self.assertEqual(imported_project.status_code, 200)

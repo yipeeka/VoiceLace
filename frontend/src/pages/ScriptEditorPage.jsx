@@ -427,7 +427,8 @@ export default function ScriptEditorPage() {
     useUiStore.getState().pushToast({ title: "已导出剧本 JSON", tone: "success" });
   }
 
-  const handleSaveProjectFile = useCallback(async () => {
+  const handleSaveProjectFile = useCallback(async (options = {}) => {
+    const forceSaveAs = Boolean(options?.forceSaveAs);
     if (!currentProject) {
       return;
     }
@@ -441,12 +442,13 @@ export default function ScriptEditorPage() {
         payload,
         preferredName: currentProject.name,
         existingHandle: currentProjectFileHandle || null,
+        forceSaveAs,
       });
       if (result?.handle) {
         bindCurrentProjectFile({ handle: result.handle, fileName: result.fileName || "" });
       }
       useUiStore.getState().pushToast({
-        title: result?.mode === "inplace" ? "项目文件已保存" : "项目文件已导出",
+        title: forceSaveAs ? "项目文件已另存" : result?.mode === "inplace" ? "项目文件已保存" : "项目文件已导出",
         tone: "success",
       });
     } catch (error) {
