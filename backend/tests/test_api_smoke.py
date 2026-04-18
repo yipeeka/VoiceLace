@@ -61,6 +61,34 @@ class ApiSmokeTest(unittest.TestCase):
         body = response.json()
         self.assertTrue(body.get("prompt"))
 
+    def test_parse_stats_not_found(self) -> None:
+        response = self.client.get(f"/api/v1/llm/parse/{uuid.uuid4()}/stats")
+        self.assertEqual(response.status_code, 404)
+
+    def test_parse_stats_response_shape(self) -> None:
+        task_id = f"stats-{uuid.uuid4()}"
+        self.app_state.llm_tasks[task_id] = {
+            "task_id": task_id,
+            "status": "done",
+            "result": {"segments": []},
+            "error": "",
+            "project_id": None,
+            "events": [],
+            "parse_stats": {"mode": "single", "duration_ms": 123, "total_chunks": 1},
+        }
+        try:
+            response = self.client.get(f"/api/v1/llm/parse/{task_id}/stats")
+            self.assertEqual(response.status_code, 200)
+            body = response.json()
+            self.assertEqual(body["task_id"], task_id)
+            self.assertEqual(body["status"], "done")
+            self.assertEqual(body["parse_stats"]["mode"], "single")
+            self.assertEqual(body["parse_stats"]["duration_ms"], 123)
+            # observability fields should be preserved for frontend diagnostics
+            self.assertIn("total_chunks", body["parse_stats"])
+        finally:
+            self.app_state.llm_tasks.pop(task_id, None)
+
     def test_update_orchestrator_llm_params(self) -> None:
         cfg_path = self.app_state.settings.runtime_config_path
         original_cfg = cfg_path.read_text(encoding="utf-8") if cfg_path.exists() else None

@@ -4,19 +4,25 @@ import asyncio
 import inspect
 import json
 import logging
-import math
 import sys
-import threading
 from pathlib import Path
 from typing import Any, Awaitable, Callable
-from urllib import error as urllib_error
-from urllib import parse as urllib_parse
-from urllib import request as urllib_request
 
 from backend.config import settings
-from backend.engine.chunk_merger import merge_chunk_scripts
-from backend.engine.script_builder import build_mock_script, build_script_from_model_payload
-from backend.engine.text_chunker import chunk_text_by_paragraph
+from backend.engine.llm_clients import repair_json_via_gemini, run_gemini_parse, run_openai_parse
+from backend.engine.llm_parse_orchestrator import run_chunked_parse_flow
+from backend.engine.llm_parser import (
+    decode_json_payload,
+    decode_json_payload_with_meta,
+    extract_json_object,
+    gemini_response_schema,
+    should_attempt_repair,
+    strip_json_fences,
+    structured_output_schema,
+    to_gemini_schema_type,
+    validate_structured_payload,
+)
+from backend.engine.llm_single_runner import run_single_parse_with_stats
 from backend.models import Script
 
 logger = logging.getLogger(__name__)
@@ -40,6 +46,19 @@ class LLMEngine:
         self._loaded_n_gpu_layers: int = settings.default_llm_n_gpu_layers
         self._loaded_n_threads: int = settings.default_llm_threads
         self._loaded_enable_think_mode: bool = settings.default_enable_llama_cpp_think_mode
+        self.last_parse_stats: dict[str, Any] = {}
+
+    @staticmethod
+    def _structured_output_schema() -> dict[str, Any]:
+        return structured_output_schema()
+
+    @classmethod
+    def _gemini_response_schema(cls) -> dict[str, Any]:
+        return gemini_response_schema()
+
+    @classmethod
+    def _to_gemini_schema_type(cls, schema: Any) -> Any:
+        return to_gemini_schema_type(schema)
 
     @staticmethod
     def _is_qwen35_model_path(model_path: str) -> bool:
@@ -209,35 +228,32 @@ class LLMEngine:
         on_chunk_start: ChunkProgressCallback | None = None,
         llm_options: dict[str, Any] | None = None,
     ) -> Script:
+        opts = llm_options or {}
         max_chunk_chars = self._resolve_chunk_chars(llm_options or {})
-        chunks = chunk_text_by_paragraph(text, max_chunk_chars=max_chunk_chars)
-        if len(chunks) <= 1:
-            return await self._parse_single_stream(text, prompt, on_chunk=on_chunk, llm_options=llm_options)
-
-        known_characters: dict[str, str] = {}
-        scripts: list[Script] = []
-        total = len(chunks)
-        for index, chunk in enumerate(chunks, start=1):
-            if on_chunk_start is not None:
-                await on_chunk_start(index, total)
-            context_lines = [
-                f"- {name}: {desc}"
-                for name, desc in known_characters.items()
-                if name and desc
-            ]
-            context_text = "\n".join(context_lines)
-            chunk_prompt = prompt or ""
-            if context_text:
-                chunk_prompt = f"{chunk_prompt}\n\n已知角色：\n{context_text}".strip()
-            script = await self._parse_single_stream(chunk.text, chunk_prompt, on_chunk=on_chunk, llm_options=llm_options)
-            scripts.append(script)
-            for char in script.characters:
-                if char.name and char.description and char.name not in known_characters:
-                    known_characters[char.name] = char.description
-            if on_chunk_progress is not None:
-                await on_chunk_progress(index, total)
-
-        return merge_chunk_scripts(text, scripts)
+        script, parse_stats = await run_chunked_parse_flow(
+            text=text,
+            prompt=prompt,
+            on_chunk=on_chunk,
+            on_chunk_progress=on_chunk_progress,
+            on_chunk_start=on_chunk_start,
+            llm_options=llm_options,
+            max_chunk_chars=max_chunk_chars,
+            backend_name=self.backend_name,
+            parse_single_with_stats=self._parse_single_stream_with_stats,
+            logger=logger,
+        )
+        parse_stats.update(
+            {
+                "model_name": self.model_name or "",
+                "structured_output_enabled": bool(opts.get("enable_structured_output", True)),
+                "json_repair_enabled": bool(opts.get("enable_json_repair", True)),
+                "think_mode_enabled": bool(self.enable_llama_cpp_think_mode),
+                "n_ctx": int(opts.get("n_ctx", self._loaded_n_ctx)),
+                "max_tokens": int(opts.get("max_tokens", settings.default_llm_max_tokens)),
+            }
+        )
+        self.last_parse_stats = parse_stats
+        return script
 
     async def _parse_single_stream(
         self,
@@ -246,121 +262,39 @@ class LLMEngine:
         on_chunk: ChunkCallback | None = None,
         llm_options: dict[str, Any] | None = None,
     ) -> Script:
-        if self.backend_name != "llama-cpp-python" or self._llm is None:
-            if self.backend_name == "openai":
-                try:
-                    content = await self._run_openai_parse(text, prompt, llm_options or {})
-                    if on_chunk is not None and content:
-                        await on_chunk(content)
-                    payload = await self._decode_json_payload(content, llm_options or {}, provider="openai")
-                    return build_script_from_model_payload(text, payload, "openai")
-                except Exception as exc:
-                    logger.exception("OpenAI parse failed, falling back to mock parser")
-                    self.last_error = str(exc)
-                    return build_mock_script(text, prompt=prompt, parser_name="demo-llm-fallback")
-            if self.backend_name == "gemini":
-                try:
-                    content = await self._run_gemini_parse(text, prompt, llm_options or {})
-                    if on_chunk is not None and content:
-                        await on_chunk(content)
-                    payload = await self._decode_json_payload(content, llm_options or {}, provider="gemini")
-                    return build_script_from_model_payload(text, payload, "gemini")
-                except Exception as exc:
-                    logger.exception("Gemini parse failed, falling back to mock parser")
-                    self.last_error = str(exc)
-                    return build_mock_script(text, prompt=prompt, parser_name="demo-llm-fallback")
-            if on_chunk is not None:
-                for line in [line.strip() for line in text.splitlines() if line.strip()]:
-                    await on_chunk(f"{line}\n")
-                    await asyncio.sleep(0)
-            return build_mock_script(text, prompt=prompt, parser_name="demo-llm")
+        script, _stats = await self._parse_single_stream_with_stats(
+            text=text,
+            prompt=prompt,
+            on_chunk=on_chunk,
+            llm_options=llm_options,
+        )
+        return script
 
-        extraction_prompt = self._extraction_prompt()
-        combined_prompt = f"{prompt.strip()}\n\n{extraction_prompt.strip()}" if prompt else extraction_prompt.strip()
+    async def _parse_single_stream_with_stats(
+        self,
+        text: str,
+        prompt: str | None = None,
+        on_chunk: ChunkCallback | None = None,
+        llm_options: dict[str, Any] | None = None,
+    ) -> tuple[Script, dict[str, Any]]:
+        def _set_last_error(message: str) -> None:
+            self.last_error = message
 
-        try:
-            opts = llm_options or {}
-            base_max_tokens = int(opts.get("max_tokens", 2048))
-            temperature = float(opts.get("temperature", 0.2))
-            top_p = float(opts.get("top_p", 0.9))
-            top_k = int(opts.get("top_k", 40))
-            min_p = float(opts.get("min_p", 0.0))
-            presence_penalty = float(opts.get("presence_penalty", 0.0))
-            repeat_penalty = float(opts.get("repeat_penalty", 1.0))
-            last_error: Exception | None = None
-            for attempt in range(2):
-                max_tokens = int(min(8192, math.ceil(base_max_tokens * (1 + 0.6 * attempt))))
-                kwargs = self._build_llama_chat_kwargs(
-                    messages=[
-                        {"role": "system", "content": combined_prompt},
-                        {"role": "user", "content": text},
-                    ],
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    top_p=top_p,
-                    top_k=top_k,
-                    min_p=min_p,
-                    presence_penalty=presence_penalty,
-                    repeat_penalty=repeat_penalty,
-                )
-                # Run the synchronous llama-cpp stream in a thread so we don't
-                # block the asyncio event loop (which would freeze progress/WS).
-                token_queue: asyncio.Queue[tuple[str, str] | None] = asyncio.Queue()
-                loop = asyncio.get_running_loop()
-
-                cancel_event = threading.Event()
-
-                def _stream_in_thread() -> None:
-                    stream = self._llm.create_chat_completion(**kwargs)
-                    fr = ""
-                    for event in stream:
-                        if cancel_event.is_set():
-                            break
-                        choice = event["choices"][0]
-                        fr = str(choice.get("finish_reason") or fr or "")
-                        delta = choice.get("delta", {})
-                        piece = delta.get("content") or ""
-                        if piece:
-                            loop.call_soon_threadsafe(token_queue.put_nowait, (piece, fr))
-                    # Sentinel: signal end-of-stream
-                    loop.call_soon_threadsafe(token_queue.put_nowait, None)
-
-                thread_future = asyncio.ensure_future(asyncio.to_thread(_stream_in_thread))
-                chunks: list[str] = []
-                finish_reason = ""
-                try:
-                    while True:
-                        item = await token_queue.get()
-                        if item is None:
-                            break
-                        piece, finish_reason = item
-                        chunks.append(piece)
-                        if on_chunk is not None:
-                            await on_chunk(piece)
-                except asyncio.CancelledError:
-                    cancel_event.set()
-                    await thread_future
-                    raise
-                # Make sure the thread finished cleanly (propagate exceptions).
-                await thread_future
-                content = "".join(chunks)
-                try:
-                    payload = await self._decode_json_payload(content, llm_options or {}, provider="llama")
-                    return build_script_from_model_payload(text, payload, "llama-cpp-python")
-                except Exception as exc:
-                    last_error = exc
-                    # length/空输出属于典型截断场景，扩大 max_tokens 再试。
-                    if finish_reason in {"length", "max_tokens"} or not content.strip():
-                        continue
-                    # 其他错误也允许下一次重试，但不提前返回。
-                    continue
-            if last_error is not None:
-                raise last_error
-            raise RuntimeError("llama parse failed with empty output")
-        except Exception as exc:
-            logger.exception("LLM parse failed, falling back to mock parser")
-            self.last_error = str(exc)
-            return build_mock_script(text, prompt=prompt, parser_name="demo-llm-fallback")
+        return await run_single_parse_with_stats(
+            backend_name=self.backend_name,
+            llm=self._llm,
+            text=text,
+            prompt=prompt,
+            on_chunk=on_chunk,
+            llm_options=llm_options,
+            extraction_prompt=self._extraction_prompt(),
+            run_openai_parse=self._run_openai_parse,
+            run_gemini_parse=self._run_gemini_parse,
+            decode_json_payload_with_meta=self._decode_json_payload_with_meta,
+            build_llama_chat_kwargs=self._build_llama_chat_kwargs,
+            set_last_error=_set_last_error,
+            logger=logger,
+        )
 
     def _fallback_or_raise(self, message: str) -> None:
         self.last_error = message
@@ -387,243 +321,66 @@ class LLMEngine:
 
     @staticmethod
     def _strip_json_fences(content: str) -> str:
-        text = (content or "").strip()
-        if text.startswith("```json"):
-            text = text[7:]
-        elif text.startswith("```"):
-            text = text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-        return text.strip()
+        return strip_json_fences(content)
 
     async def _decode_json_payload(self, content: str, llm_options: dict[str, Any], provider: str) -> dict[str, Any]:
-        cleaned = self._strip_json_fences(content)
-        try:
-            return json.loads(cleaned)
-        except json.JSONDecodeError as first_error:
-            extracted = self._extract_json_object(cleaned)
-            if extracted:
-                try:
-                    return json.loads(extracted)
-                except json.JSONDecodeError:
-                    pass
-            if provider == "gemini":
-                repaired = await self._repair_json_via_gemini(cleaned, llm_options)
-                repaired_cleaned = self._strip_json_fences(repaired)
-                extracted_repaired = self._extract_json_object(repaired_cleaned) or repaired_cleaned
-                try:
-                    return json.loads(extracted_repaired)
-                except json.JSONDecodeError:
-                    pass
-            if provider == "llama":
-                repaired = await self._repair_json_via_llama(cleaned, llm_options)
-                repaired_cleaned = self._strip_json_fences(repaired)
-                extracted_repaired = self._extract_json_object(repaired_cleaned) or repaired_cleaned
-                try:
-                    return json.loads(extracted_repaired)
-                except json.JSONDecodeError:
-                    pass
-            raise first_error
+        return await decode_json_payload(
+            content=content,
+            llm_options=llm_options,
+            provider=provider,
+            repair_gemini=self._repair_json_via_gemini,
+            repair_llama=self._repair_json_via_llama,
+        )
+
+    async def _decode_json_payload_with_meta(
+        self,
+        content: str,
+        llm_options: dict[str, Any],
+        provider: str,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        return await decode_json_payload_with_meta(
+            content=content,
+            llm_options=llm_options,
+            provider=provider,
+            repair_gemini=self._repair_json_via_gemini,
+            repair_llama=self._repair_json_via_llama,
+        )
+
+    @staticmethod
+    def _validate_structured_payload(payload: Any) -> None:
+        validate_structured_payload(payload)
+
+    @staticmethod
+    def _should_attempt_repair(content: str, error: json.JSONDecodeError, llm_options: dict[str, Any]) -> bool:
+        return should_attempt_repair(content, error, llm_options)
 
     @staticmethod
     def _extract_json_object(text: str) -> str:
-        if not text:
-            return ""
-        start = -1
-        depth = 0
-        in_string = False
-        escaped = False
-        for idx, ch in enumerate(text):
-            if in_string:
-                if escaped:
-                    escaped = False
-                elif ch == "\\":
-                    escaped = True
-                elif ch == '"':
-                    in_string = False
-                continue
-            if ch == '"':
-                in_string = True
-                continue
-            if ch == "{":
-                if depth == 0:
-                    start = idx
-                depth += 1
-                continue
-            if ch == "}":
-                if depth > 0:
-                    depth -= 1
-                    if depth == 0 and start >= 0:
-                        return text[start : idx + 1]
-        if start >= 0:
-            return text[start:].strip()
-        return ""
+        return extract_json_object(text)
 
     async def _run_openai_parse(self, text: str, prompt: str | None, llm_options: dict[str, Any]) -> str:
-        if self._openai_client is None:
-            raise RuntimeError("OpenAI client is not initialized")
-        extraction_prompt = self._extraction_prompt()
-        combined_prompt = f"{(prompt or '').strip()}\n\n{extraction_prompt.strip()}".strip()
-        model = str(llm_options.get("api_model") or settings.openai_model)
-        temperature = float(llm_options.get("temperature", 0.2))
-        top_p = float(llm_options.get("top_p", 0.9))
-        presence_penalty = float(llm_options.get("presence_penalty", 0.0))
-        max_tokens = int(llm_options.get("max_tokens", 2048))
-        top_k = int(llm_options.get("top_k", 40))
-        min_p = float(llm_options.get("min_p", 0.0))
-        repeat_penalty = float(llm_options.get("repeat_penalty", 1.0))
-        extra_body = {
-            "top_k": top_k,
-            "min_p": min_p,
-            "repeat_penalty": repeat_penalty,
-        }
-
-        def _call() -> Any:
-            return self._openai_client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": combined_prompt},
-                    {"role": "user", "content": text},
-                ],
-                response_format={"type": "json_object"},
-                temperature=temperature,
-                top_p=top_p,
-                presence_penalty=presence_penalty,
-                max_tokens=max_tokens,
-                extra_body=extra_body,
-            )
-
-        response = await asyncio.to_thread(_call)
-        return (response.choices[0].message.content or "").strip()
+        return await run_openai_parse(
+            openai_client=self._openai_client,
+            text=text,
+            prompt=prompt,
+            llm_options=llm_options,
+            extraction_prompt=self._extraction_prompt(),
+            schema=self._structured_output_schema(),
+            logger=logger,
+        )
 
     async def _run_gemini_parse(self, text: str, prompt: str | None, llm_options: dict[str, Any]) -> str:
-        extraction_prompt = self._extraction_prompt()
-        combined_prompt = f"{(prompt or '').strip()}\n\n{extraction_prompt.strip()}".strip()
-        base_url = settings.gemini_base_url.rstrip("/")
-        model = str(llm_options.get("api_model") or settings.gemini_model)
-        temperature = float(llm_options.get("temperature", 0.2))
-        top_p = float(llm_options.get("top_p", 0.9))
-        top_k = int(llm_options.get("top_k", 40))
-        max_tokens = int(llm_options.get("max_tokens", 2048))
-        presence_penalty = float(llm_options.get("presence_penalty", 0.0))
-        url = f"{base_url}/v1beta/models/{urllib_parse.quote(model)}:generateContent?key={urllib_parse.quote(settings.gemini_api_key)}"
-        def _call(max_output_tokens: int) -> tuple[str, str]:
-            payload = {
-                "contents": [
-                    {
-                        "role": "user",
-                        "parts": [{"text": f"{combined_prompt}\n\n用户文本：\n{text}"}],
-                    }
-                ],
-                "generationConfig": {
-                    "responseMimeType": "application/json",
-                    "temperature": temperature,
-                    "topP": top_p,
-                    "topK": top_k,
-                    "maxOutputTokens": max_output_tokens,
-                    "presencePenalty": presence_penalty,
-                },
-            }
-            data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-            req = urllib_request.Request(
-                url,
-                data=data,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            import time
-            retryable_codes = {429, 500, 503}
-            last_exc: Exception | None = None
-            for retry in range(4):
-                try:
-                    with urllib_request.urlopen(req, timeout=90) as resp:
-                        raw = resp.read().decode("utf-8")
-                    break
-                except urllib_error.HTTPError as exc:
-                    body = exc.read().decode("utf-8", errors="ignore")
-                    if exc.code in retryable_codes and retry < 3:
-                        last_exc = RuntimeError(f"Gemini API error {exc.code}: {body}")
-                        wait = (2 ** retry) * 2  # 2, 4, 8 seconds
-                        time.sleep(wait)
-                        # Rebuild request (consumed by previous attempt)
-                        req = urllib_request.Request(
-                            url,
-                            data=data,
-                            headers={"Content-Type": "application/json"},
-                            method="POST",
-                        )
-                        continue
-                    raise RuntimeError(f"Gemini API error {exc.code}: {body}") from exc
-            else:
-                raise last_exc or RuntimeError("Gemini API retries exhausted")
-            parsed = json.loads(raw)
-            candidates = parsed.get("candidates") or []
-            if not candidates:
-                raise RuntimeError("Gemini 返回空候选结果")
-            first = candidates[0]
-            finish_reason = str(first.get("finishReason") or "")
-            content = first.get("content") or {}
-            parts = content.get("parts") or []
-            text_parts = [part.get("text", "") for part in parts if isinstance(part, dict)]
-            out = "".join(text_parts).strip()
-            if not out:
-                raise RuntimeError("Gemini 返回内容为空")
-            return out, finish_reason
-
-        last_out = ""
-        for attempt in range(3):
-            current_max = int(min(16384, math.ceil(max_tokens * (1 + 0.5 * attempt))))
-            out, finish_reason = await asyncio.to_thread(_call, current_max)
-            last_out = out
-            if finish_reason != "MAX_TOKENS":
-                return out
-        return last_out
+        return await run_gemini_parse(
+            text=text,
+            prompt=prompt,
+            llm_options=llm_options,
+            extraction_prompt=self._extraction_prompt(),
+            gemini_schema=self._gemini_response_schema(),
+            logger=logger,
+        )
 
     async def _repair_json_via_gemini(self, broken_json: str, llm_options: dict[str, Any]) -> str:
-        base_url = settings.gemini_base_url.rstrip("/")
-        model = str(llm_options.get("api_model") or settings.gemini_model)
-        url = f"{base_url}/v1beta/models/{urllib_parse.quote(model)}:generateContent?key={urllib_parse.quote(settings.gemini_api_key)}"
-        prompt = (
-            "请修复下面这段损坏的 JSON，要求：\n"
-            "1) 仅输出一个合法 JSON 对象；\n"
-            "2) 保留原有字段和内容语义；\n"
-            "3) 不要输出解释文字。\n\n"
-            f"{broken_json}"
-        )
-        payload = {
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "responseMimeType": "application/json",
-                "temperature": 0.0,
-                "topP": 0.1,
-                "topK": 1,
-                "maxOutputTokens": int(min(16384, max(2048, int(llm_options.get("max_tokens", 2048)) * 2))),
-            },
-        }
-        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-
-        def _call() -> str:
-            req = urllib_request.Request(
-                url,
-                data=data,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib_request.urlopen(req, timeout=90) as resp:
-                raw = resp.read().decode("utf-8")
-            parsed = json.loads(raw)
-            candidates = parsed.get("candidates") or []
-            if not candidates:
-                raise RuntimeError("Gemini JSON 修复返回空候选结果")
-            content = candidates[0].get("content") or {}
-            parts = content.get("parts") or []
-            text_parts = [part.get("text", "") for part in parts if isinstance(part, dict)]
-            out = "".join(text_parts).strip()
-            if not out:
-                raise RuntimeError("Gemini JSON 修复返回内容为空")
-            return out
-
-        return await asyncio.to_thread(_call)
+        return await repair_json_via_gemini(broken_json=broken_json, llm_options=llm_options)
 
     async def _repair_json_via_llama(self, broken_json: str, llm_options: dict[str, Any]) -> str:
         if self._llm is None:
@@ -727,6 +484,7 @@ class LLMEngine:
         min_p: float,
         presence_penalty: float,
         repeat_penalty: float,
+        response_format: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         base_kwargs: dict[str, Any] = {
             "messages": messages,
@@ -740,6 +498,8 @@ class LLMEngine:
             "max_tokens": max_tokens,
             "stream": True,
         }
+        if response_format is not None:
+            base_kwargs["response_format"] = response_format
         # Signature-filter to avoid version mismatch kwargs errors.
         try:
             sig = inspect.signature(self._llm.create_chat_completion)

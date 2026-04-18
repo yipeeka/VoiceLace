@@ -15,6 +15,7 @@ export const useScriptStore = create((set) => ({
   modelStatus: "",
   lastSyncError: "",
   parseTaskId: null,
+  parseStats: null,
   isParsing: false,
   isSaving: false,
   error: "",
@@ -44,6 +45,7 @@ export const useScriptStore = create((set) => ({
       parseProgress: 5,
       llmStreamOutput: "",
       parseTaskId: null,
+      parseStats: null,
     });
     try {
       const { task_id: taskId } = await api.post("/llm/parse", {
@@ -119,6 +121,20 @@ export const useScriptStore = create((set) => ({
           try {
             const state = await api.get(`/llm/parse/${taskId}`);
             if (state && Array.isArray(state.segments)) {
+              try {
+                const statsResp = await api.get(`/llm/parse/${taskId}/stats`);
+                const normalized = normalizeParseStats(statsResp?.parse_stats || null);
+                if (normalized) {
+                  set((prev) => ({
+                    parseStats: normalized,
+                    llmStreamOutput: prev.parseStats
+                      ? prev.llmStreamOutput
+                      : `${prev.llmStreamOutput}${buildParseStatsSummary(normalized)}`,
+                  }));
+                }
+              } catch {
+                // ignore stats pull failure in sync path
+              }
               done(finalizeWithScript(state));
               return true;
             }
@@ -179,8 +195,37 @@ export const useScriptStore = create((set) => ({
               }));
               break;
             case "complete":
+              void (async () => {
+                try {
+                  const statsResp = await api.get(`/llm/parse/${taskId}/stats`);
+                  const normalized = normalizeParseStats(statsResp?.parse_stats || null);
+                  if (!normalized) {
+                    return;
+                  }
+                  set((state) => ({
+                    parseStats: normalized,
+                    llmStreamOutput: state.parseStats
+                      ? state.llmStreamOutput
+                      : `${state.llmStreamOutput}${buildParseStatsSummary(normalized)}`,
+                  }));
+                } catch {
+                  // ignore stats pull failure; parse result already available
+                }
+              })();
               done(finalizeWithScript(msg.data));
               break;
+            case "parse_stats": {
+              const stats = normalizeParseStats(msg.data || {});
+              if (!stats) {
+                break;
+              }
+              const summary = buildParseStatsSummary(stats);
+              set((state) => ({
+                parseStats: stats,
+                llmStreamOutput: `${state.llmStreamOutput}${summary}`,
+              }));
+              break;
+            }
             case "error":
               set({
                 isParsing: false,
@@ -189,6 +234,7 @@ export const useScriptStore = create((set) => ({
                 error: msg.message || "解析失败",
                 parseProgress: 0,
                 parseTaskId: null,
+                parseStats: null,
               });
               fail(new Error(msg.message || "解析失败"));
               break;
@@ -199,6 +245,7 @@ export const useScriptStore = create((set) => ({
                 modelStatus: "解析任务已中断",
                 parseProgress: 0,
                 parseTaskId: null,
+                parseStats: null,
                 llmStreamOutput: `${state.llmStreamOutput}\n[系统] 解析已中断\n`,
               }));
               done(null);
@@ -226,6 +273,7 @@ export const useScriptStore = create((set) => ({
         error: message,
         parseProgress: 0,
         parseTaskId: null,
+        parseStats: null,
       });
       useUiStore.getState().pushToast({ title: formatError("解析失败", message), tone: "error" });
       throw error;
@@ -315,3 +363,25 @@ export const useScriptStore = create((set) => ({
     }
   },
 }));
+
+function normalizeParseStats(stats) {
+  if (!stats || typeof stats !== "object") {
+    return null;
+  }
+  return {
+    mode: stats.mode || "unknown",
+    total_chunks: Number.isFinite(Number(stats.total_chunks)) ? Number(stats.total_chunks) : null,
+    duration_ms: Number.isFinite(Number(stats.duration_ms)) ? Number(stats.duration_ms) : null,
+    repair_used_count: Number.isFinite(Number(stats.repair_used_count)) ? Number(stats.repair_used_count) : 0,
+    fallback_count: Number.isFinite(Number(stats.fallback_count)) ? Number(stats.fallback_count) : 0,
+    backend: stats.backend || "",
+    ...stats,
+  };
+}
+
+function buildParseStatsSummary(stats) {
+  if (!stats) {
+    return "";
+  }
+  return `[系统] 解析统计: mode=${stats.mode || "unknown"}, chunks=${stats.total_chunks ?? "?"}, duration_ms=${stats.duration_ms ?? "?"}, repair=${stats.repair_used_count ?? 0}, fallback=${stats.fallback_count ?? 0}\n`;
+}

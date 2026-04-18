@@ -4,9 +4,11 @@ import { getWsBaseUrl } from "../../utils/api";
 import { useWebSocket } from "../../hooks/useWebSocket";
 import { useUiStore } from "../../stores/useUiStore";
 import { useSettingsStore } from "../../stores/useSettingsStore";
+import { useScriptStore } from "../../stores/useScriptStore";
 
 export default function StatusBar() {
   const { systemStatus, refreshSystemStatus } = useSettingsStore();
+  const parseStats = useScriptStore((state) => state.parseStats);
   const wsUrl = `${getWsBaseUrl()}/ws/system/gpu-realtime`;
 
   useEffect(() => {
@@ -82,6 +84,18 @@ export default function StatusBar() {
 
   const LLM_LABELS = { idle: "空闲", ready: "就绪", loading: "加载中", unloading: "卸载中", error: "错误" };
   const TTS_LABELS = { ...LLM_LABELS };
+  const parseSummary = useMemo(() => {
+    if (!parseStats || typeof parseStats !== "object") {
+      return "";
+    }
+    const modeLabel = parseStats.mode === "chunked" ? "分块" : parseStats.mode === "single" ? "单段" : (parseStats.mode || "unknown");
+    const chunks = Number(parseStats.total_chunks ?? 0) || 0;
+    const durationMs = Number(parseStats.duration_ms ?? 0) || 0;
+    const repairCount = Number(parseStats.repair_used_count ?? 0) || 0;
+    const fallbackCount = Number(parseStats.fallback_count ?? 0) || 0;
+    const sec = durationMs > 0 ? (durationMs / 1000).toFixed(1) : "?";
+    return `解析 ${modeLabel} · ${chunks || "?"} 段 · ${sec}s · 修复 ${repairCount} · 兜底 ${fallbackCount}`;
+  }, [parseStats]);
 
   return (
     <div className="statusBar">
@@ -114,6 +128,15 @@ export default function StatusBar() {
             }}
           >
             {(gpu.used_vram_mb / 1024).toFixed(1)}&thinsp;/&thinsp;{(gpu.total_vram_mb / 1024).toFixed(1)} GB
+          </span>
+        </div>
+      )}
+
+      {parseSummary && (
+        <div className="statusBarItem statusBarParseItem" title={parseSummary}>
+          <span>最近解析</span>
+          <span className="statusBarParseText" style={{ color: "var(--text-primary)", fontWeight: 500 }}>
+            {parseSummary}
           </span>
         </div>
       )}

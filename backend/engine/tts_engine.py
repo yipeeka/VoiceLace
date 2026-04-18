@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import wave
 from pathlib import Path
 from typing import Any
@@ -80,6 +81,23 @@ class TTSEngine:
         self._torch = None
 
     async def synthesize_to_file(
+        self,
+        text: str,
+        output_path: Path,
+        preset: VoicePreset | None = None,
+        config: SynthesisConfig | None = None,
+        tts_overrides: dict[str, Any] | None = None,
+    ) -> Path:
+        return await asyncio.to_thread(
+            self._synthesize_to_file_sync,
+            text,
+            output_path,
+            preset,
+            config,
+            tts_overrides,
+        )
+
+    def _synthesize_to_file_sync(
         self,
         text: str,
         output_path: Path,

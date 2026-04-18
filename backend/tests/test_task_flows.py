@@ -257,6 +257,7 @@ class TaskFlowTest(unittest.TestCase):
 
     def test_tts_overrides_are_forwarded_to_engine(self) -> None:
         project_id = self._create_project("tts-overrides-pass")
+        unique_text = f"A-{uuid.uuid4().hex[:8]}"
         self._update_script(
             project_id,
             {
@@ -268,7 +269,7 @@ class TaskFlowTest(unittest.TestCase):
                         "index": 0,
                         "type": "narration",
                         "speaker": "narrator",
-                        "text": "A",
+                        "text": unique_text,
                         "tts_overrides": {
                             "speed": 1,
                             "duration": 3.5,

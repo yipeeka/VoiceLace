@@ -312,6 +312,13 @@ pre, code {
 
 .statusBarItem:first-child { padding-left: 0; }
 .statusBarItem:last-child { border-right: none; padding-right: 0; margin-left: auto; }
+.statusBarParseItem { min-width: 0; max-width: 420px; }
+.statusBarParseText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .statusBarDot {
   width: 6px;

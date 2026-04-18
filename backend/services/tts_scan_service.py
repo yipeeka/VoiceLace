@@ -1,0 +1,98 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Callable
+
+
+def build_synthesis_scan_plan(
+    *,
+    run_segments: list,
+    voice_assignments: dict[str, str],
+    presets_by_id: dict,
+    config,
+    cache_dir: Path,
+    is_partial: bool,
+    rebuild_full: bool,
+    target_segment_ids: set[str],
+    output_dir: Path,
+    project,
+    tts_backend: str,
+    tts_model_path: str,
+    normalize_segment_tts_overrides: Callable[..., dict],
+    segment_cache_key: Callable[..., str],
+    hash_payload: Callable[[dict], str],
+    resolve_segment_asset_path: Callable[..., Path | None],
+) -> dict:
+    cached_count = 0
+    reused_count = 0
+    to_generate_count = 0
+    scan_items: list[tuple] = []
+    unresolved_non_target_ids: list[str] = []
+
+    config_payload = {}
+    if config is not None:
+        try:
+            config_payload = config.model_dump()
+        except Exception:
+            config_payload = {}
+    config_hash = hash_payload(config_payload)
+
+    for segment in run_segments:
+        normalized_overrides = normalize_segment_tts_overrides(segment)
+        preset_id = voice_assignments.get(segment.speaker)
+        preset = presets_by_id.get(preset_id) if preset_id else None
+        preset_payload = {}
+        if preset is not None:
+            try:
+                preset_payload = preset.model_dump()
+            except Exception:
+                preset_payload = {"id": getattr(preset, "id", "")}
+        preset_hash = hash_payload(preset_payload)
+        key = segment_cache_key(
+            text=segment.text,
+            preset=preset,
+            config=config,
+            tts_backend=tts_backend,
+            tts_model_path=tts_model_path,
+            tts_overrides=normalized_overrides,
+        )
+        cached_path = cache_dir / f"{key}.wav"
+        hit = cached_path.exists() and cached_path.is_file() and cached_path.stat().st_size > 0
+        project_asset_path = resolve_segment_asset_path(output_dir=output_dir, project=project, segment_id=segment.id)
+        can_reuse = (
+            is_partial
+            and segment.id not in target_segment_ids
+            and project_asset_path is not None
+            and project_asset_path.exists()
+        )
+        if is_partial and rebuild_full and segment.id not in target_segment_ids and not can_reuse and not hit:
+            unresolved_non_target_ids.append(segment.id)
+        if can_reuse:
+            reused_count += 1
+        elif hit:
+            cached_count += 1
+        else:
+            to_generate_count += 1
+        scan_items.append(
+            (
+                segment,
+                preset,
+                preset_id,
+                preset_hash,
+                normalized_overrides,
+                cached_path,
+                hit,
+                can_reuse,
+                project_asset_path,
+                key,
+            )
+        )
+
+    return {
+        "config_hash": config_hash,
+        "cached_count": cached_count,
+        "reused_count": reused_count,
+        "to_generate_count": to_generate_count,
+        "scan_items": scan_items,
+        "unresolved_non_target_ids": unresolved_non_target_ids,
+    }

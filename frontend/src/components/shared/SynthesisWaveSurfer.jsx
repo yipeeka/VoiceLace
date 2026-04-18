@@ -36,6 +36,7 @@ function buildChannelDataFromMinMax(data) {
 export default function SynthesisWaveSurfer({ projectId, audioUrl, segments = [], gapDurationMs = 500, height = 100 }) {
   const containerRef = useRef(null);
   const wavesurferRef = useRef(null);
+  const regionWarningLoggedRef = useRef(false);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -44,8 +45,14 @@ export default function SynthesisWaveSurfer({ projectId, audioUrl, segments = []
   const [zoom, setZoom] = useState(0);
   const [waveformPayload, setWaveformPayload] = useState({ data: [], duration_ms: 0, level: 1024 });
   const [waveformError, setWaveformError] = useState("");
+  const [forcePlainLoad, setForcePlainLoad] = useState(false);
 
   const requestedLevel = useMemo(() => pickWaveformLevel(zoom), [zoom]);
+
+  useEffect(() => {
+    setForcePlainLoad(false);
+    regionWarningLoggedRef.current = false;
+  }, [projectId, audioUrl]);
 
   useEffect(() => {
     let canceled = false;
@@ -158,7 +165,7 @@ export default function SynthesisWaveSurfer({ projectId, audioUrl, segments = []
         ],
       });
 
-      if (precomputedChannelData && precomputedDurationSec) {
+      if (!forcePlainLoad && precomputedChannelData && precomputedDurationSec) {
         ws.load(audioUrl, [precomputedChannelData], precomputedDurationSec);
       } else {
         ws.load(audioUrl);
@@ -171,19 +178,35 @@ export default function SynthesisWaveSurfer({ projectId, audioUrl, segments = []
       setDuration(ws.getDuration());
       setIsReady(true);
       setWaveformError("");
+
+      // Regions are decorative only. If region rendering fails, do not block playback.
+      let regionRenderFailed = false;
       regionConfig.forEach((config) => {
-        const region = regionsPlugin.addRegion(config);
-        const contentEl = region.element.querySelector(".wavesurfer-region-content");
-        if (contentEl) {
-          contentEl.style.fontSize = "11px";
-          contentEl.style.padding = "2px 4px";
-          contentEl.style.color = "var(--text-secondary)";
-          contentEl.style.whiteSpace = "nowrap";
-          contentEl.style.overflow = "hidden";
-          contentEl.style.textOverflow = "ellipsis";
-          contentEl.title = config.text;
+        try {
+          const region = regionsPlugin.addRegion(config);
+          const contentEl = region.element?.querySelector?.(".wavesurfer-region-content");
+          if (contentEl) {
+            contentEl.style.fontSize = "11px";
+            contentEl.style.padding = "2px 4px";
+            contentEl.style.color = "var(--text-secondary)";
+            contentEl.style.whiteSpace = "nowrap";
+            contentEl.style.overflow = "hidden";
+            contentEl.style.textOverflow = "ellipsis";
+            contentEl.title = config.text;
+          }
+        } catch (error) {
+          regionRenderFailed = true;
+          if (import.meta?.env?.DEV && !regionWarningLoggedRef.current) {
+            regionWarningLoggedRef.current = true;
+            // Non-blocking diagnostics in development only.
+            console.warn("[SynthesisWaveSurfer] region render failed; playback kept available.", error);
+          }
         }
       });
+
+      if (regionRenderFailed) {
+        setWaveformError("分段标注暂不可用，已保留完整音频播放。");
+      }
     });
 
     ws.on("audioprocess", () => setCurrentTime(ws.getCurrentTime()));
@@ -192,6 +215,11 @@ export default function SynthesisWaveSurfer({ projectId, audioUrl, segments = []
     ws.on("error", (err) => {
       const message = String(err?.message || err || "").toLowerCase();
       if (message.includes("abort") || message.includes("destroy")) {
+        return;
+      }
+      if (!forcePlainLoad && precomputedChannelData && precomputedDurationSec) {
+        setForcePlainLoad(true);
+        setWaveformError("波形预加载失败，已自动切换普通模式。");
         return;
       }
       setWaveformError("WaveSurfer 初始化失败，建议重试或刷新页面。");
@@ -207,21 +235,31 @@ export default function SynthesisWaveSurfer({ projectId, audioUrl, segments = []
       setCurrentTime(0);
       setDuration(0);
     };
-  }, [audioUrl, regionConfig, height, precomputedChannelData, precomputedDurationSec]);
+  }, [audioUrl, regionConfig, height, precomputedChannelData, precomputedDurationSec, forcePlainLoad]);
 
   useEffect(() => {
     if (!wavesurferRef.current || !isReady) return;
-    if (zoom === 0) {
-      wavesurferRef.current.zoom(1);
-    } else {
-      wavesurferRef.current.zoom(10 + zoom * 3);
+    try {
+      if (zoom === 0) {
+        wavesurferRef.current.zoom(1);
+      } else {
+        wavesurferRef.current.zoom(10 + zoom * 3);
+      }
+    } catch {
+      setWaveformError("缩放失败，已保持当前波形视图。");
     }
   }, [zoom, isReady]);
 
   const togglePlay = async () => {
     if (!wavesurferRef.current || !isReady) return;
-    await wavesurferRef.current.playPause();
-    setIsPlaying((v) => !v);
+    try {
+      await wavesurferRef.current.playPause();
+      setIsPlaying((v) => !v);
+    } catch {
+      setIsPlaying(false);
+      setIsReady(false);
+      setWaveformError("音频尚未就绪，请稍后重试。");
+    }
   };
 
   if (!audioUrl) return null;
@@ -291,7 +329,14 @@ export default function SynthesisWaveSurfer({ projectId, audioUrl, segments = []
       </div>
 
       {waveformError ? (
-        <div style={{ color: "var(--text-muted)", fontSize: 12 }}>{waveformError}</div>
+        <div
+          style={{
+            color: waveformError.includes("暂不可用") ? "var(--text-subtle)" : "var(--text-muted)",
+            fontSize: 12,
+          }}
+        >
+          {waveformError}
+        </div>
       ) : null}
     </div>
   );

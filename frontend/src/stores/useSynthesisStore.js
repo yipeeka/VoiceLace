@@ -108,6 +108,16 @@ export const useSynthesisStore = create((set) => ({
               done(completeWithResult(state));
               return true;
             }
+            if (state?.status === "canceled") {
+              set({
+                isRunning: false,
+                status: "canceled",
+                modelStatus: "合成任务已取消",
+                lastSyncError: "",
+              });
+              done({ status: "canceled", task_id: taskId });
+              return true;
+            }
             if (state?.status === "error") {
               fail(new Error(state.error || "合成失败"));
               return true;
@@ -130,6 +140,16 @@ export const useSynthesisStore = create((set) => ({
         onMessage: ({ msg, done, fail }) => {
           switch (msg.type) {
             case "task_status":
+              if (msg.status === "canceled") {
+                set({
+                  isRunning: false,
+                  status: "canceled",
+                  modelStatus: "合成任务已取消",
+                  lastSyncError: "",
+                });
+                done({ status: "canceled", task_id: taskId });
+                break;
+              }
               set({
                 status: msg.status,
                 modelStatus: `任务状态：${msg.status}`,
@@ -311,6 +331,16 @@ export const useSynthesisStore = create((set) => ({
               done(completeWithResult(state));
               return true;
             }
+            if (state?.status === "canceled") {
+              set({
+                isRunning: false,
+                status: "canceled",
+                modelStatus: "局部合成任务已取消",
+                lastSyncError: "",
+              });
+              done({ status: "canceled", task_id: taskId });
+              return true;
+            }
             if (state?.status === "error") {
               fail(new Error(state.error || "局部合成失败"));
               return true;
@@ -333,6 +363,16 @@ export const useSynthesisStore = create((set) => ({
         onMessage: ({ msg, done, fail }) => {
           switch (msg.type) {
             case "task_status":
+              if (msg.status === "canceled") {
+                set({
+                  isRunning: false,
+                  status: "canceled",
+                  modelStatus: "局部合成任务已取消",
+                  lastSyncError: "",
+                });
+                done({ status: "canceled", task_id: taskId });
+                break;
+              }
               set({
                 status: msg.status,
                 modelStatus: `任务状态：${msg.status}`,
@@ -428,6 +468,39 @@ export const useSynthesisStore = create((set) => ({
       return { status: "idle" };
     }
     const result = await api.post(`/tts/synthesize/${taskId}/cancel`, {});
+    const backendStatus = result?.status;
+    if (backendStatus === "done") {
+      set({
+        isRunning: false,
+        status: "done",
+        connectionStatus: "open",
+        modelStatus: "任务已完成",
+      });
+      useUiStore.getState().pushToast({ title: "任务已完成，无需取消", tone: "default" });
+      return result;
+    }
+    if (backendStatus === "canceled") {
+      set({
+        isRunning: false,
+        status: "canceled",
+        connectionStatus: "open",
+        modelStatus: "合成任务已取消",
+      });
+      useUiStore.getState().pushToast({ title: "合成任务已取消", tone: "default" });
+      return result;
+    }
+    if (backendStatus === "error") {
+      set({
+        isRunning: false,
+        status: "error",
+        connectionStatus: "open",
+        modelStatus: "",
+        error: result?.error || "任务取消失败",
+      });
+      useUiStore.getState().pushToast({ title: "取消失败，任务已报错", tone: "error" });
+      return result;
+    }
+
     set({
       isRunning: true,
       status: "cancel_requested",
@@ -435,6 +508,41 @@ export const useSynthesisStore = create((set) => ({
       modelStatus: "任务取消中...",
     });
     useUiStore.getState().pushToast({ title: "已请求取消合成任务", tone: "default" });
+    // Fallback: if WS event is missed, reconcile status once.
+    setTimeout(async () => {
+      const state = useSynthesisStore.getState();
+      if (state.taskId !== taskId || state.status !== "cancel_requested") {
+        return;
+      }
+      try {
+        const synced = await api.get(`/tts/synthesize/${taskId}`);
+        if (synced?.status === "canceled") {
+          set({
+            isRunning: false,
+            status: "canceled",
+            modelStatus: "合成任务已取消",
+            lastSyncError: "",
+          });
+        } else if (synced?.status === "done") {
+          set({
+            isRunning: false,
+            status: "done",
+            modelStatus: "任务已完成",
+            lastSyncError: "",
+          });
+        } else if (synced?.status === "error") {
+          set({
+            isRunning: false,
+            status: "error",
+            modelStatus: "",
+            error: synced?.error || "合成失败",
+            lastSyncError: "",
+          });
+        }
+      } catch {
+        // Keep current status; websocket may still deliver updates.
+      }
+    }, 1500);
     return result;
   },
   reset: () =>

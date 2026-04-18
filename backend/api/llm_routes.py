@@ -114,6 +114,10 @@ async def _run_parse_task(task_id: str, payload: LlmParseRequest, state) -> None
             project.status = "parsed" if script.segments else "draft"
             save_project(state.settings.projects_dir, project)
 
+        parse_stats = dict(getattr(state.llm_engine, "last_parse_stats", {}) or {})
+        if parse_stats:
+            await _emit(state, task, task_id, {"type": "parse_stats", "data": parse_stats})
+
         if state.orchestrator.config.auto_unload_llm_after_parse:
             await _emit(state, task, task_id, {"type": "model_unloading", "engine": "llm", "message": "正在卸载 LLM..."})
             await state.orchestrator.unload_llm()
@@ -122,6 +126,7 @@ async def _run_parse_task(task_id: str, payload: LlmParseRequest, state) -> None
         result = script.model_dump(mode="json")
         task["status"] = "done"
         task["result"] = result
+        task["parse_stats"] = parse_stats if parse_stats else None
         await _emit(state, task, task_id, {"type": "progress", "current": 100, "total": 100, "percent": 100})
         await _emit(state, task, task_id, {"type": "complete", "data": result})
     except asyncio.CancelledError:
@@ -162,6 +167,28 @@ async def get_parse_result(task_id: str, state=Depends(get_app_state)):
     if task["status"] == "error":
         raise HTTPException(status_code=500, detail=task["error"])
     return JSONResponse(status_code=202, content={"status": task["status"], "task_id": task_id})
+
+
+@router.get("/parse/{task_id}/stats")
+async def get_parse_stats(task_id: str, state=Depends(get_app_state)):
+    task = state.llm_tasks.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Parse task not found")
+    stats = task.get("parse_stats")
+    if task.get("status") == "done":
+        return {
+            "task_id": task_id,
+            "status": "done",
+            "parse_stats": stats or {},
+        }
+    return JSONResponse(
+        status_code=202,
+        content={
+            "task_id": task_id,
+            "status": task.get("status", "queued"),
+            "parse_stats": stats or {},
+        },
+    )
 
 
 @router.post("/parse/{task_id}/cancel")
