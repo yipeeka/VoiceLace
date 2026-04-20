@@ -38,6 +38,10 @@ async def get_default_prompt():
 async def _run_parse_task(task_id: str, payload: LlmParseRequest, state) -> None:
     task = state.llm_tasks[task_id]
     task["status"] = "running"
+    task["parse_mode"] = payload.parse_mode
+    task["stage"] = "initializing"
+    task["stage_label"] = "正在初始化解析任务"
+    task["stage_progress"] = 2
     await _emit(state, task, task_id, {"type": "task_status", "status": "running"})
     await _emit(state, task, task_id, {"type": "model_loading", "engine": "llm", "message": "正在加载 LLM..."})
     await _emit(state, task, task_id, {"type": "progress", "current": 3, "total": 100, "percent": 3})
@@ -71,7 +75,10 @@ async def _run_parse_task(task_id: str, payload: LlmParseRequest, state) -> None
                 await _emit(state, task, task_id, {"type": "progress", "current": chunk_counter["count"], "total": 100, "percent": min(95, chunk_counter["count"])})
 
         async def on_chunk_progress(chunk: int, total_chunks: int) -> None:
-            percent = max(10, int((chunk / max(total_chunks, 1)) * 100))
+            if payload.parse_mode == "two_step_pipeline" and task.get("stage") == "step1_structure":
+                percent = max(10, min(56, 10 + int((chunk / max(total_chunks, 1)) * 46)))
+            else:
+                percent = max(10, int((chunk / max(total_chunks, 1)) * 100))
             await _emit(
                 state,
                 task,
@@ -85,8 +92,13 @@ async def _run_parse_task(task_id: str, payload: LlmParseRequest, state) -> None
             )
 
         async def on_chunk_start(chunk: int, total_chunks: int) -> None:
-            base = int(((chunk - 1) / max(total_chunks, 1)) * 100)
-            percent = max(10, min(95, base + 2))
+            if payload.parse_mode == "two_step_pipeline" and task.get("stage") == "step1_structure":
+                base = int(((chunk - 1) / max(total_chunks, 1)) * 46)
+                percent = max(10, min(54, 10 + base + 2))
+            else:
+                base = int(((chunk - 1) / max(total_chunks, 1)) * 100)
+                percent = max(10, min(95, base + 2))
+            task["stage_progress"] = percent
             await _emit(
                 state,
                 task,
@@ -99,6 +111,35 @@ async def _run_parse_task(task_id: str, payload: LlmParseRequest, state) -> None
                 },
             )
 
+        async def on_stage(stage: str, label: str, progress: int) -> None:
+            normalized_progress = max(0, min(99, int(progress)))
+            task["stage"] = stage
+            task["stage_label"] = label
+            task["stage_progress"] = normalized_progress
+            await _emit(
+                state,
+                task,
+                task_id,
+                {
+                    "type": "parse_stage",
+                    "stage": stage,
+                    "stage_label": label,
+                    "stage_progress": normalized_progress,
+                    "parse_mode": payload.parse_mode,
+                },
+            )
+            await _emit(
+                state,
+                task,
+                task_id,
+                {
+                    "type": "progress",
+                    "current": normalized_progress,
+                    "total": 100,
+                    "percent": normalized_progress,
+                },
+            )
+
         script = await state.llm_engine.parse_text_chunked_stream(
             payload.text,
             payload.system_prompt or DEFAULT_PARSE_PROMPT,
@@ -106,6 +147,8 @@ async def _run_parse_task(task_id: str, payload: LlmParseRequest, state) -> None
             on_chunk_progress=on_chunk_progress,
             on_chunk_start=on_chunk_start,
             llm_options=llm_options,
+            parse_mode=payload.parse_mode,
+            on_stage=on_stage,
         )
 
         if payload.project_id:
@@ -116,6 +159,7 @@ async def _run_parse_task(task_id: str, payload: LlmParseRequest, state) -> None
 
         parse_stats = dict(getattr(state.llm_engine, "last_parse_stats", {}) or {})
         if parse_stats:
+            task["step_stats"] = parse_stats.get("step_stats") or {}
             await _emit(state, task, task_id, {"type": "parse_stats", "data": parse_stats})
 
         if state.orchestrator.config.auto_unload_llm_after_parse:
@@ -127,6 +171,9 @@ async def _run_parse_task(task_id: str, payload: LlmParseRequest, state) -> None
         task["status"] = "done"
         task["result"] = result
         task["parse_stats"] = parse_stats if parse_stats else None
+        task["stage"] = "done"
+        task["stage_label"] = "解析完成"
+        task["stage_progress"] = 100
         await _emit(state, task, task_id, {"type": "progress", "current": 100, "total": 100, "percent": 100})
         await _emit(state, task, task_id, {"type": "complete", "data": result})
     except asyncio.CancelledError:
@@ -147,6 +194,11 @@ async def parse_text(payload: LlmParseRequest, state=Depends(get_app_state)):
     state.llm_tasks[task_id] = {
         "task_id": task_id,
         "status": "queued",
+        "parse_mode": payload.parse_mode,
+        "stage": "queued",
+        "stage_label": "任务排队中",
+        "stage_progress": 0,
+        "step_stats": {},
         "result": None,
         "error": "",
         "project_id": payload.project_id,
@@ -166,7 +218,18 @@ async def get_parse_result(task_id: str, state=Depends(get_app_state)):
         return task["result"]
     if task["status"] == "error":
         raise HTTPException(status_code=500, detail=task["error"])
-    return JSONResponse(status_code=202, content={"status": task["status"], "task_id": task_id})
+    return JSONResponse(
+        status_code=202,
+        content={
+            "status": task["status"],
+            "task_id": task_id,
+            "parse_mode": task.get("parse_mode", "two_step_pipeline"),
+            "stage": task.get("stage", ""),
+            "stage_label": task.get("stage_label", ""),
+            "stage_progress": task.get("stage_progress", 0),
+            "step_stats": task.get("step_stats", {}),
+        },
+    )
 
 
 @router.get("/parse/{task_id}/stats")
@@ -180,6 +243,11 @@ async def get_parse_stats(task_id: str, state=Depends(get_app_state)):
             "task_id": task_id,
             "status": "done",
             "parse_stats": stats or {},
+            "parse_mode": task.get("parse_mode", "two_step_pipeline"),
+            "stage": task.get("stage", "done"),
+            "stage_label": task.get("stage_label", "解析完成"),
+            "stage_progress": task.get("stage_progress", 100),
+            "step_stats": (stats or {}).get("step_stats", task.get("step_stats", {})),
         }
     return JSONResponse(
         status_code=202,
@@ -187,6 +255,11 @@ async def get_parse_stats(task_id: str, state=Depends(get_app_state)):
             "task_id": task_id,
             "status": task.get("status", "queued"),
             "parse_stats": stats or {},
+            "parse_mode": task.get("parse_mode", "two_step_pipeline"),
+            "stage": task.get("stage", ""),
+            "stage_label": task.get("stage_label", ""),
+            "stage_progress": task.get("stage_progress", 0),
+            "step_stats": task.get("step_stats", {}),
         },
     )
 

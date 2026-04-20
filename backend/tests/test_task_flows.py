@@ -72,14 +72,15 @@ class TaskFlowTest(unittest.TestCase):
             ],
         )
 
+        parse_mock = AsyncMock(return_value=parsed_script)
         with (
             patch.object(self.app_state.orchestrator, "ensure_llm_ready", new=AsyncMock(return_value=None)),
             patch.object(self.app_state.orchestrator, "unload_llm", new=AsyncMock(return_value=None)),
-            patch.object(self.app_state.llm_engine, "parse_text_chunked_stream", new=AsyncMock(return_value=parsed_script)),
+            patch.object(self.app_state.llm_engine, "parse_text_chunked_stream", new=parse_mock),
         ):
             started = self.client.post(
                 "/api/v1/llm/parse",
-                json={"text": "输入文本", "project_id": project_id},
+                json={"text": "输入文本", "project_id": project_id, "parse_mode": "legacy_single_pass"},
             )
             self.assertEqual(started.status_code, 200)
             task_id = started.json()["task_id"]
@@ -88,6 +89,10 @@ class TaskFlowTest(unittest.TestCase):
             self.assertEqual(status_code, 200)
             self.assertEqual(len(body["segments"]), 2)
             self.assertEqual(body["segments"][0]["text"], "第一段")
+            self.assertTrue(parse_mock.await_count >= 1)
+            parse_call = parse_mock.await_args_list[0]
+            self.assertEqual(parse_call.kwargs.get("parse_mode"), "legacy_single_pass")
+            self.assertIn("on_stage", parse_call.kwargs)
 
         fetched_script = self.client.get(f"/api/v1/projects/{project_id}/script")
         self.assertEqual(fetched_script.status_code, 200)

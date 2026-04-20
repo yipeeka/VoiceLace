@@ -6,10 +6,17 @@ import { runTaskChannel } from "../utils/taskChannel";
 import { createTaskChannelBridge } from "../utils/taskChannelBridge";
 import { useUiStore } from "./useUiStore";
 
-export const useScriptStore = create((set) => ({
+const DEFAULT_PARSE_MODE = "two_step_pipeline";
+const PARSE_MODE_STORAGE_KEY = "beautyvoice.parse_mode";
+
+export const useScriptStore = create((set, get) => ({
   sourceText: "",
   llmStreamOutput: "",
   parseProgress: 0,
+  parseMode: readParseModeFromStorage(),
+  parseStage: "",
+  parseStageLabel: "",
+  parseStageProgress: 0,
   status: "idle",
   connectionStatus: "idle",
   modelStatus: "",
@@ -29,12 +36,19 @@ export const useScriptStore = create((set) => ({
   setSourceText: (sourceText) => set({ sourceText }),
   setLlmStreamOutput: (llmStreamOutput) => set({ llmStreamOutput }),
   setScript: (script) => set({ script }),
+  setParseMode: (parseMode) => {
+    const normalized = normalizeParseMode(parseMode);
+    writeParseModeToStorage(normalized);
+    set({ parseMode: normalized });
+  },
   loadProjectScript: async (projectId) => {
     const script = await api.get(`/projects/${projectId}/script`);
     set({ script, sourceText: script.source_text || "" });
     return script;
   },
-  parseText: async ({ text, projectId, prompt }) => {
+  parseText: async ({ text, projectId, prompt, parseMode }) => {
+    const normalizedMode = normalizeParseMode(parseMode || get().parseMode);
+    writeParseModeToStorage(normalizedMode);
     set({
       isParsing: true,
       status: "starting",
@@ -43,6 +57,10 @@ export const useScriptStore = create((set) => ({
       lastSyncError: "",
       error: "",
       parseProgress: 5,
+      parseMode: normalizedMode,
+      parseStage: "initializing",
+      parseStageLabel: "准备开始解析",
+      parseStageProgress: 5,
       llmStreamOutput: "",
       parseTaskId: null,
       parseStats: null,
@@ -52,6 +70,7 @@ export const useScriptStore = create((set) => ({
         text,
         system_prompt: prompt,
         project_id: projectId,
+        parse_mode: normalizedMode,
       });
       set({ parseTaskId: taskId });
       const wsUrl = `${getWsBaseUrl()}/ws/llm-stream/${taskId}`;
@@ -63,6 +82,9 @@ export const useScriptStore = create((set) => ({
           modelStatus: "",
           lastSyncError: "",
           parseProgress: 100,
+          parseStage: "done",
+          parseStageLabel: "解析完成",
+          parseStageProgress: 100,
           script,
           llmStreamOutput: JSON.stringify(script, null, 2),
           parseTaskId: null,
@@ -143,6 +165,10 @@ export const useScriptStore = create((set) => ({
                 status: state.status,
                 modelStatus: state.status === "cancel_requested" ? "正在中断解析任务..." : "任务状态同步中",
                 lastSyncError: "",
+                parseMode: normalizeParseMode(state.parse_mode || normalizedMode),
+                parseStage: state.stage || "",
+                parseStageLabel: state.stage_label || "",
+                parseStageProgress: Number(state.stage_progress || 0) || 0,
               });
             }
             return false;
@@ -163,6 +189,7 @@ export const useScriptStore = create((set) => ({
                 status: msg.status || state.status,
                 modelStatus: `任务状态：${msg.status || state.status}`,
                 llmStreamOutput: `任务状态：${msg.status}\n`,
+                parseMode: normalizeParseMode(msg.parse_mode || state.parseMode),
               }));
               break;
             case "model_loading":
@@ -226,6 +253,16 @@ export const useScriptStore = create((set) => ({
               }));
               break;
             }
+            case "parse_stage":
+              set((state) => ({
+                parseMode: normalizeParseMode(msg.parse_mode || state.parseMode),
+                parseStage: msg.stage || "",
+                parseStageLabel: msg.stage_label || "",
+                parseStageProgress: Number(msg.stage_progress || 0) || 0,
+                modelStatus: msg.stage_label || state.modelStatus,
+                llmStreamOutput: `${state.llmStreamOutput}\n[系统] ${msg.stage_label || msg.stage || "阶段更新"} (${msg.stage_progress || 0}%)\n`,
+              }));
+              break;
             case "error":
               set({
                 isParsing: false,
@@ -233,6 +270,9 @@ export const useScriptStore = create((set) => ({
                 modelStatus: "",
                 error: msg.message || "解析失败",
                 parseProgress: 0,
+                parseStage: "",
+                parseStageLabel: "",
+                parseStageProgress: 0,
                 parseTaskId: null,
                 parseStats: null,
               });
@@ -244,6 +284,9 @@ export const useScriptStore = create((set) => ({
                 status: "canceled",
                 modelStatus: "解析任务已中断",
                 parseProgress: 0,
+                parseStage: "",
+                parseStageLabel: "",
+                parseStageProgress: 0,
                 parseTaskId: null,
                 parseStats: null,
                 llmStreamOutput: `${state.llmStreamOutput}\n[系统] 解析已中断\n`,
@@ -272,6 +315,9 @@ export const useScriptStore = create((set) => ({
         lastSyncError: "",
         error: message,
         parseProgress: 0,
+        parseStage: "",
+        parseStageLabel: "",
+        parseStageProgress: 0,
         parseTaskId: null,
         parseStats: null,
       });
@@ -370,6 +416,11 @@ function normalizeParseStats(stats) {
   }
   return {
     mode: stats.mode || "unknown",
+    parse_mode: normalizeParseMode(stats.parse_mode || DEFAULT_PARSE_MODE),
+    stage: stats.stage || "",
+    stage_label: stats.stage_label || "",
+    stage_progress: Number(stats.stage_progress || 0) || 0,
+    step_stats: stats.step_stats && typeof stats.step_stats === "object" ? stats.step_stats : {},
     total_chunks: Number.isFinite(Number(stats.total_chunks)) ? Number(stats.total_chunks) : null,
     duration_ms: Number.isFinite(Number(stats.duration_ms)) ? Number(stats.duration_ms) : null,
     repair_used_count: Number.isFinite(Number(stats.repair_used_count)) ? Number(stats.repair_used_count) : 0,
@@ -383,5 +434,26 @@ function buildParseStatsSummary(stats) {
   if (!stats) {
     return "";
   }
-  return `[系统] 解析统计: mode=${stats.mode || "unknown"}, chunks=${stats.total_chunks ?? "?"}, duration_ms=${stats.duration_ms ?? "?"}, repair=${stats.repair_used_count ?? 0}, fallback=${stats.fallback_count ?? 0}\n`;
+  return `[系统] 解析统计: parse_mode=${stats.parse_mode || DEFAULT_PARSE_MODE}, mode=${stats.mode || "unknown"}, chunks=${stats.total_chunks ?? "?"}, duration_ms=${stats.duration_ms ?? "?"}, repair=${stats.repair_used_count ?? 0}, fallback=${stats.fallback_count ?? 0}\n`;
+}
+
+function normalizeParseMode(value) {
+  return value === "legacy_single_pass" ? "legacy_single_pass" : DEFAULT_PARSE_MODE;
+}
+
+function readParseModeFromStorage() {
+  try {
+    const raw = window.localStorage.getItem(PARSE_MODE_STORAGE_KEY) || "";
+    return normalizeParseMode(raw);
+  } catch {
+    return DEFAULT_PARSE_MODE;
+  }
+}
+
+function writeParseModeToStorage(value) {
+  try {
+    window.localStorage.setItem(PARSE_MODE_STORAGE_KEY, normalizeParseMode(value));
+  } catch {
+    // Ignore storage failures.
+  }
 }

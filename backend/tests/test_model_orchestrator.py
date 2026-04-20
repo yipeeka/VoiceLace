@@ -58,6 +58,8 @@ class ModelOrchestratorTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(status["llm_fallback_active"])
         self.assertEqual(status["llm_status"], "ready")
         self.assertEqual(status["llm_backend"], "mock")
+        self.assertIn("llm_think_mode_effective", status)
+        self.assertIn("llm_think_mode_support", status)
 
     async def test_status_no_fallback_when_config_is_mock(self) -> None:
         llm = _FakeLlmEngine()
@@ -86,11 +88,19 @@ class ModelOrchestratorTest(unittest.IsolatedAsyncioTestCase):
         tts.is_loaded = True
 
         orch = ModelOrchestrator(llm, tts)
-        orch.set_config(OrchestratorConfig(auto_serial=True, llm_model_path="E:/models/test.gguf"))
+        orch.set_config(
+            OrchestratorConfig(
+                auto_serial=True,
+                llm_model_path="E:/models/test.gguf",
+                llm_clip_model_path="E:/models/test.mmproj",
+            )
+        )
 
         await orch.ensure_llm_ready()
         self.assertTrue(llm.is_loaded)
         self.assertTrue(tts.unload_called)
+        _args, kwargs = llm.loaded_args
+        self.assertEqual(kwargs.get("clip_model_path"), "E:/models/test.mmproj")
 
 
 if __name__ == "__main__":

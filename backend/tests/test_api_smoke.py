@@ -50,6 +50,9 @@ class ApiSmokeTest(unittest.TestCase):
         body = response.json()
         self.assertIn("llm_backend", body)
         self.assertIn("tts_backend", body)
+        self.assertIn("llm_think_mode_effective", body)
+        self.assertIn("llm_think_mode_support", body)
+        self.assertIn("llm_load_mode", body)
         self.assertIn("asr_backend", body)
         self.assertIn("python_executable", body)
         self.assertIn("llama_cpp_available", body)
@@ -70,11 +73,22 @@ class ApiSmokeTest(unittest.TestCase):
         self.app_state.llm_tasks[task_id] = {
             "task_id": task_id,
             "status": "done",
+            "parse_mode": "two_step_pipeline",
+            "stage": "done",
+            "stage_label": "解析完成",
+            "stage_progress": 100,
             "result": {"segments": []},
             "error": "",
             "project_id": None,
             "events": [],
-            "parse_stats": {"mode": "single", "duration_ms": 123, "total_chunks": 1},
+            "step_stats": {"step1_structure": {}, "step2_tts": {}},
+            "parse_stats": {
+                "mode": "two_step",
+                "parse_mode": "two_step_pipeline",
+                "duration_ms": 123,
+                "total_chunks": 1,
+                "step_stats": {"step1_structure": {}, "step2_tts": {}},
+            },
         }
         try:
             response = self.client.get(f"/api/v1/llm/parse/{task_id}/stats")
@@ -82,10 +96,39 @@ class ApiSmokeTest(unittest.TestCase):
             body = response.json()
             self.assertEqual(body["task_id"], task_id)
             self.assertEqual(body["status"], "done")
-            self.assertEqual(body["parse_stats"]["mode"], "single")
+            self.assertEqual(body["parse_stats"]["mode"], "two_step")
+            self.assertEqual(body["parse_mode"], "two_step_pipeline")
+            self.assertEqual(body["stage"], "done")
+            self.assertEqual(body["stage_progress"], 100)
             self.assertEqual(body["parse_stats"]["duration_ms"], 123)
             # observability fields should be preserved for frontend diagnostics
             self.assertIn("total_chunks", body["parse_stats"])
+            self.assertIn("step_stats", body)
+        finally:
+            self.app_state.llm_tasks.pop(task_id, None)
+
+    def test_parse_pending_shape_contains_stage_fields(self) -> None:
+        task_id = f"pending-{uuid.uuid4()}"
+        self.app_state.llm_tasks[task_id] = {
+            "task_id": task_id,
+            "status": "running",
+            "parse_mode": "two_step_pipeline",
+            "stage": "step1_structure",
+            "stage_label": "Step 1：解析文本结构与角色",
+            "stage_progress": 33,
+            "result": None,
+            "error": "",
+            "project_id": None,
+            "events": [],
+            "step_stats": {},
+        }
+        try:
+            response = self.client.get(f"/api/v1/llm/parse/{task_id}")
+            self.assertEqual(response.status_code, 202)
+            body = response.json()
+            self.assertEqual(body["parse_mode"], "two_step_pipeline")
+            self.assertEqual(body["stage"], "step1_structure")
+            self.assertEqual(body["stage_progress"], 33)
         finally:
             self.app_state.llm_tasks.pop(task_id, None)
 
@@ -99,6 +142,7 @@ class ApiSmokeTest(unittest.TestCase):
             "enable_llama_cpp_think_mode": False,
             "llm_backend": "openai",
             "llm_model_path": "unused-for-openai",
+            "llm_clip_model_path": "E:/models/mmproj/qwen35.mmproj",
             "llm_api_model": "gpt-4.1-mini",
             "llm_n_ctx": 4096,
             "llm_n_gpu_layers": -1,
@@ -122,12 +166,14 @@ class ApiSmokeTest(unittest.TestCase):
             self.assertFalse(body["enable_llama_cpp_think_mode"])
             self.assertEqual(body["llm_backend"], "openai")
             self.assertEqual(body["llm_api_model"], "gpt-4.1-mini")
+            self.assertEqual(body["llm_clip_model_path"], "E:/models/mmproj/qwen35.mmproj")
             self.assertEqual(body["llm_threads"], 8)
             self.assertEqual(body["asr_model_path"], "E:/models/faster-whisper-large-v3")
             self.assertAlmostEqual(body["llm_temperature"], 0.35, places=6)
             persisted = json.loads(cfg_path.read_text(encoding="utf-8"))
             self.assertFalse(persisted["enable_llama_cpp_think_mode"])
             self.assertEqual(persisted["llm_backend"], "openai")
+            self.assertEqual(persisted["llm_clip_model_path"], "E:/models/mmproj/qwen35.mmproj")
             self.assertEqual(persisted["llm_threads"], 8)
         finally:
             if original_cfg is None:
@@ -161,6 +207,7 @@ class ApiSmokeTest(unittest.TestCase):
             "enable_llama_cpp_think_mode": True,
             "llm_backend": "llama_cpp",
             "llm_model_path": "E:/models/keep-me.gguf",
+            "llm_clip_model_path": "E:/models/mmproj/keep.mmproj",
             "llm_api_model": "seed-model",
             "llm_n_ctx": 6144,
             "llm_n_gpu_layers": -1,
@@ -189,6 +236,7 @@ class ApiSmokeTest(unittest.TestCase):
             cfg = status.json().get("config", {})
             self.assertEqual(cfg.get("llm_backend"), "mock")
             self.assertEqual(cfg.get("llm_model_path"), "E:/models/keep-me.gguf")
+            self.assertEqual(cfg.get("llm_clip_model_path"), "E:/models/mmproj/keep.mmproj")
             self.assertEqual(cfg.get("llm_n_ctx"), 6144)
             self.assertEqual(cfg.get("llm_threads"), 6)
         finally:

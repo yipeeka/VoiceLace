@@ -29,6 +29,7 @@ class OrchestratorConfig:
     enable_llama_cpp_think_mode: bool = settings.default_enable_llama_cpp_think_mode
     llm_backend: str = settings.default_llm_backend
     llm_model_path: str = settings.default_llm_model_path
+    llm_clip_model_path: str = settings.default_llm_clip_model_path
     llm_api_model: str = settings.default_llm_api_model
     llm_n_ctx: int = settings.default_llm_n_ctx
     llm_n_gpu_layers: int = settings.default_llm_n_gpu_layers
@@ -129,6 +130,7 @@ class ModelOrchestrator:
             if getattr(self._llm, "is_loaded", False) and hasattr(self._llm, "needs_reload"):
                 need_reload = self._llm.needs_reload(
                     model_path=self._config.llm_model_path,
+                    clip_model_path=self._config.llm_clip_model_path,
                     n_ctx=self._config.llm_n_ctx,
                     n_gpu_layers=self._config.llm_n_gpu_layers,
                     backend=self._config.llm_backend,
@@ -140,9 +142,10 @@ class ModelOrchestrator:
             if not self._llm.is_loaded:
                 await self._set_state(ModelState.LOADING_LLM, "llm")
                 await self._llm.load_model(
-                    self._config.llm_model_path,
-                    self._config.llm_n_ctx,
-                    self._config.llm_n_gpu_layers,
+                    model_path=self._config.llm_model_path,
+                    clip_model_path=self._config.llm_clip_model_path,
+                    n_ctx=self._config.llm_n_ctx,
+                    n_gpu_layers=self._config.llm_n_gpu_layers,
                     backend=self._config.llm_backend,
                     n_threads=self._config.llm_threads,
                 )
@@ -187,6 +190,10 @@ class ModelOrchestrator:
             and self._config.llm_backend != "mock"
             and llm_error
         )
+        llm_think_mode_effective = bool(getattr(self._llm, "think_mode_effective", False))
+        llm_think_mode_support = str(getattr(self._llm, "think_mode_support", "unknown"))
+        llm_load_mode = str(getattr(self._llm, "last_load_mode", ""))
+        llm_handler_fallback_reason = str(getattr(self._llm, "handler_fallback_reason", ""))
         return {
             "state": self._state.value,
             "auto_serial": self._config.auto_serial,
@@ -199,6 +206,10 @@ class ModelOrchestrator:
             "llm_error": llm_error,
             "tts_error": tts_error,
             "llm_fallback_active": llm_fallback_active,
+            "llm_think_mode_effective": llm_think_mode_effective,
+            "llm_think_mode_support": llm_think_mode_support,
+            "llm_load_mode": llm_load_mode,
+            "llm_handler_fallback_reason": llm_handler_fallback_reason,
             "gpu": self.get_gpu_info(),
             "config": asdict(self._config),
         }

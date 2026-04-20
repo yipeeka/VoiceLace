@@ -46,6 +46,16 @@ export default function OrchestratorConfigCard({ form, isSaving, onSetField, onS
           </div>
 
           <div className="formGroup">
+            <label className="formLabel">LLM CLIP 模型路径（Qwen35ChatHandler 可选）</label>
+            <input
+              className="textInput"
+              value={form.llm_clip_model_path ?? ""}
+              onChange={(e) => onSetField("llm_clip_model_path", e.target.value)}
+              placeholder="e.g. D:/models/mmproj/model.mmproj"
+            />
+          </div>
+
+          <div className="formGroup">
             <label className="formLabel">LLM API 模型名（OpenAI/Gemini）</label>
             <input
               className="textInput"

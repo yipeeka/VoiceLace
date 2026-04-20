@@ -36,6 +36,11 @@ export default function SystemStatusCard({
   const llmError = systemStatus?.llm_error ?? "";
   const llmFallbackActive = Boolean(systemStatus?.llm_fallback_active);
   const configuredLlmBackend = systemStatus?.config?.llm_backend ?? "unknown";
+  const configuredClipPath = systemStatus?.config?.llm_clip_model_path ?? "";
+  const llmLoadMode = systemStatus?.llm_load_mode ?? "";
+  const llmThinkModeSupport = systemStatus?.llm_think_mode_support ?? "unknown";
+  const llmThinkModeEffective = Boolean(systemStatus?.llm_think_mode_effective);
+  const llmHandlerFallbackReason = systemStatus?.llm_handler_fallback_reason ?? "";
   const pythonExecutable = systemStatus?.python_executable ?? "";
   const llamaCppAvailable = Boolean(systemStatus?.llama_cpp_available);
   const llamaCppModulePath = systemStatus?.llama_cpp_module_path ?? "";
@@ -87,6 +92,43 @@ export default function SystemStatusCard({
           <span>LLM 配置后端</span>
           <strong>{configuredLlmBackend}</strong>
         </div>
+        <div className="statRow">
+          <span>Think 模式生效</span>
+          <strong style={{ color: llmThinkModeEffective ? "var(--success)" : "var(--text-secondary)" }}>
+            {llmThinkModeEffective ? "yes" : "no"}
+          </strong>
+        </div>
+        <div className="statRow">
+          <span>Think 支持类型</span>
+          <strong>{llmThinkModeSupport}</strong>
+        </div>
+        {llmLoadMode ? (
+          <div className="statRow">
+            <span>LLM 加载模式</span>
+            <strong title={llmLoadMode} style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {llmLoadMode}
+            </strong>
+          </div>
+        ) : null}
+        {configuredClipPath ? (
+          <div className="statRow">
+            <span>LLM CLIP 路径</span>
+            <strong
+              title={configuredClipPath}
+              style={{ fontFamily: "monospace", fontSize: 11, maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            >
+              {compactPath(configuredClipPath)}
+            </strong>
+          </div>
+        ) : null}
+        {llmHandlerFallbackReason ? (
+          <div className="statRow">
+            <span>Handler 降级原因</span>
+            <strong style={{ color: "var(--warning, #f59e0b)", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {llmHandlerFallbackReason}
+            </strong>
+          </div>
+        ) : null}
         {llmError ? (
           <div className="statRow">
             <span>LLM 错误</span>

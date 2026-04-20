@@ -88,6 +88,8 @@ async def load_llm(payload: LoadLlmRequest, state=Depends(get_app_state)):
         state.orchestrator.config.llm_backend = payload.llm_backend
     if payload.llm_model_path is not None:
         state.orchestrator.config.llm_model_path = payload.llm_model_path
+    if payload.llm_clip_model_path is not None:
+        state.orchestrator.config.llm_clip_model_path = payload.llm_clip_model_path
     if payload.llm_api_model is not None:
         state.orchestrator.config.llm_api_model = payload.llm_api_model
     if payload.llm_n_ctx is not None:

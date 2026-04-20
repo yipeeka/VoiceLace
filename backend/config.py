@@ -26,6 +26,7 @@ class Settings:
     )
     base_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parent)
     default_llm_model_path: str = field(default_factory=lambda: os.getenv("BV_LLM_MODEL_PATH", ""))
+    default_llm_clip_model_path: str = field(default_factory=lambda: os.getenv("BV_LLM_CLIP_MODEL_PATH", ""))
     default_llm_backend: str = field(default_factory=lambda: os.getenv("BV_LLM_BACKEND", "llama_cpp"))
     default_llm_api_model: str = field(
         default_factory=lambda: os.getenv(

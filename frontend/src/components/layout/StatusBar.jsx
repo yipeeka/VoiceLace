@@ -88,13 +88,26 @@ export default function StatusBar() {
     if (!parseStats || typeof parseStats !== "object") {
       return "";
     }
-    const modeLabel = parseStats.mode === "chunked" ? "分块" : parseStats.mode === "single" ? "单段" : (parseStats.mode || "unknown");
+    const parseModeLabel =
+      parseStats.parse_mode === "two_step_pipeline"
+        ? "两步"
+        : parseStats.parse_mode === "legacy_single_pass"
+          ? "单步"
+          : "未知";
+    const modeLabel =
+      parseStats.mode === "two_step"
+        ? "两步流程"
+        : parseStats.mode === "chunked"
+          ? "分块"
+          : parseStats.mode === "single"
+            ? "单段"
+            : (parseStats.mode || "unknown");
     const chunks = Number(parseStats.total_chunks ?? 0) || 0;
     const durationMs = Number(parseStats.duration_ms ?? 0) || 0;
     const repairCount = Number(parseStats.repair_used_count ?? 0) || 0;
     const fallbackCount = Number(parseStats.fallback_count ?? 0) || 0;
     const sec = durationMs > 0 ? (durationMs / 1000).toFixed(1) : "?";
-    return `解析 ${modeLabel} · ${chunks || "?"} 段 · ${sec}s · 修复 ${repairCount} · 兜底 ${fallbackCount}`;
+    return `解析 ${parseModeLabel}/${modeLabel} · ${chunks || "?"} 段 · ${sec}s · 修复 ${repairCount} · 兜底 ${fallbackCount}`;
   }, [parseStats]);
 
   return (

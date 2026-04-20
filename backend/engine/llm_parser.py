@@ -19,6 +19,8 @@ def structured_output_schema() -> dict[str, Any]:
                     "type": "object",
                     "additionalProperties": True,
                     "properties": {
+                        "id": {"type": "string"},
+                        "index": {"type": "integer"},
                         "type": {"type": "string"},
                         "speaker": {"type": "string"},
                         "text": {"type": "string"},
@@ -34,6 +36,37 @@ def structured_output_schema() -> dict[str, Any]:
         },
         "required": ["segments"],
     }
+
+
+def structured_output_schema_structure_only() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": True,
+        "properties": {
+            "title": {"type": "string"},
+            "segments": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": True,
+                    "properties": {
+                        "index": {"type": "integer"},
+                        "type": {"type": "string"},
+                        "speaker": {"type": "string"},
+                        "text": {"type": "string"},
+                    },
+                    "required": ["speaker", "text"],
+                },
+            },
+            "character_descriptions": {"type": "object"},
+            "metadata": {"type": "object"},
+        },
+        "required": ["segments"],
+    }
+
+
+def structured_output_schema_tts_enrichment() -> dict[str, Any]:
+    return structured_output_schema()
 
 
 def to_gemini_schema_type(schema: Any) -> Any:
