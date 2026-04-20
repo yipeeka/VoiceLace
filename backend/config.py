@@ -71,6 +71,7 @@ class Settings:
     allow_mock_fallback: bool = field(default_factory=lambda: os.getenv("BV_ALLOW_MOCK_FALLBACK", "true").lower() == "true")
     data_dir: Path = field(init=False)
     runtime_config_path: Path = field(init=False)
+    runtime_defaults_config_path: Path = field(init=False)
     projects_dir: Path = field(init=False)
     voices_dir: Path = field(init=False)
     output_dir: Path = field(init=False)
@@ -78,6 +79,7 @@ class Settings:
     def __post_init__(self) -> None:
         self.data_dir = self.base_dir / "data"
         self.runtime_config_path = self.data_dir / "config.json"
+        self.runtime_defaults_config_path = self.data_dir / "config.defaults.json"
         self.projects_dir = self.data_dir / "projects"
         self.voices_dir = self.data_dir / "voices"
         self.output_dir = self.data_dir / "output"

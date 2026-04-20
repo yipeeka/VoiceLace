@@ -32,6 +32,13 @@ export default function SynthesisTimelineCard({
   stop,
   pushToast,
 }) {
+  const speakerOptions = [
+    { value: "narrator", label: "narrator" },
+    ...Array.from(new Set((segments || []).map((segment) => (segment.speaker || "").trim()).filter(Boolean)))
+      .filter((name) => name !== "narrator")
+      .map((name) => ({ value: name, label: name })),
+  ];
+
   return (
     <GlassCard className="fullWidthCard">
       <h2 className="cardTitle">分段时间线</h2>
@@ -86,6 +93,7 @@ export default function SynthesisTimelineCard({
                 recentlyUpdatedSegmentId={recentlyUpdatedSegmentId}
                 isEditing={isEditing}
                 segmentDraft={segmentDraft}
+                speakerOptions={speakerOptions}
                 setSegmentDraft={setSegmentDraft}
                 isScriptSaving={isScriptSaving}
                 beginEditSegment={beginEditSegment}

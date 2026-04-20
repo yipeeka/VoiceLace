@@ -1,7 +1,37 @@
+import { useMemo } from "react";
+
 import Select from "../ui/Select";
 import { EMOTION_OPTIONS, TYPE_OPTIONS } from "../../constants/scriptOptions";
 
-export default function SegmentEditorFields({ draft, onFieldChange, includeAdvanced = true, textMinHeight = 64 }) {
+export default function SegmentEditorFields({
+  draft,
+  onFieldChange,
+  includeAdvanced = true,
+  textMinHeight = 64,
+  speakerOptions = [],
+}) {
+  const knownSpeakerOptions = useMemo(() => {
+    const map = new Map();
+    map.set("narrator", { value: "narrator", label: "narrator" });
+    (speakerOptions || []).forEach((item) => {
+      if (!item?.value) return;
+      map.set(item.value, item);
+    });
+    return Array.from(map.values());
+  }, [speakerOptions]);
+
+  const currentSpeaker = (draft?.speaker || "").trim();
+  const isKnownSpeaker = knownSpeakerOptions.some((item) => item.value === currentSpeaker);
+  const speakerSelectValue = isKnownSpeaker ? currentSpeaker : "__new__";
+
+  const resolvedSpeakerOptions = useMemo(
+    () => [
+      ...knownSpeakerOptions,
+      { value: "__new__", label: "+ 添加新角色" },
+    ],
+    [knownSpeakerOptions],
+  );
+
   return (
     <div style={{ display: "grid", gap: 6 }}>
       <div
@@ -11,11 +41,16 @@ export default function SegmentEditorFields({ draft, onFieldChange, includeAdvan
           gap: 6,
         }}
       >
-        <input
-          className="textInput"
-          value={draft?.speaker || ""}
-          onChange={(e) => onFieldChange("speaker", e.target.value)}
-          placeholder="角色"
+        <Select
+          value={speakerSelectValue}
+          onValueChange={(value) => {
+            if (value === "__new__") {
+              onFieldChange("speaker", isKnownSpeaker ? "" : currentSpeaker);
+              return;
+            }
+            onFieldChange("speaker", value || "narrator");
+          }}
+          options={resolvedSpeakerOptions}
         />
         <Select
           value={draft?.type || "dialogue"}
@@ -28,6 +63,14 @@ export default function SegmentEditorFields({ draft, onFieldChange, includeAdvan
           options={EMOTION_OPTIONS}
         />
       </div>
+      {speakerSelectValue === "__new__" ? (
+        <input
+          className="textInput"
+          value={currentSpeaker}
+          onChange={(e) => onFieldChange("speaker", e.target.value)}
+          placeholder="输入新角色名（留空保存后会回退 narrator）"
+        />
+      ) : null}
       <textarea
         className="textArea compactArea"
         value={draft?.text || ""}

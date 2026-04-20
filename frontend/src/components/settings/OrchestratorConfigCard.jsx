@@ -10,7 +10,7 @@ const llmBackendOptions = [
   { value: "mock", label: "Mock (调试)" },
 ];
 
-export default function OrchestratorConfigCard({ form, isSaving, onSetField, onSave, onReset }) {
+export default function OrchestratorConfigCard({ form, isSaving, onSetField, onSave, onSetAsDefault, onReset }) {
   return (
     <GlassCard>
       <h2 className="cardTitle">
@@ -198,8 +198,11 @@ export default function OrchestratorConfigCard({ form, isSaving, onSetField, onS
             <Button variant="primary" disabled={isSaving} onClick={onSave}>
               {isSaving ? "保存中..." : "保存配置"}
             </Button>
+            <Button variant="secondary" disabled={isSaving} onClick={onSetAsDefault}>
+              设为默认
+            </Button>
             <Button variant="secondary" disabled={isSaving} onClick={onReset}>
-              Reset 缺省值
+              Reset 默认
             </Button>
           </div>
         </>

@@ -8,7 +8,11 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from backend.engine import OrchestratorConfig
 from backend.models import FileBrowseRequest, LoadLlmRequest, LoadTtsRequest, OrchestratorConfigPayload
-from backend.runtime_config import save_runtime_config
+from backend.runtime_config import (
+    load_runtime_default_config,
+    save_runtime_config,
+    save_runtime_default_config,
+)
 from backend.state import get_app_state
 
 router = APIRouter()
@@ -72,7 +76,7 @@ async def update_orchestrator_config(payload: OrchestratorConfigPayload, state=D
 async def reset_orchestrator_config(state=Depends(get_app_state)):
     old_model_path = getattr(state.asr_engine, "model_path", "")
     old_device = getattr(state.asr_engine, "device", "")
-    config = OrchestratorConfig()
+    config = load_runtime_default_config(state.settings.runtime_defaults_config_path) or OrchestratorConfig()
     saved = await state.orchestrator.update_config(config)
     save_runtime_config(state.settings.runtime_config_path, config)
     state.asr_engine.model_path = config.asr_model_path
@@ -80,6 +84,16 @@ async def reset_orchestrator_config(state=Depends(get_app_state)):
     if state.asr_engine.is_loaded and (old_model_path != config.asr_model_path or old_device != config.asr_device):
         await state.asr_engine.unload_model()
     return saved
+
+
+@router.post("/orchestrator/config/defaults/use-current")
+async def set_current_orchestrator_config_as_default(state=Depends(get_app_state)):
+    current = state.orchestrator.config
+    save_runtime_default_config(state.settings.runtime_defaults_config_path, current)
+    return {
+        "status": "ok",
+        "message": "current config saved as reset default",
+    }
 
 
 @router.post("/load-llm")

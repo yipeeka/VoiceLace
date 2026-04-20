@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import json
 from typing import Any
 from uuid import uuid4
 
@@ -107,7 +108,7 @@ def build_script_from_model_payload(text: str, payload: dict[str, Any], parser_n
         for name, count in speaker_counter.items()
     ]
 
-    metadata = payload.get("metadata") or {}
+    metadata = _sanitize_script_metadata(payload.get("metadata"))
     metadata["parser"] = parser_name
 
     return Script(
@@ -117,3 +118,21 @@ def build_script_from_model_payload(text: str, payload: dict[str, Any], parser_n
         characters=characters,
         metadata=metadata,
     )
+
+
+def _sanitize_script_metadata(raw_metadata: Any) -> dict[str, str | int | float | bool]:
+    if not isinstance(raw_metadata, dict):
+        return {}
+    sanitized: dict[str, str | int | float | bool] = {}
+    for key, value in raw_metadata.items():
+        key_str = str(key)
+        if isinstance(value, (str, int, float, bool)):
+            sanitized[key_str] = value
+            continue
+        if value is None:
+            continue
+        try:
+            sanitized[key_str] = json.dumps(value, ensure_ascii=False)
+        except Exception:
+            sanitized[key_str] = str(value)
+    return sanitized

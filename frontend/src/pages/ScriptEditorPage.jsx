@@ -10,7 +10,7 @@ import GlassCard from "../components/shared/GlassCard";
 import SegmentEditorFields from "../components/script/SegmentEditorFields";
 import Button from "../components/ui/Button";
 import Select from "../components/ui/Select";
-import { EMOTION_OPTIONS, TYPE_OPTIONS } from "../constants/scriptOptions";
+import { TYPE_OPTIONS } from "../constants/scriptOptions";
 import { useProjectStore } from "../stores/useProjectStore";
 import { useScriptStore } from "../stores/useScriptStore";
 import { useUiStore } from "../stores/useUiStore";
@@ -25,6 +25,7 @@ function SortableSegmentCard({
   isEditing,
   isInsertAnchor,
   draft,
+  speakerOptions,
   canEdit,
   isSaving,
   onBeginEdit,
@@ -63,6 +64,7 @@ function SortableSegmentCard({
             <SegmentEditorFields
               draft={draft}
               includeAdvanced
+              speakerOptions={speakerOptions}
               onFieldChange={(field, value) => onUpdateDraft(segment.id, field, value)}
               textMinHeight={56}
             />
@@ -238,6 +240,14 @@ export default function ScriptEditorPage() {
       { value: "narrator", label: "narrator（默认）" },
       ...withoutNarrator.map((name) => ({ value: name, label: name })),
       { value: "__new__", label: "+ 添加新角色" },
+    ];
+  }, [characters]);
+  const segmentSpeakerOptions = useMemo(() => {
+    const existing = characters.map((item) => item.name).filter(Boolean);
+    const withoutNarrator = existing.filter((name) => name !== "narrator");
+    return [
+      { value: "narrator", label: "narrator" },
+      ...withoutNarrator.map((name) => ({ value: name, label: name })),
     ];
   }, [characters]);
 
@@ -621,6 +631,7 @@ export default function ScriptEditorPage() {
                     isEditing={editingId === segment.id}
                     isInsertAnchor={insertAfterSegmentId === segment.id}
                     draft={segmentDraft?.id === segment.id ? segmentDraft : null}
+                    speakerOptions={segmentSpeakerOptions}
                     canEdit={canEdit}
                     isSaving={isSaving}
                     onBeginEdit={beginEdit}

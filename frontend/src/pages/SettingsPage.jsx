@@ -11,6 +11,7 @@ export default function SettingsPage() {
     loadOrchestratorConfig,
     saveOrchestratorConfig,
     resetOrchestratorConfig,
+    setCurrentConfigAsDefault,
     refreshSystemStatus,
     manualUnloadLLM,
     manualUnloadTTS,
@@ -61,6 +62,20 @@ export default function SettingsPage() {
     setIsSaving(false);
   }
 
+  async function handleSetAsDefault() {
+    if (!form) {
+      return;
+    }
+    setIsSaving(true);
+    const saved = await saveOrchestratorConfig(form);
+    if (saved) {
+      setForm(saved);
+      await setCurrentConfigAsDefault();
+      await refreshSystemStatus();
+    }
+    setIsSaving(false);
+  }
+
   return (
     <div className="pageGrid twoCols">
       <SystemStatusCard
@@ -77,6 +92,7 @@ export default function SettingsPage() {
         isSaving={isSaving}
         onSetField={setField}
         onSave={handleSave}
+        onSetAsDefault={handleSetAsDefault}
         onReset={handleReset}
       />
     </div>

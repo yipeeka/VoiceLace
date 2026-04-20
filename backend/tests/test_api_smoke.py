@@ -191,6 +191,63 @@ class ApiSmokeTest(unittest.TestCase):
         self.assertIn("tts_model_path", body)
         self.assertIn("asr_model_path", body)
 
+    def test_set_current_config_as_default_and_reset(self) -> None:
+        cfg_path = self.app_state.settings.runtime_config_path
+        defaults_path = self.app_state.settings.runtime_defaults_config_path
+        original_cfg = cfg_path.read_text(encoding="utf-8") if cfg_path.exists() else None
+        original_defaults = defaults_path.read_text(encoding="utf-8") if defaults_path.exists() else None
+        payload_a = {
+            "auto_serial": True,
+            "auto_unload_llm_after_parse": True,
+            "auto_load_tts_before_synth": True,
+            "debug_stale_report": False,
+            "enable_llama_cpp_think_mode": False,
+            "llm_backend": "llama_cpp",
+            "llm_model_path": "E:/models/default-a.gguf",
+            "llm_clip_model_path": "E:/models/default-a.mmproj",
+            "llm_api_model": "gpt-4.1-mini",
+            "llm_n_ctx": 6144,
+            "llm_n_gpu_layers": -1,
+            "llm_threads": 6,
+            "llm_temperature": 0.33,
+            "llm_top_p": 0.91,
+            "llm_top_k": 37,
+            "llm_min_p": 0.03,
+            "llm_presence_penalty": 0.1,
+            "llm_repeat_penalty": 1.07,
+            "llm_max_tokens": 1900,
+            "tts_model_path": "E:/models/omnivoice-a",
+            "tts_device": "cuda:0",
+            "asr_model_path": "base",
+            "asr_device": "cuda:0",
+        }
+        payload_b = {**payload_a, "llm_model_path": "E:/models/changed-b.gguf", "llm_n_ctx": 8192}
+        try:
+            self.assertEqual(self.client.put("/api/v1/system/orchestrator/config", json=payload_a).status_code, 200)
+            set_default_resp = self.client.post("/api/v1/system/orchestrator/config/defaults/use-current", json={})
+            self.assertEqual(set_default_resp.status_code, 200)
+
+            self.assertEqual(self.client.put("/api/v1/system/orchestrator/config", json=payload_b).status_code, 200)
+            reset_resp = self.client.post("/api/v1/system/orchestrator/config/reset", json={})
+            self.assertEqual(reset_resp.status_code, 200)
+            body = reset_resp.json()
+            self.assertEqual(body["llm_model_path"], payload_a["llm_model_path"])
+            self.assertEqual(body["llm_n_ctx"], payload_a["llm_n_ctx"])
+            self.assertFalse(body["enable_llama_cpp_think_mode"])
+
+            persisted = json.loads(cfg_path.read_text(encoding="utf-8"))
+            self.assertEqual(persisted["llm_model_path"], payload_a["llm_model_path"])
+            self.assertEqual(persisted["llm_n_ctx"], payload_a["llm_n_ctx"])
+        finally:
+            if original_cfg is None:
+                cfg_path.unlink(missing_ok=True)
+            else:
+                cfg_path.write_text(original_cfg, encoding="utf-8")
+            if original_defaults is None:
+                defaults_path.unlink(missing_ok=True)
+            else:
+                defaults_path.write_text(original_defaults, encoding="utf-8")
+
     def test_load_llm_validation_error(self) -> None:
         response = self.client.post("/api/v1/system/load-llm", json={"n_ctx": "bad-type"})
         self.assertEqual(response.status_code, 422)

@@ -122,13 +122,27 @@ export const useSettingsStore = create((set, get) => ({
         settingsError: "",
         orchestratorConfig: normalizeOrchestratorConfig(saved),
       });
-      useUiStore.getState().pushToast({ title: "已恢复缺省配置", tone: "success" });
+      useUiStore.getState().pushToast({ title: "已恢复默认配置", tone: "success" });
       return saved;
     } catch (error) {
       const message = getErrorMessage(error, "重置模型配置失败");
       set({ settingsError: message });
       useUiStore.getState().pushToast({ title: formatError("重置模型配置失败", message), tone: "error" });
       return null;
+    }
+  },
+
+  setCurrentConfigAsDefault: async () => {
+    try {
+      await api.post("/system/orchestrator/config/defaults/use-current", {});
+      set({ settingsError: "" });
+      useUiStore.getState().pushToast({ title: "已将当前参数设为默认值", tone: "success" });
+      return true;
+    } catch (error) {
+      const message = getErrorMessage(error, "设置默认配置失败");
+      set({ settingsError: message });
+      useUiStore.getState().pushToast({ title: formatError("设置默认配置失败", message), tone: "error" });
+      return false;
     }
   },
 

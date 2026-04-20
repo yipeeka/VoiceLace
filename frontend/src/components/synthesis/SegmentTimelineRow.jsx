@@ -22,6 +22,7 @@ export default function SegmentTimelineRow({
   recentlyUpdatedSegmentId,
   isEditing,
   segmentDraft,
+  speakerOptions,
   setSegmentDraft,
   isScriptSaving,
   beginEditSegment,
@@ -72,6 +73,7 @@ export default function SegmentTimelineRow({
           <SegmentEditorFields
             draft={segmentDraft}
             includeAdvanced
+            speakerOptions={speakerOptions}
             onFieldChange={(field, value) => setSegmentDraft((draft) => ({ ...(draft || {}), [field]: value }))}
           />
         </div>
