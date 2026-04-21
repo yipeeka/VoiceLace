@@ -104,7 +104,7 @@ export default function SegmentTimelineRow({
           size="sm"
           icon={Play}
           onClick={async () => {
-            const ok = await playFrom(seg.segment_id);
+            const ok = await playFrom(seg.segment_id, seg.audio_url);
             if (!ok) {
               pushToast({ title: "连续播放启动失败，请重试。", tone: "error" });
             }

@@ -66,15 +66,16 @@ export function useSynthesisActions({
     }, 1800);
   }
 
-  async function handleRegenerateSelected() {
-    if (!selectedSegmentIds.length || isRunning) {
+  async function handleRegenerateSelected(targetIds = selectedSegmentIds) {
+    const ids = Array.isArray(targetIds) ? targetIds.filter(Boolean) : [];
+    if (!ids.length || isRunning) {
       return;
     }
-    const ok = window.confirm(`确认重新生成已选 ${selectedSegmentIds.length} 段？这会重建整本音频与字幕。`);
+    const ok = window.confirm(`确认重新生成已选 ${ids.length} 段？这会重建整本音频与字幕。`);
     if (!ok) {
       return;
     }
-    await handlePartialSynthesis(selectedSegmentIds);
+    await handlePartialSynthesis(ids);
   }
 
   async function handleImportArchive(event) {

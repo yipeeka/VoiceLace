@@ -37,6 +37,7 @@ export default function SynthesisWaveSurfer({ projectId, audioUrl, segments = []
   const containerRef = useRef(null);
   const wavesurferRef = useRef(null);
   const regionWarningLoggedRef = useRef(false);
+  const readyRef = useRef(false);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -52,6 +53,7 @@ export default function SynthesisWaveSurfer({ projectId, audioUrl, segments = []
   useEffect(() => {
     setForcePlainLoad(false);
     regionWarningLoggedRef.current = false;
+    readyRef.current = false;
   }, [projectId, audioUrl]);
 
   useEffect(() => {
@@ -177,6 +179,7 @@ export default function SynthesisWaveSurfer({ projectId, audioUrl, segments = []
     ws.on("ready", () => {
       setDuration(ws.getDuration());
       setIsReady(true);
+      readyRef.current = true;
       setWaveformError("");
 
       // Regions are decorative only. If region rendering fails, do not block playback.
@@ -217,6 +220,12 @@ export default function SynthesisWaveSurfer({ projectId, audioUrl, segments = []
       if (message.includes("abort") || message.includes("destroy")) {
         return;
       }
+      const alreadyReady = readyRef.current || ws.getDuration() > 0;
+      if (alreadyReady) {
+        // Keep playback path available when waveform/region internals throw transient errors.
+        setWaveformError("完整音频波形渲染异常，已保留音频播放。");
+        return;
+      }
       if (!forcePlainLoad && precomputedChannelData && precomputedDurationSec) {
         setForcePlainLoad(true);
         setWaveformError("波形预加载失败，已自动切换普通模式。");
@@ -230,6 +239,7 @@ export default function SynthesisWaveSurfer({ projectId, audioUrl, segments = []
     return () => {
       ws?.destroy();
       wavesurferRef.current = null;
+      readyRef.current = false;
       setIsPlaying(false);
       setIsReady(false);
       setCurrentTime(0);

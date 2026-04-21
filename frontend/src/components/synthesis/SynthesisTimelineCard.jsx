@@ -60,9 +60,13 @@ export default function SynthesisTimelineCard({
             variant="secondary"
             size="sm"
             disabled={isRunning}
-            onClick={() => setSelectedSegmentIds(recommendedRegenerateIds.length ? recommendedRegenerateIds : staleTargetIds)}
+            onClick={async () => {
+              const ids = recommendedRegenerateIds.length ? recommendedRegenerateIds : staleTargetIds;
+              setSelectedSegmentIds(ids);
+              await handleRegenerateSelected(ids);
+            }}
           >
-            选择段落重新生成
+            需更新段落重新生成
           </Button>
         </div>
       ) : null}

@@ -167,7 +167,39 @@ export default function VoiceConfigPage() {
     setAssignments(currentProject?.voice_assignments || {});
   }, [currentProject, setAssignments]);
 
-  const characters = currentProject?.script?.characters || [];
+  const characters = useMemo(() => {
+    const effectiveScript =
+      (Array.isArray(script?.segments) && script.segments.length ? script : null)
+      || (currentProject?.script || null);
+    if (!effectiveScript) {
+      return [];
+    }
+
+    const segmentCounts = new Map();
+    for (const segment of effectiveScript.segments || []) {
+      const name = (segment?.speaker || "").trim() || "narrator";
+      segmentCounts.set(name, (segmentCounts.get(name) || 0) + 1);
+    }
+
+    const merged = new Map();
+    for (const [name, count] of segmentCounts.entries()) {
+      merged.set(name, { name, appearance_count: count });
+    }
+    for (const character of effectiveScript.characters || []) {
+      const name = (character?.name || "").trim();
+      if (!name) {
+        continue;
+      }
+      if (!merged.has(name)) {
+        merged.set(name, {
+          name,
+          appearance_count: Number(character?.appearance_count || 0) || 0,
+        });
+      }
+    }
+
+    return Array.from(merged.values()).sort((a, b) => (b.appearance_count || 0) - (a.appearance_count || 0));
+  }, [script, currentProject?.script]);
   const presetOptions = useMemo(
     () => [{ value: "", label: "未分配" }, ...presets.map((p) => ({ value: p.id, label: p.name }))],
     [presets]
