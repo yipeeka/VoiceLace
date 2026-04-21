@@ -3,6 +3,7 @@ export function runTaskChannel({
   timeoutMs,
   maxReconnectRetries = 5,
   baseDelayMs = 1000,
+  maxTimeoutExtensions = 3,
   shouldReconnect = () => true,
   syncTaskState = async () => false,
   onConnectionStatus = () => {},
@@ -17,12 +18,18 @@ export function runTaskChannel({
     let finished = false;
     let reconnectAttempts = 0;
     let timeoutId = null;
+    let timeoutExtensions = 0;
 
     const clearTimer = () => {
       if (timeoutId) {
         window.clearTimeout(timeoutId);
         timeoutId = null;
       }
+    };
+
+    const bumpActivity = () => {
+      timeoutExtensions = 0;
+      scheduleTimeout();
     };
 
     const closeSocket = () => {
@@ -85,6 +92,7 @@ export function runTaskChannel({
       ws = new WebSocket(wsUrl);
 
       ws.onopen = async () => {
+        bumpActivity();
         onConnectionStatus("open");
         await onOpen({ isReconnect: reconnectAttempts > 0, reconnectAttempts });
       };
@@ -96,6 +104,7 @@ export function runTaskChannel({
         } catch {
           return;
         }
+        bumpActivity();
         onMessage({ msg, done, fail, closeSocket });
       };
 
@@ -116,15 +125,33 @@ export function runTaskChannel({
       };
     };
 
-    timeoutId = window.setTimeout(() => {
-      if (finished) {
-        return;
-      }
-      const timeoutError = onTimeout();
-      fail(timeoutError || new Error("task channel timeout"));
-    }, timeoutMs);
+    const scheduleTimeout = () => {
+      clearTimer();
+      timeoutId = window.setTimeout(async () => {
+        if (finished) {
+          return;
+        }
+        try {
+          const recovered = await syncTaskState({ done, fail, closeSocket });
+          if (finished || recovered) {
+            return;
+          }
+        } catch {
+          // ignore sync errors and continue timeout handling
+        }
+        if (shouldReconnect() && timeoutExtensions < maxTimeoutExtensions) {
+          timeoutExtensions += 1;
+          onConnectionStatus("syncing");
+          scheduleTimeout();
+          return;
+        }
+        const timeoutError = onTimeout();
+        fail(timeoutError || new Error("task channel timeout"));
+      }, timeoutMs);
+    };
 
     onConnectionStatus("connecting");
+    scheduleTimeout();
     connect();
   });
 }

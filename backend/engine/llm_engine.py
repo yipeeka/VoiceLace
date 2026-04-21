@@ -4,19 +4,31 @@ import asyncio
 import inspect
 import logging
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from backend.config import settings
-from backend.engine.llm_clients import repair_json_via_gemini, run_gemini_parse, run_openai_parse
+from backend.engine.llm_clients import (
+    repair_json_via_gemini,
+    run_gemini_parse,
+    run_gemini_text,
+    run_openai_parse,
+    run_openai_text,
+)
 from backend.engine.llm_parse_orchestrator import run_chunked_parse_flow
-from backend.engine.llm_two_step_pipeline import run_two_step_parse_pipeline
+from backend.engine.llm_two_step_pipeline import (
+    analyze_two_step_structure_drift,
+    merge_two_step_output,
+    run_two_step_parse_pipeline,
+    to_structured_draft,
+)
 from backend.engine.llm_parser import (
     decode_json_payload,
     decode_json_payload_with_meta,
     gemini_response_schema,
     structured_output_schema,
-    structured_output_schema_structure_only,
     structured_output_schema_tts_enrichment,
     to_gemini_schema_type,
 )
@@ -127,6 +139,27 @@ class LLMEngine:
             f"enable_thinking={think_effective})"
         )
         return handler, load_mode, think_effective, think_support
+
+    @staticmethod
+    def _structure_extraction_prompt() -> str:
+        return structure_extraction_prompt()
+
+    @staticmethod
+    def _to_structured_draft(script: Script, source_text: str):
+        return to_structured_draft(script, source_text)
+
+    @staticmethod
+    def _analyze_two_step_structure_drift(structure_draft, tts_script):
+        return analyze_two_step_structure_drift(structure_draft, tts_script)
+
+    @staticmethod
+    def _merge_two_step_output(*, structure_draft, tts_script, source_text: str, structure_guard: dict[str, Any] | None = None):
+        return merge_two_step_output(
+            structure_draft=structure_draft,
+            tts_script=tts_script,
+            source_text=source_text,
+            structure_guard=structure_guard,
+        )
 
     def needs_reload(
         self,
@@ -491,13 +524,181 @@ class LLMEngine:
             on_stage=on_stage,
             backend_name=self.backend_name,
             resolve_chunk_chars=self._resolve_chunk_chars,
+            parse_step1_raw_with_stats=self._parse_step1_raw_with_stats,
             parse_single_with_profile=self._parse_single_with_profile,
             structure_extraction_prompt=structure_extraction_prompt(),
-            structure_schema=structured_output_schema_structure_only(),
             tts_extraction_prompt=tts_enrichment_prompt(),
             tts_schema=structured_output_schema_tts_enrichment(),
             logger=logger,
         )
+
+    async def _parse_step1_raw_with_stats(
+        self,
+        *,
+        text: str,
+        prompt: str | None,
+        on_chunk: ChunkCallback | None,
+        llm_options: dict[str, Any] | None,
+        extraction_prompt: str,
+    ) -> tuple[str, dict[str, Any]]:
+        started = time.perf_counter()
+        opts = llm_options or {}
+        combined_prompt = f"{(prompt or '').strip()}\n\n{extraction_prompt.strip()}".strip()
+        stats: dict[str, Any] = {
+            "backend": self.backend_name,
+            "provider": self.backend_name,
+            "attempts": 1,
+            "repair_used": False,
+            "decode_strategy": "raw_text",
+            "fallback": False,
+            "error": "",
+            "output_chars": 0,
+            "finish_reason": "",
+        }
+
+        async def _emit_chunk(content: str) -> None:
+            if on_chunk is not None and content:
+                await on_chunk(content)
+
+        try:
+            if self.backend_name == "openai":
+                content = await run_openai_text(
+                    openai_client=self._openai_client,
+                    text=text,
+                    prompt=prompt,
+                    llm_options=opts,
+                    extraction_prompt=extraction_prompt,
+                )
+                if not (content or "").strip():
+                    raise RuntimeError("OpenAI Step1 raw output is empty")
+                await _emit_chunk(content)
+                stats["output_chars"] = len(content or "")
+                stats["duration_ms"] = int((time.perf_counter() - started) * 1000)
+                return content, stats
+
+            if self.backend_name == "gemini":
+                content = await run_gemini_text(
+                    text=text,
+                    prompt=prompt,
+                    llm_options=opts,
+                    extraction_prompt=extraction_prompt,
+                )
+                if not (content or "").strip():
+                    raise RuntimeError("Gemini Step1 raw output is empty")
+                await _emit_chunk(content)
+                stats["output_chars"] = len(content or "")
+                stats["duration_ms"] = int((time.perf_counter() - started) * 1000)
+                return content, stats
+
+            if self.backend_name != "llama-cpp-python" or self._llm is None:
+                content = self._build_mock_step1_lines(text)
+                await _emit_chunk(content)
+                stats["provider"] = "mock"
+                stats["decode_strategy"] = "mock_step1"
+                stats["output_chars"] = len(content or "")
+                stats["duration_ms"] = int((time.perf_counter() - started) * 1000)
+                return content, stats
+
+            temperature = float(opts.get("temperature", 0.2))
+            top_p = float(opts.get("top_p", 0.9))
+            top_k = int(opts.get("top_k", 40))
+            min_p = float(opts.get("min_p", 0.0))
+            presence_penalty = float(opts.get("presence_penalty", 0.0))
+            repeat_penalty = float(opts.get("repeat_penalty", 1.0))
+            max_tokens = int(opts.get("max_tokens", 2048))
+
+            kwargs = self._build_llama_chat_kwargs(
+                messages=[
+                    {"role": "system", "content": combined_prompt},
+                    {"role": "user", "content": text},
+                ],
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                min_p=min_p,
+                presence_penalty=presence_penalty,
+                repeat_penalty=repeat_penalty,
+                response_format=None,
+            )
+
+            token_queue: asyncio.Queue[tuple[str, str] | None] = asyncio.Queue()
+            loop = asyncio.get_running_loop()
+            cancel_event = threading.Event()
+
+            def _stream_in_thread() -> None:
+                stream = self._llm.create_chat_completion(**kwargs)
+                finish_reason = ""
+                for event in stream:
+                    if cancel_event.is_set():
+                        break
+                    choice = event["choices"][0]
+                    finish_reason = str(choice.get("finish_reason") or finish_reason or "")
+                    delta = choice.get("delta", {})
+                    piece = delta.get("content") or ""
+                    if piece:
+                        loop.call_soon_threadsafe(token_queue.put_nowait, (piece, finish_reason))
+                loop.call_soon_threadsafe(token_queue.put_nowait, None)
+
+            thread_future = asyncio.ensure_future(asyncio.to_thread(_stream_in_thread))
+            finish_reason = ""
+            chunks: list[str] = []
+            try:
+                while True:
+                    item = await token_queue.get()
+                    if item is None:
+                        break
+                    piece, finish_reason = item
+                    chunks.append(piece)
+                    await _emit_chunk(piece)
+            except asyncio.CancelledError:
+                cancel_event.set()
+                await thread_future
+                raise
+            await thread_future
+
+            content = "".join(chunks).strip()
+            if not content:
+                raise RuntimeError("Step1 raw parse returned empty content")
+            stats["finish_reason"] = finish_reason
+            stats["output_chars"] = len(content)
+            stats["duration_ms"] = int((time.perf_counter() - started) * 1000)
+            return content, stats
+        except Exception as exc:
+            logger.exception("Step1 raw parse failed, falling back to mock step1 lines")
+            self.last_error = str(exc)
+            fallback = self._build_mock_step1_lines(text)
+            await _emit_chunk(fallback)
+            stats["fallback"] = True
+            stats["error"] = str(exc)
+            stats["decode_strategy"] = "fallback_step1_raw"
+            stats["output_chars"] = len(fallback or "")
+            stats["duration_ms"] = int((time.perf_counter() - started) * 1000)
+            return fallback, stats
+
+    @staticmethod
+    def _build_mock_step1_lines(text: str) -> str:
+        lines: list[str] = []
+        for raw in (text or "").splitlines():
+            line = (raw or "").strip()
+            if not line:
+                continue
+            if line.startswith("旁白：") or line.startswith("旁白:"):
+                lines.append(line.replace(":", "：", 1))
+                continue
+            if line.startswith("舞台提示：") or line.startswith("舞台提示:"):
+                lines.append(line.replace(":", "：", 1))
+                continue
+            if "：" in line or ":" in line:
+                sep = "：" if "：" in line else ":"
+                speaker, content = line.split(sep, 1)
+                speaker = speaker.strip()
+                content = content.strip()
+                if speaker and content:
+                    lines.append(f"{speaker}：{content}")
+                    continue
+            lines.append(f"旁白：{line}")
+        return "\n".join(lines)
 
     def _fallback_or_raise(self, message: str) -> None:
         self.last_error = message

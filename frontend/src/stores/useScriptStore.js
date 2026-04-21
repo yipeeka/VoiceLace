@@ -134,6 +134,7 @@ export const useScriptStore = create((set, get) => ({
       return await runTaskChannel({
         wsUrl,
         timeoutMs: 20 * 60 * 1000,
+        maxTimeoutExtensions: 12,
         maxReconnectRetries: 5,
         baseDelayMs: 1000,
         shouldReconnect: channelBridge.shouldReconnect,

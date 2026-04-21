@@ -54,10 +54,12 @@ class LlmEngineStatsTest(unittest.TestCase):
 
     def test_structure_prompt_emphasizes_quoted_direct_speech(self) -> None:
         prompt = LLMEngine._structure_extraction_prompt()
-        self.assertIn("不要把引号内台词并入 narration", prompt)
-        self.assertIn("冒号后或引号内的文本优先判为 dialogue", prompt)
-        self.assertIn("老太太一想到她的孙子被枪打死了", prompt)
-        self.assertIn('"speaker": "老太太"', prompt)
+        self.assertIn("只输出纯文本多行，不要 JSON", prompt)
+        self.assertIn("旁白：", prompt)
+        self.assertIn("舞台提示：", prompt)
+        self.assertIn("角色名：", prompt)
+        self.assertIn("引语拆分强规则", prompt)
+        self.assertIn("石头笑着说", prompt)
 
     def test_two_step_structure_drift_is_reported_not_raised(self) -> None:
         engine = LLMEngine()
@@ -85,8 +87,10 @@ class LlmEngineStatsTest(unittest.TestCase):
         draft = engine._to_structured_draft(step1, source_text=step1.source_text)
         guard = engine._analyze_two_step_structure_drift(draft, step2)
         self.assertFalse(guard["segment_count_changed"])
-        self.assertEqual(guard["mismatch_count"], 1)
-        self.assertEqual(guard["mismatched_indices"], [1])
+        # New contract: text differences are handled by merge guard and do not
+        # count as structural drift.
+        self.assertEqual(guard["mismatch_count"], 0)
+        self.assertEqual(guard["mismatched_indices"], [])
 
         merged = engine._merge_two_step_output(
             structure_draft=draft,

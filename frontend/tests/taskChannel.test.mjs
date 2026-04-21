@@ -111,6 +111,29 @@ test("runTaskChannel rejects on timeout", async () => {
   });
 });
 
+test("runTaskChannel extends timeout window while syncTaskState reports pending", async () => {
+  await withMockWebSocket(async () => {
+    let syncCalls = 0;
+    const started = Date.now();
+    await assert.rejects(
+      () =>
+        runTaskChannel({
+          wsUrl: "ws://test/timeout-extend",
+          timeoutMs: 5,
+          maxTimeoutExtensions: 2,
+          syncTaskState: async () => {
+            syncCalls += 1;
+            return false;
+          },
+          onMessage: () => {},
+        }),
+      (error) => error && error.message.includes("timeout"),
+    );
+    assert.equal(syncCalls >= 3, true);
+    assert.equal(Date.now() - started >= 10, true);
+  });
+});
+
 test("runTaskChannel does not reconnect when shouldReconnect returns false", async () => {
   await withMockWebSocket(async () => {
     const statuses = [];

@@ -30,83 +30,76 @@ def legacy_extraction_prompt() -> str:
 
 def structure_extraction_prompt() -> str:
     return (
-        "你是一个专业且严谨的有声书剧本分析助手。"
-        "你的任务是将原始文本解析、拆分，并准确提取角色信息，"
-        "为后续的 TTS 语音合成提供基础结构。\n\n"
-        "核心任务：\n"
-        "1) 文本拆分：将原文拆分为语流自然的短片段，每段建议 1-3 句；长难句需合理切分。\n"
-        "2) 角色与类型识别：准确区分 type（narration/dialogue/direction）。\n"
-        "3) 说话人标记：为每段标注 speaker；未明确说话人的文本一律标注为 narrator。\n"
-        "4) 说话引导语剥离（强规则）：若对话前后出现“他说/她低声嘟囔/宝玉笑道：”等提示语，"
-        "必须从对话里剥离，归入 narration；不得留在 dialogue 文本中。\n"
-        "5) 角色描述提取：提取角色身份、关系或性格特征。\n\n"
-        "请只做“结构解析”，不要注入任何 TTS 表现参数。"
-        "请直接输出一个 JSON 对象（不要 ```json 标记，不要解释），格式如下：\n"
-        "{\n"
-        '  "title": "根据内容起一个标题",\n'
-        '  "segments": [\n'
-        '    {"index": 0, "type": "narration", "speaker": "narrator", "text": "原文片段"},\n'
-        '    {"index": 1, "type": "dialogue", "speaker": "角色名", "text": "原文对白"}\n'
-        "  ],\n"
-        '  "character_descriptions": {"角色名": "角色描述"},\n'
-        '  "metadata": {"language": "zh"}\n'
-        "}\n\n"
+        "你是一个极其严谨的文学文本剧本化解析器。你的任务是把小说叙述转换成行文本剧本。\n\n"
+        "输出协议（必须严格遵守）：\n"
+        "1. 只输出纯文本多行，不要 JSON，不要解释，不要代码块。\n"
+        "2. 每一行必须且只能以下列前缀之一开头：\n"
+        "   - 旁白：...\n"
+        "   - 舞台提示：...\n"
+        "   - 角色名：...\n"
+        "3. 顺序必须与原文一致。\n\n"
         "硬性规则：\n"
-        "1. 只输出结构字段，不要输出 emotion/non_verbal/tts_overrides\n"
-        "2. 不改写原文，不删减，不扩写；不得改变原文核心语义\n"
-        "3. segments 顺序必须与原文一致\n"
-        "4. 每个 segment 必须包含 index，且从 0 开始递增\n"
-        "5. type 仅可取 narration/dialogue/direction\n"
-        "6. 未明确说话人的文本，speaker 设为 narrator\n"
-        "7. 每段建议 1-3 句，避免过长\n"
-        "8. 如果一句话里先是叙述引导语，后面出现冒号、破折号或引号包裹的直接引语，必须拆成 narration + dialogue 两段，"
-        "不要把引号内台词并入 narration\n"
-        "9. 遇到“某人说/问/哭/哭了/喊/叫/骂/叹/答/回答/嘀咕/嚷道：‘……’”这类结构时，"
-        "冒号后或引号内的文本优先判为 dialogue，speaker 尽量使用引导语主语\n"
-        "10. 引号内出现完整呼喊、提问、感叹、重复呼语时，通常是角色直接说话，不是旁白\n\n"
+        "1. 逐字忠实：严禁删字、改字、加字；原文标点要保留。\n"
+        "1.1 严禁输出任何 OmniVoice 标签（如 [laughter] / [sigh]）；Step1 绝不做音效标注。\n"
+        "2. 旁白：所有叙述、动作、环境描写、以及引出对话的说辞（如“X道：”“X笑道：”）均归入旁白。\n"
+        "3. 对话：引号内的直接话语必须单独成行为“角色名：...”。\n"
+        "4. 舞台提示：非口语动作提示、场景调度可写为“舞台提示：...”。\n"
+        "5. 引语拆分强规则：出现“X道/问/喊/哭道：‘…’”时，必须拆成两行：\n"
+        "   旁白：X道：\n"
+        "   X：…\n"
+        "6. 绝对禁止删除引语引导语：如“武松道：”“店小二笑道：”“王婆低声问道：”必须完整保留为旁白行。\n"
+        "7. 未能确定具体说话人但存在明确引语时，可用“有人：...”承载引号内对话；不得把引号内容并入旁白。\n"
+        "8. 禁止合并跨语义段落；建议每行 1-3 句。\n\n"
+        "9. 角色名必须是最小说话人短语，不得把动作链并入角色名：\n"
+        "   - 正确：老周：...\n"
+        "   - 错误：老周朝前挪了两步，又回头对儿子：...\n"
+        "   - 正确：有人：...\n"
+        "   - 错误：有人惊呼：...\n\n"
+        "错误示例（禁止）：\n"
+        "武松道：‘先切二斤熟牛肉。’ -> 武松：先切二斤熟牛肉。\n"
+        "（错误原因：丢失“武松道：”）\n\n"
+        "正确示例：\n"
+        "武松道：‘先切二斤熟牛肉。’\n"
+        "输出：\n"
+        "旁白：武松道：\n"
+        "武松：先切二斤熟牛肉。\n\n"
         "示例：\n"
-        "原文：石头笑着说：‘大师请了。’\n"
-        "应拆分为：\n"
-        '1. {"index": 0, "type": "narration", "speaker": "narrator", "text": "石头笑着说："}\n'
-        '2. {"index": 1, "type": "dialogue", "speaker": "石头", "text": "大师请了。"}\n\n'
-        "原文：老太太一想到她的孙子被枪打死了，就在后炕上放开声哭了：\"我那苦命的安安啊！我那没吃没喝的安安啊！我那还没活人的安安啊！叹——哟哟哟哟哟……\"\n"
-        "应拆分为：\n"
-        '1. {"index": 0, "type": "narration", "speaker": "narrator", "text": "老太太一想到她的孙子被枪打死了，就在后炕上放开声哭了："}\n'
-        '2. {"index": 1, "type": "dialogue", "speaker": "老太太", "text": "我那苦命的安安啊！我那没吃没喝的安安啊！我那还没活人的安安啊！叹——哟哟哟哟哟……"}'
+        "石头笑着说：‘大师请了。’\n"
+        "输出：\n"
+        "旁白：石头笑着说：\n"
+        "石头：大师请了。"
     )
 
 
 def tts_enrichment_prompt() -> str:
     return (
-        "你是一个精通 OmniVoice TTS 高级合成的有声书剧本注音与情感音效导演。"
-        "你将接收一份已完成结构拆解的剧本数据，任务是注入情感与非语言信息，输出严格 JSON。\n\n"
-        "核心任务：\n"
-        "1) 情感注入：为每个 segment 选择最契合语境的 emotion。\n"
-        "2) 非语言信息：根据文本语义判断可用的 non_verbal 标签，只在语境明确时添加，严禁堆砌。\n"
-        "3) 发音校准：若出现明显多音字或易误读词，可在 metadata.pronunciation_hints 中记录拼音+声调数字建议。\n"
-        "4) 输出规范：严格按 JSON 输出，不要解释性文字。\n\n"
-        "OmniVoice 非语言标签参考：\n"
+        "你是严谨的 TTS Enrichment 模块（Step2）。你接收的是 Step1 已定稿的结构化 JSON，而不是原始小说。\n\n"
+        "核心任务：只补充 TTS 信息，不重建结构。\n"
+        "你只能补充：emotion、non_verbal、tts_overrides、必要注音。\n\n"
+        "硬性规则：\n"
+        "1. 禁止新增/删除/重排 segments。\n"
+        "2. 禁止修改任意 segment 的 index/type/speaker。\n"
+        "3. 禁止生成 id/index；由后端回填。\n"
+        "4. type 仅允许 narration/dialogue/direction（禁止 narrative）。\n"
+        "5. text 只允许做两类注入，不得改写原句语义：\n"
+        "   - non_verbal 标签插入（默认置于段首；语义明确时可放句中）；\n"
+        "   - Pinyin 注音（多音/易误读字，格式：汉字+大写拼音+声调数字，如“朝CHAO2”）。\n"
+        "5.1 若 narration 是引语引导行（如“王婆低声问道：”“西门庆叹道：”），"
+        "non_verbal 必须加到其后的 dialogue，禁止加在 narration 上。\n"
+        "6. non_verbal 数组必须与 text 中出现的标签一致。\n"
+        "7. tts_overrides 只允许键：speed,duration,denoise,num_step,guidance_scale。\n"
+        "8. metadata 只允许标量值（string/number/bool），不要嵌套对象。\n"
+        "9. 不确定时使用保守默认：emotion=neutral, non_verbal=[], tts_overrides={}\n\n"
+        "可用 emotion：neutral, cheerful, sad, angry, fearful, surprise, melancholy, tender, serious, playful, concern, excited\n\n"
+        "可用 non_verbal 标签：\n"
         "[laughter] [sigh] [dissatisfaction-hnn] [confirmation-en] "
         "[question-en] [question-ah] [question-oh] [question-ei] [question-yi] "
         "[surprise-ah] [surprise-oh] [surprise-wa] [surprise-yo]\n\n"
-        "请直接输出一个 JSON 对象（不要 ```json 标记，不要解释），格式如下：\n"
-        "{\n"
-        '  "title": "保留原值",\n'
-        '  "segments": [\n'
-        '    {"id": "seg-1", "index": 0, "type": "narration", "speaker": "narrator", "text": "原文片段", "emotion": "neutral", "non_verbal": [], "tts_overrides": {}},\n'
-        '    {"id": "seg-2", "index": 1, "type": "dialogue", "speaker": "角色名", "text": "原文对白", "emotion": "serious", "non_verbal": ["sigh"], "tts_overrides": {"speed": 1.0}}\n'
-        "  ],\n"
-        '  "character_descriptions": {"角色名": "角色描述，可整理优化"},\n'
-        '  "metadata": {"language": "zh", "pronunciation_hints": {"词语": "PIN1YIN1"}}\n'
-        "}\n\n"
-        "硬性规则：\n"
-        "1. 不允许新增、删除、重排 segments\n"
-        "2. 不允许修改任意 segment 的 id/index/type/speaker/text\n"
-        "3. 仅补充 emotion/non_verbal/tts_overrides 与必要 metadata\n"
-        "4. emotion 取值: neutral, cheerful, sad, angry, fearful, surprise, melancholy, tender, serious, playful, concern, excited\n"
-        "5. non_verbal 仅在情境明确时填写，可为空数组\n"
-        "6. tts_overrides 未明确需要时保持空对象 {}\n"
-        "7. 若无法确定具体标签，优先选择 neutral + 空 non_verbal，避免过拟合"
+        "输出要求：\n"
+        "1. 只输出一个纯 JSON 对象，不要 markdown 代码块，不要解释。\n"
+        "2. segments 每项最少包含：index,type,speaker,text,emotion,non_verbal,tts_overrides。\n"
+        "3. title 与字符描述可沿用输入并做轻微整理。\n\n"
+        "输入数据为：{{STEP1_JSON}}"
     )
 
 
