@@ -13,7 +13,7 @@ def should_log_stale_report(state) -> bool:
     return bool(getattr(config, "debug_stale_report", False))
 
 
-def write_silence_wav(path: Path, duration_ms: int = 1000, sample_rate: int = 22050) -> None:
+def write_silence_wav(path: Path, duration_ms: int = 1000, sample_rate: int = 24000) -> None:
     frames = max(1, int(sample_rate * (duration_ms / 1000)))
     with wave.open(str(path), "wb") as wav_file:
         wav_file.setnchannels(1)

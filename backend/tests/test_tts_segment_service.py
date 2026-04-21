@@ -38,6 +38,8 @@ class TtsSegmentServiceTest(unittest.IsolatedAsyncioTestCase):
             output_dir.mkdir(parents=True, exist_ok=True)
             cache_dir.mkdir(parents=True, exist_ok=True)
             temp_dir.mkdir(parents=True, exist_ok=True)
+            project_segments_dir.mkdir(parents=True, exist_ok=True)
+            project_segment_waveforms_dir.mkdir(parents=True, exist_ok=True)
 
             segment = Segment(id="seg-1", index=0, type="narration", speaker="narrator", text="hello")
             segment_path = temp_dir / "seg-1.wav"
@@ -92,6 +94,8 @@ class TtsSegmentServiceTest(unittest.IsolatedAsyncioTestCase):
             output_dir.mkdir(parents=True, exist_ok=True)
             cache_dir.mkdir(parents=True, exist_ok=True)
             temp_dir.mkdir(parents=True, exist_ok=True)
+            project_segments_dir.mkdir(parents=True, exist_ok=True)
+            project_segment_waveforms_dir.mkdir(parents=True, exist_ok=True)
 
             segment = Segment(id="seg-2", index=0, type="narration", speaker="narrator", text="reuse")
             project_asset_path = output_dir / "projects" / "p1" / "segments" / "existing.wav"

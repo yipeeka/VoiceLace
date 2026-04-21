@@ -5,27 +5,28 @@ import json
 import unittest
 
 from backend.engine.llm_engine import LLMEngine
+from backend.engine.llm_parser import extract_json_object, gemini_response_schema, should_attempt_repair
 
 
 class LlmJsonUtilsTest(unittest.TestCase):
     def test_extract_json_object_with_wrapper_text(self) -> None:
         text = 'prefix {"title":"x","segments":[]} suffix'
-        extracted = LLMEngine._extract_json_object(text)
+        extracted = extract_json_object(text)
         self.assertEqual(extracted, '{"title":"x","segments":[]}')
 
     def test_extract_json_object_truncated(self) -> None:
         text = '{"title":"x","segments":[{"speaker":"a","text":"incomplete"'
-        extracted = LLMEngine._extract_json_object(text)
+        extracted = extract_json_object(text)
         self.assertTrue(extracted.startswith('{"title":"x"'))
 
     def test_should_attempt_repair_false_for_large_payload(self) -> None:
         err = json.JSONDecodeError("Unterminated string", "{}", 1)
         content = "{" + ("x" * 25000)
-        self.assertFalse(LLMEngine._should_attempt_repair(content, err, {}))
+        self.assertFalse(should_attempt_repair(content, err, {}))
 
     def test_should_attempt_repair_false_when_disabled(self) -> None:
         err = json.JSONDecodeError("Unterminated string", "{}", 1)
-        self.assertFalse(LLMEngine._should_attempt_repair('{"a":', err, {"enable_json_repair": False}))
+        self.assertFalse(should_attempt_repair('{"a":', err, {"enable_json_repair": False}))
 
     def test_decode_json_payload_with_meta_extracted_strategy(self) -> None:
         engine = LLMEngine()
@@ -52,7 +53,7 @@ class LlmJsonUtilsTest(unittest.TestCase):
             )
 
     def test_gemini_schema_type_uppercase(self) -> None:
-        schema = LLMEngine._gemini_response_schema()
+        schema = gemini_response_schema()
         self.assertEqual(schema.get("type"), "OBJECT")
         self.assertEqual(schema.get("properties", {}).get("segments", {}).get("type"), "ARRAY")
 

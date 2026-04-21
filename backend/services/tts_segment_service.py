@@ -87,7 +87,9 @@ async def process_synthesis_segment(
             raise
 
     if rebuild_full and index < total - 1:
-        gap_frames = max(1, int(sample_rate * (gap_duration_ms / 1000)))
+        # Use the actual frame rate read from the WAV, not the caller-supplied sample_rate,
+        # to avoid mismatches when e.g. different backends produce different rates.
+        gap_frames = max(1, int(frame_rate * (gap_duration_ms / 1000)))
         combined_frames.extend(b"\x00\x00" * gap_frames)
 
     project_segment_path = project_segments_dir / f"{segment.id}.wav"
@@ -151,4 +153,5 @@ async def process_synthesis_segment(
         "generated_count_delta": generated,
         "cache_hit": cache_hit,
         "reused": reused,
+        "frame_rate": frame_rate,
     }

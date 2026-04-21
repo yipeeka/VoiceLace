@@ -38,12 +38,17 @@ SUPPORTED_ENGLISH_INSTRUCTS = {
 
 
 class TTSEngine:
+    # OmniVoice outputs 24 kHz mono PCM regardless of input.
+    # Exposed as a class-level constant so callers don't need to hard-code it.
+    SAMPLE_RATE: int = 24000
+
     def __init__(self) -> None:
         self.is_loaded = False
         self.model_path = "k2-fsa/OmniVoice"
         self.device = "cpu"
         self.backend_name = "mock"
         self.last_error = ""
+        self.sample_rate: int = TTSEngine.SAMPLE_RATE
         self._model: Any | None = None
         self._torch: Any | None = None
         self._audio_patch_applied = False
@@ -141,7 +146,7 @@ class TTSEngine:
                 with wave.open(str(output_path), "wb") as wav_file:
                     wav_file.setnchannels(1)
                     wav_file.setsampwidth(2)
-                    wav_file.setframerate(24000)
+                    wav_file.setframerate(self.sample_rate)
                     wav_file.writeframes(waveform)
                 return output_path
             except Exception as exc:
@@ -199,8 +204,8 @@ class TTSEngine:
         with wave.open(str(output_path), "wb") as wav_file:
             wav_file.setnchannels(1)
             wav_file.setsampwidth(2)
-            wav_file.setframerate(22050)
-            wav_file.writeframes(b"\x00\x00" * 22050)
+            wav_file.setframerate(self.sample_rate)
+            wav_file.writeframes(b"\x00\x00" * self.sample_rate)
 
     def _install_omnivoice_audio_patch(self, torch_module: Any) -> None:
         if self._audio_patch_applied:

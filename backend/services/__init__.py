@@ -57,6 +57,7 @@ from .tts_delivery_service import (
 )
 from .tts_scan_service import build_synthesis_scan_plan
 from .tts_segment_service import process_synthesis_segment
+from .tts_pipeline_service import run_synthesis_task
 from .tts_stale_service import build_stale_report, from_output_relpath, resolve_segment_asset_path, resolve_segment_peaks_path
 from .tts_task_service import hash_payload, public_task, segment_cache_key
 
@@ -116,6 +117,7 @@ __all__ = [
     "write_silence_wav",
     "build_synthesis_scan_plan",
     "process_synthesis_segment",
+    "run_synthesis_task",
     "hash_payload",
     "public_task",
     "segment_cache_key",

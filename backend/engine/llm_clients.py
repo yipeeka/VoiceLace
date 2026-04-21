@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any
-from urllib import error as urllib_error
 from urllib import parse as urllib_parse
-from urllib import request as urllib_request
+
+import httpx
 
 from backend.config import settings
 
@@ -115,7 +115,7 @@ async def run_gemini_parse(
         api_key=settings.gemini_api_key,
     )
 
-    def _call(include_schema: bool) -> tuple[str, str]:
+    async def _call(include_schema: bool) -> tuple[str, str]:
         generation_config: dict[str, Any] = {
             "responseMimeType": "application/json",
             "temperature": temperature,
@@ -132,48 +132,48 @@ async def run_gemini_parse(
             ],
             "generationConfig": generation_config,
         }
-        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        req = urllib_request.Request(
-            url,
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        import time
         retryable_codes = {429, 500, 503}
-        last_exc: Exception | None = None
-        for retry in range(4):
-            try:
-                with urllib_request.urlopen(req, timeout=90) as resp:
-                    raw = resp.read().decode("utf-8")
-                break
-            except urllib_error.HTTPError as exc:
-                body = exc.read().decode("utf-8", errors="ignore")
-                if include_schema and exc.code == 400:
+        timeout = httpx.Timeout(90.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            for retry in range(4):
+                try:
+                    response = await client.post(url, json=payload)
+                except httpx.RequestError as exc:
+                    if retry < 3:
+                        await asyncio.sleep((2**retry) * 2)
+                        continue
+                    raise RuntimeError(
+                        f"Gemini API request failed: {exc} "
+                        f"(model={_normalize_gemini_model_name(model)}, url={url})"
+                    ) from exc
+
+                body = response.text or ""
+                if response.is_success:
+                    try:
+                        parsed = response.json()
+                    except Exception as exc:
+                        raise RuntimeError(f"Gemini returned invalid JSON response: {body[:400]}") from exc
+                    break
+
+                if include_schema and response.status_code == 400:
                     _gemini_schema_unsupported_models.add(normalized_model)
                     logger.warning(
                         "Gemini responseSchema unsupported for model=%s, fallback to responseMimeType only and cache this decision",
                         normalized_model,
                     )
-                    return _call(include_schema=False)
-                if exc.code in retryable_codes and retry < 3:
-                    last_exc = RuntimeError(f"Gemini API error {exc.code}: {body}")
-                    wait = (2 ** retry) * 2
-                    time.sleep(wait)
-                    req = urllib_request.Request(
-                        url,
-                        data=data,
-                        headers={"Content-Type": "application/json"},
-                        method="POST",
-                    )
+                    return await _call(include_schema=False)
+
+                if response.status_code in retryable_codes and retry < 3:
+                    await asyncio.sleep((2**retry) * 2)
                     continue
+
                 raise RuntimeError(
-                    f"Gemini API error {exc.code}: {body or '<empty body>'} "
+                    f"Gemini API error {response.status_code}: {body or '<empty body>'} "
                     f"(model={_normalize_gemini_model_name(model)}, url={url})"
-                ) from exc
-        else:
-            raise last_exc or RuntimeError("Gemini API retries exhausted")
-        parsed = json.loads(raw)
+                )
+            else:
+                raise RuntimeError("Gemini API retries exhausted")
+
         candidates = parsed.get("candidates") or []
         if not candidates:
             raise RuntimeError("Gemini 返回空候选结果")
@@ -187,7 +187,7 @@ async def run_gemini_parse(
             raise RuntimeError("Gemini 返回内容为空")
         return out, finish_reason
 
-    out, _finish_reason = await asyncio.to_thread(_call, use_schema)
+    out, _finish_reason = await _call(use_schema)
     return out
 
 
@@ -217,27 +217,44 @@ async def repair_json_via_gemini(
             "temperature": 0.0,
         },
     }
-    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    retryable_codes = {429, 500, 503}
+    timeout = httpx.Timeout(90.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        for retry in range(4):
+            try:
+                response = await client.post(url, json=payload)
+            except httpx.RequestError as exc:
+                if retry < 3:
+                    await asyncio.sleep((2**retry) * 2)
+                    continue
+                raise RuntimeError(f"Gemini JSON repair request failed: {exc}") from exc
 
-    def _call() -> str:
-        req = urllib_request.Request(
-            url,
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib_request.urlopen(req, timeout=90) as resp:
-            raw = resp.read().decode("utf-8")
-        parsed = json.loads(raw)
-        candidates = parsed.get("candidates") or []
-        if not candidates:
-            raise RuntimeError("Gemini JSON 修复返回空候选结果")
-        content = candidates[0].get("content") or {}
-        parts = content.get("parts") or []
-        text_parts = [part.get("text", "") for part in parts if isinstance(part, dict)]
-        out = "".join(text_parts).strip()
-        if not out:
-            raise RuntimeError("Gemini JSON 修复返回内容为空")
-        return out
+            body = response.text or ""
+            if response.is_success:
+                try:
+                    parsed = response.json()
+                except Exception as exc:
+                    raise RuntimeError(f"Gemini JSON 修复返回非法响应: {body[:400]}") from exc
+                break
 
-    return await asyncio.to_thread(_call)
+            if response.status_code in retryable_codes and retry < 3:
+                await asyncio.sleep((2**retry) * 2)
+                continue
+
+            raise RuntimeError(
+                f"Gemini JSON 修复失败 {response.status_code}: {body or '<empty body>'} "
+                f"(model={_normalize_gemini_model_name(model)}, url={url})"
+            )
+        else:
+            raise RuntimeError("Gemini JSON repair retries exhausted")
+
+    candidates = parsed.get("candidates") or []
+    if not candidates:
+        raise RuntimeError("Gemini JSON 修复返回空候选结果")
+    content = candidates[0].get("content") or {}
+    parts = content.get("parts") or []
+    text_parts = [part.get("text", "") for part in parts if isinstance(part, dict)]
+    out = "".join(text_parts).strip()
+    if not out:
+        raise RuntimeError("Gemini JSON 修复返回内容为空")
+    return out
