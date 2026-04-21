@@ -1338,6 +1338,13 @@ select.textInput option {
   flex-wrap: wrap;
 }
 
+.projectToolbarRenameRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .projectToolbarNameInput {
   flex: 1 1 180px;
   min-width: 0;

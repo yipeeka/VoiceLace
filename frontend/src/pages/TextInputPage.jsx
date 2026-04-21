@@ -32,6 +32,7 @@ const PARSE_MODE_OPTIONS = [
 
 export default function TextInputPage({ onNavigate }) {
   const [projectName, setProjectName] = useState("");
+  const [renameProjectName, setRenameProjectName] = useState("");
   const [promptOpen, setPromptOpen] = useState(false);
   const [prompt, setPrompt] = useState("");
   const streamRef = useRef(null);
@@ -45,6 +46,7 @@ export default function TextInputPage({ onNavigate }) {
     projects,
     projectSources,
     createProject,
+    renameProject,
     selectProject,
     refreshCurrentProject,
     loadProjects,
@@ -87,6 +89,10 @@ export default function TextInputPage({ onNavigate }) {
     }
   }, [llmStreamOutput]);
 
+  useEffect(() => {
+    setRenameProjectName(currentProject?.name || "");
+  }, [currentProject?.id, currentProject?.name]);
+
   const selectProjectAndHydrate = useCallback(async (projectId, options = {}) => {
     if (!projectId) {
       return null;
@@ -119,6 +125,36 @@ export default function TextInputPage({ onNavigate }) {
     if (!result) return; // canceled
     await refreshCurrentProject(project.id);
     onNavigate?.("script");
+  }
+
+  async function handleRenameProject() {
+    if (!currentProject?.id) {
+      return;
+    }
+    const nextName = renameProjectName.trim();
+    if (!nextName) {
+      useUiStore.getState().pushToast({
+        title: "项目名称不能为空",
+        tone: "warning",
+      });
+      return;
+    }
+    if (nextName === currentProject.name) {
+      useUiStore.getState().pushToast({
+        title: "项目名称未变化",
+        tone: "default",
+      });
+      return;
+    }
+    try {
+      const updated = await renameProject(currentProject.id, nextName);
+      setRenameProjectName(updated.name || nextName);
+    } catch (error) {
+      useUiStore.getState().pushToast({
+        title: `项目改名失败：${error?.message || "未知错误"}`,
+        tone: "error",
+      });
+    }
   }
 
   async function handleDeleteProject() {
@@ -436,13 +472,17 @@ export default function TextInputPage({ onNavigate }) {
           currentProjectMeta={currentProjectMeta}
           projectOptions={projectOptions}
           projectName={projectName}
+          renameProjectName={renameProjectName}
           isParsing={isParsing}
           archiveInputRef={archiveInputRef}
           projectFileInputRef={projectFileInputRef}
           onProjectNameChange={setProjectName}
           onProjectNameKeyDown={(event) => event.key === "Enter" && handleCreateProject()}
+          onRenameProjectNameChange={setRenameProjectName}
+          onRenameProjectNameKeyDown={(event) => event.key === "Enter" && handleRenameProject()}
           onSelectProject={(projectId) => selectProjectAndHydrate(projectId)}
           onCreateProject={handleCreateProject}
+          onRenameProject={handleRenameProject}
           onOpenProjectFileClick={handleOpenProjectFileClick}
           onProjectFileInputChange={handleOpenProjectFile}
           onImportArchive={handleImportArchive}

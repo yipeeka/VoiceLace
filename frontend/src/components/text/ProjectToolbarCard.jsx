@@ -9,13 +9,17 @@ export default function ProjectToolbarCard({
   currentProjectMeta,
   projectOptions,
   projectName,
+  renameProjectName,
   isParsing,
   archiveInputRef,
   projectFileInputRef,
   onProjectNameChange,
   onProjectNameKeyDown,
+  onRenameProjectNameChange,
+  onRenameProjectNameKeyDown,
   onSelectProject,
   onCreateProject,
+  onRenameProject,
   onOpenProjectFileClick,
   onProjectFileInputChange,
   onImportArchive,
@@ -52,6 +56,23 @@ export default function ProjectToolbarCard({
           />
           <Button variant="secondary" onClick={onCreateProject}>
             新建
+          </Button>
+        </div>
+        <div className="projectToolbarRenameRow">
+          <input
+            className="textInput projectToolbarNameInput"
+            value={renameProjectName}
+            onChange={(event) => onRenameProjectNameChange(event.target.value)}
+            placeholder="项目新名称"
+            onKeyDown={onRenameProjectNameKeyDown}
+            disabled={!currentProject || isParsing}
+          />
+          <Button
+            variant="secondary"
+            onClick={onRenameProject}
+            disabled={!currentProject || isParsing}
+          >
+            改名
           </Button>
         </div>
         <div className="projectToolbarActionsPrimary">

@@ -228,3 +228,76 @@ test("importProjectFile updates current project and keeps unique summary by id",
     );
   });
 });
+
+test("renameProject updates current project and summary list", async () => {
+  resetProjectStore();
+  useProjectStore.setState({
+    currentProject: {
+      id: "p-rename",
+      name: "旧名称",
+      status: "draft",
+      updated_at: "2026-04-18T02:00:00+00:00",
+      script: { title: "", source_text: "", segments: [], characters: [], metadata: {} },
+      voice_assignments: {},
+      synthesis_config: {},
+      audio_assets: {
+        latest_task_id: null,
+        full_wav_relpath: null,
+        full_mp3_relpath: null,
+        subtitle_srt_relpath: null,
+        subtitle_lrc_relpath: null,
+        segments: {},
+        full_peaks_relpath: null,
+        full_peaks_version: 1,
+        full_peaks_levels: [],
+        archive_schema_version: 3,
+      },
+    },
+    projects: [
+      {
+        id: "p-rename",
+        name: "旧名称",
+        status: "draft",
+        updated_at: "2026-04-18T02:00:00+00:00",
+        origin_kind: "local",
+      },
+    ],
+    lastOpenedProjectId: "p-rename",
+  });
+
+  await withFetchQueue(
+    [
+      {
+        match: "/projects/p-rename",
+        response: jsonResponse({
+          id: "p-rename",
+          name: "新名称",
+          status: "draft",
+          updated_at: "2026-04-18T03:00:00+00:00",
+          script: { title: "", source_text: "", segments: [], characters: [], metadata: {} },
+          voice_assignments: {},
+          synthesis_config: {},
+          audio_assets: {
+            latest_task_id: null,
+            full_wav_relpath: null,
+            full_mp3_relpath: null,
+            subtitle_srt_relpath: null,
+            subtitle_lrc_relpath: null,
+            segments: {},
+            full_peaks_relpath: null,
+            full_peaks_version: 1,
+            full_peaks_levels: [],
+            archive_schema_version: 3,
+          },
+        }),
+      },
+    ],
+    async () => {
+      const updated = await useProjectStore.getState().renameProject("p-rename", "新名称", { suppressToast: true });
+      assert.equal(updated.name, "新名称");
+      const state = useProjectStore.getState();
+      assert.equal(state.currentProject?.name, "新名称");
+      assert.equal(state.projects[0]?.name, "新名称");
+    },
+  );
+});

@@ -129,6 +129,59 @@ export const useProjectStore = create((set, get) => ({
     useUiStore.getState().pushToast({ title: `已创建项目：${project.name}`, tone: "success" });
     return project;
   },
+  renameProject: async (projectId, nextName, options = {}) => {
+    const trimmedName = String(nextName || "").trim();
+    if (!projectId) {
+      throw new Error("缺少项目 ID");
+    }
+    if (!trimmedName) {
+      throw new Error("项目名称不能为空");
+    }
+
+    const state = get();
+    let baseProject = state.currentProject?.id === projectId ? state.currentProject : null;
+    if (!baseProject?.script || !baseProject?.voice_assignments || !baseProject?.audio_assets) {
+      baseProject = await api.get(`/projects/${projectId}`);
+    }
+
+    const updatedProject = await api.put(`/projects/${projectId}`, {
+      ...baseProject,
+      name: trimmedName,
+    });
+
+    set((currentState) => {
+      const summary = toProjectSummary(updatedProject);
+      const projects = sortProjectSummaries(
+        upsertProjectSummary(currentState.projects, summary),
+        currentState.lastOpenedProjectId,
+      );
+      const source = deriveProjectSourceFromProject(updatedProject);
+      const nextSources = source
+        ? { ...(currentState.projectSources || {}), [updatedProject.id]: source }
+        : currentState.projectSources;
+      if (source) {
+        safeWriteProjectSources(nextSources);
+      }
+      const isCurrent = currentState.currentProject?.id === updatedProject.id;
+      const bindingState = isCurrent
+        ? getCurrentBindingState(currentState, updatedProject)
+        : {};
+      return {
+        currentProject: isCurrent ? updatedProject : currentState.currentProject,
+        projects,
+        projectSources: nextSources,
+        ...bindingState,
+      };
+    });
+
+    if (!options?.suppressToast) {
+      useUiStore.getState().pushToast({
+        title: `项目已改名：${trimmedName}`,
+        tone: "success",
+      });
+    }
+    return updatedProject;
+  },
   selectProject: async (projectId, options = {}) => {
     const project = await api.get(`/projects/${projectId}`);
     safeWriteLastOpenedProjectId(project.id);
