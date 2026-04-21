@@ -687,6 +687,79 @@ pre, code {
   color: var(--accent-primary);
 }
 
+.selectItemBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.selectItemMeta {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.dropdownMenuTrigger {
+  justify-content: space-between;
+}
+
+.dropdownMenuContent {
+  min-width: 220px;
+  background: color-mix(in srgb, var(--bg-surface) 92%, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 8px;
+  z-index: 120;
+  animation: scaleIn var(--duration-normal) var(--ease-out) both;
+}
+
+.dropdownMenuList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dropdownMenuItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background var(--duration-fast) ease, color var(--duration-fast) ease;
+  text-align: left;
+}
+
+.dropdownMenuItem:hover:not(:disabled) {
+  background: var(--bg-elevated);
+}
+
+.dropdownMenuItem.danger {
+  color: color-mix(in srgb, var(--danger) 92%, white 8%);
+}
+
+.dropdownMenuItem.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
+.dropdownMenuItem:disabled,
+.dropdownMenuItem.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.dropdownMenuSeparator {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 4px 2px;
+}
+
 /* Native select fallback (Windows dropdowns may force white menu background) */
 select.textInput {
   color-scheme: dark;
@@ -1192,6 +1265,117 @@ select.textInput option {
   display: flex;
   flex-direction: column;
   gap: 3px;
+}
+
+.projectToolbar {
+  display: grid;
+  grid-template-columns: minmax(280px, 1.2fr) minmax(360px, 1.4fr) minmax(140px, 0.5fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.projectToolbarGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
+}
+
+.projectToolbarGroupTitle {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.projectToolbarGroupIdentity {
+  min-width: 0;
+}
+
+.projectToolbarSelect {
+  min-width: 0;
+}
+
+.projectToolbarMetaRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.projectToolbarBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--accent-primary-dim) 70%, transparent);
+  color: var(--accent-primary);
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.projectToolbarMetaText {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.projectToolbarCreateRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.projectToolbarNameInput {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.projectToolbarActionsPrimary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.projectToolbarGroupMore {
+  justify-content: space-between;
+}
+
+.projectToolbarMoreButton {
+  width: 100%;
+}
+
+@media (max-width: 1180px) {
+  .projectToolbar {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .projectToolbarGroupMore {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 760px) {
+  .projectToolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .projectToolbarGroupMore {
+    grid-column: auto;
+  }
 }
 
 /* ─────────────────────────────────────────────────────────────

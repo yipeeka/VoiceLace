@@ -184,7 +184,7 @@ export const useProjectStore = create((set, get) => ({
     set({ projectEvents: events });
     return events;
   },
-  deleteProject: async (projectId) => {
+  deleteProject: async (projectId, options = {}) => {
     await api.delete(`/projects/${projectId}`);
     set((state) => {
       const projects = (state.projects || []).filter((item) => item.id !== projectId);
@@ -213,7 +213,9 @@ export const useProjectStore = create((set, get) => ({
         ...bindingState,
       };
     });
-    useUiStore.getState().pushToast({ title: "项目已删除", tone: "success" });
+    if (!options?.silent) {
+      useUiStore.getState().pushToast({ title: "项目已删除", tone: "success" });
+    }
   },
   importArchive: async (file) => {
     const result = await api.uploadFile("/projects/import/archive", file);

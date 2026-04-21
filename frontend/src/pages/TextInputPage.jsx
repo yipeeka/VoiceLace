@@ -1,15 +1,24 @@
-import { BookOpen, ChevronDown, ChevronUp, FolderOpen, RefreshCw, Square, Trash2, Upload } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { BookOpen, ChevronDown, ChevronUp, RefreshCw, Square, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import EmptyState from "../components/shared/EmptyState";
 import FileDropZone from "../components/shared/FileDropZone";
 import GlassCard from "../components/shared/GlassCard";
+import ProjectToolbarCard from "../components/text/ProjectToolbarCard";
 import Button from "../components/ui/Button";
 import Select from "../components/ui/Select";
 import { useProjectStore } from "../stores/useProjectStore";
 import { useScriptStore } from "../stores/useScriptStore";
 import { useUiStore } from "../stores/useUiStore";
+import { api } from "../utils/api";
 import { buildProjectFilePayload, openProjectFileWithPicker, saveProjectFile } from "../utils/projectFile";
+import {
+  buildProjectOption,
+  getProjectSourceTag,
+  getSameNameSiblingProjects,
+  shortProjectId,
+  toProjectFileDisplayName,
+} from "../utils/projectToolbar";
 
 const DEMO_TEXT = `旁白：暮色渐浓，庭院里只剩下风吹竹叶的细响。
 林黛玉：宝哥哥，你今日怎么来得这样晚？
@@ -20,15 +29,6 @@ const PARSE_MODE_OPTIONS = [
   { value: "two_step_pipeline", label: "两步解析（推荐）" },
   { value: "legacy_single_pass", label: "经典单步解析" },
 ];
-
-function toProjectFileDisplayName(fileName) {
-  const raw = String(fileName || "").trim();
-  if (!raw) return "";
-  if (/\.bvtproject\.json$/i.test(raw)) {
-    return raw.replace(/\.bvtproject\.json$/i, "");
-  }
-  return raw.replace(/\.json$/i, "");
-}
 
 export default function TextInputPage({ onNavigate }) {
   const [projectName, setProjectName] = useState("");
@@ -41,11 +41,13 @@ export default function TextInputPage({ onNavigate }) {
   const {
     currentProject,
     currentProjectFileHandle,
+    currentProjectFileName,
     projects,
     projectSources,
     createProject,
     selectProject,
     refreshCurrentProject,
+    loadProjects,
     deleteProject,
     importArchive,
     importProjectFile,
@@ -85,6 +87,20 @@ export default function TextInputPage({ onNavigate }) {
     }
   }, [llmStreamOutput]);
 
+  const selectProjectAndHydrate = useCallback(async (projectId, options = {}) => {
+    if (!projectId) {
+      return null;
+    }
+    const project = await selectProject(projectId, options);
+    if (!project) {
+      return null;
+    }
+    setScript(project.script);
+    const loadedScript = await loadProjectScript(project.id);
+    setSourceText(loadedScript.source_text || "");
+    return project;
+  }, [loadProjectScript, selectProject, setScript, setSourceText]);
+
   async function handleCreateProject() {
     const name = projectName.trim() || `项目 ${new Date().toLocaleTimeString("zh-CN")}`;
     await createProject(name);
@@ -113,19 +129,109 @@ export default function TextInputPage({ onNavigate }) {
     if (!ok) {
       return;
     }
-    const deletedId = currentProject.id;
-    await deleteProject(deletedId);
+    try {
+      await deleteProject(currentProject.id, { silent: true });
+      useUiStore.getState().pushToast({
+        title: "项目已删除",
+        tone: "success",
+      });
+    } catch {
+      useUiStore.getState().pushToast({
+        title: "项目删除失败，请重试",
+        tone: "warning",
+      });
+      return;
+    }
+
     const nextProjects = useProjectStore.getState().projects || [];
-    const next = nextProjects.find((p) => p.id !== deletedId);
+    const next = nextProjects[0];
     if (next) {
-      const project = await selectProject(next.id);
-      setScript(project.script);
-      const s = await loadProjectScript(project.id);
-      setSourceText(s.source_text || "");
+      await selectProjectAndHydrate(next.id);
       return;
     }
     setScript({ title: "", source_text: "", segments: [], characters: [], metadata: {} });
     setSourceText("");
+  }
+
+  async function handleDeleteSameNameDuplicates() {
+    if (!currentProject?.id) {
+      return;
+    }
+    const siblingProjects = getSameNameSiblingProjects(projects, currentProject);
+    if (!siblingProjects.length) {
+      return;
+    }
+    const ok = window.confirm(
+      `检测到 ${siblingProjects.length} 个与「${currentProject.name}」同名的副本。\n确认删除这些同名副本并保留当前项目？`
+    );
+    if (!ok) {
+      return;
+    }
+
+    let deletedCount = 0;
+    const failedIds = [];
+    for (const project of siblingProjects) {
+      try {
+        await deleteProject(project.id, { silent: true });
+        deletedCount += 1;
+      } catch {
+        failedIds.push(project.id);
+      }
+    }
+
+    if (deletedCount > 0) {
+      useUiStore.getState().pushToast({
+        title: `已删除 ${deletedCount} 个同名副本`,
+        tone: "success",
+      });
+    }
+    if (failedIds.length) {
+      useUiStore.getState().pushToast({
+        title: `有 ${failedIds.length} 个同名副本删除失败，请重试`,
+        tone: "warning",
+      });
+    }
+  }
+
+  async function handleCleanupDuplicateProjects() {
+    const ok = window.confirm(
+      "执行“清理重复项目”将合并 project-file 阴影副本并去重重复 project-file 项目。是否继续？"
+    );
+    if (!ok) {
+      return;
+    }
+
+    try {
+      const mergeResult = await api.post("/projects/maintenance/merge-project-file-shadows", {
+        dry_run: false,
+        delete_orphan_event_logs: true,
+      });
+      const dedupeResult = await api.post("/projects/maintenance/deduplicate-project-files", {
+        dry_run: false,
+        delete_orphan_event_logs: true,
+      });
+
+      const loaded = await loadProjects();
+      const stillExists = loaded.some((item) => item.id === currentProject?.id);
+      if (!stillExists) {
+        if (loaded.length) {
+          await selectProjectAndHydrate(loaded[0].id, { suppressToast: true });
+        } else {
+          setScript({ title: "", source_text: "", segments: [], characters: [], metadata: {} });
+          setSourceText("");
+        }
+      }
+
+      useUiStore.getState().pushToast({
+        title: `清理完成：合并 ${mergeResult.remove_count || 0} 个阴影副本，去重 ${dedupeResult.remove_count || 0} 个重复项目`,
+        tone: "success",
+      });
+    } catch (error) {
+      useUiStore.getState().pushToast({
+        title: `清理重复项目失败：${error?.message || "未知错误"}`,
+        tone: "error",
+      });
+    }
   }
 
   function handleFile(file) {
@@ -238,23 +344,78 @@ export default function TextInputPage({ onNavigate }) {
   const wordCount = sourceText.length;
   const estimatedSegments = sourceText.split(/\n/).filter((l) => l.trim()).length;
 
-  const sortedProjects = [...projects].sort((a, b) => Date.parse(b.updated_at || "") - Date.parse(a.updated_at || ""));
-  let visibleProjects = sortedProjects.slice(0, 20);
-  if (currentProject?.id && !visibleProjects.some((item) => item.id === currentProject.id)) {
-    const currentSummary = sortedProjects.find((item) => item.id === currentProject.id);
-    if (currentSummary) {
-      visibleProjects = [currentSummary, ...visibleProjects.slice(0, 19)];
+  const sortedProjects = useMemo(
+    () => [...projects].sort((a, b) => Date.parse(b.updated_at || "") - Date.parse(a.updated_at || "")),
+    [projects],
+  );
+  const visibleProjects = useMemo(() => {
+    let nextVisible = sortedProjects.slice(0, 20);
+    if (currentProject?.id && !nextVisible.some((item) => item.id === currentProject.id)) {
+      const currentSummary = sortedProjects.find((item) => item.id === currentProject.id);
+      if (currentSummary) {
+        nextVisible = [currentSummary, ...nextVisible.slice(0, 19)];
+      }
     }
-  }
-  const projectOptions = visibleProjects.map((p) => {
-    const source = projectSources?.[p.id];
-    const icon = source === "archive_import" ? "📦 " : "";
-    const fileSuffix =
-      source === "project_file" && p.project_file_name
-        ? ` - ${toProjectFileDisplayName(p.project_file_name)}`
-        : "";
-    return { value: p.id, label: `${icon}${p.name}${fileSuffix}` };
-  });
+    return nextVisible;
+  }, [currentProject?.id, sortedProjects]);
+  const projectOptions = useMemo(
+    () => visibleProjects.map((project) => buildProjectOption(project, projectSources?.[project.id])),
+    [projectSources, visibleProjects],
+  );
+  const sameNameSiblingProjects = useMemo(
+    () => getSameNameSiblingProjects(projects, currentProject),
+    [projects, currentProject],
+  );
+  const currentProjectMeta = useMemo(() => {
+    if (!currentProject?.id) {
+      return { sourceTag: "未选择", detail: "未选择项目" };
+    }
+    const sourceTag = getProjectSourceTag(projectSources?.[currentProject.id]);
+    const detailParts = [];
+    const fileName = toProjectFileDisplayName(currentProjectFileName || currentProject.project_file_name);
+    if (fileName) {
+      detailParts.push(fileName);
+    }
+    detailParts.push(`#${shortProjectId(currentProject.id)}`);
+    return {
+      sourceTag,
+      detail: detailParts.join(" · "),
+    };
+  }, [currentProject, currentProjectFileName, projectSources]);
+  const moreMenuItems = useMemo(() => [
+    {
+      label: "删除当前项目",
+      icon: Trash2,
+      danger: true,
+      disabled: !currentProject?.id,
+      onSelect: handleDeleteProject,
+    },
+    { type: "separator" },
+    {
+      label: sameNameSiblingProjects.length
+        ? `删除同名副本（${sameNameSiblingProjects.length}）`
+        : "删除同名副本",
+      icon: Trash2,
+      danger: true,
+      disabled: !currentProject?.id || sameNameSiblingProjects.length < 1,
+      title: sameNameSiblingProjects.length
+        ? `删除 ${sameNameSiblingProjects.length} 个与当前项目同名的副本`
+        : "当前没有可删除的同名副本",
+      onSelect: handleDeleteSameNameDuplicates,
+    },
+    {
+      label: "清理重复项目",
+      disabled: isParsing,
+      onSelect: handleCleanupDuplicateProjects,
+    },
+  ], [
+    currentProject?.id,
+    handleCleanupDuplicateProjects,
+    handleDeleteProject,
+    handleDeleteSameNameDuplicates,
+    isParsing,
+    sameNameSiblingProjects.length,
+  ]);
 
   return (
     <div className="pageGrid twoCols">
@@ -270,56 +431,23 @@ export default function TextInputPage({ onNavigate }) {
           </div>
         </div>
 
-        {/* Project bar */}
-        <div className="controlRow">
-          <div style={{ flex: 1 }}>
-            <Select
-              value={currentProject?.id ?? ""}
-              onValueChange={async (id) => {
-                const project = await selectProject(id);
-                setScript(project.script);
-                const s = await loadProjectScript(project.id);
-                setSourceText(s.source_text || "");
-              }}
-              options={projectOptions}
-              placeholder="选择项目..."
-            />
-          </div>
-          <input
-            className="textInput"
-            style={{ maxWidth: 160 }}
-            value={projectName}
-            onChange={(e) => setProjectName(e.target.value)}
-            placeholder="新项目名称"
-            onKeyDown={(e) => e.key === "Enter" && handleCreateProject()}
-          />
-          <Button variant="secondary" onClick={handleCreateProject}>
-            新建
-          </Button>
-          <Button variant="danger" icon={Trash2} disabled={!currentProject} onClick={handleDeleteProject}>
-            删除
-          </Button>
-          <Button variant="secondary" icon={Upload} onClick={() => archiveInputRef.current?.click()} disabled={isParsing}>
-            导入工程 ZIP
-          </Button>
-          <Button variant="secondary" icon={FolderOpen} onClick={handleOpenProjectFileClick} disabled={isParsing}>
-            打开项目文件
-          </Button>
-          <input
-            ref={archiveInputRef}
-            type="file"
-            accept=".zip,application/zip"
-            style={{ display: "none" }}
-            onChange={handleImportArchive}
-          />
-          <input
-            ref={projectFileInputRef}
-            type="file"
-            accept=".bvtproject.json,.json,application/json"
-            style={{ display: "none" }}
-            onChange={handleOpenProjectFile}
-          />
-        </div>
+        <ProjectToolbarCard
+          currentProject={currentProject}
+          currentProjectMeta={currentProjectMeta}
+          projectOptions={projectOptions}
+          projectName={projectName}
+          isParsing={isParsing}
+          archiveInputRef={archiveInputRef}
+          projectFileInputRef={projectFileInputRef}
+          onProjectNameChange={setProjectName}
+          onProjectNameKeyDown={(event) => event.key === "Enter" && handleCreateProject()}
+          onSelectProject={(projectId) => selectProjectAndHydrate(projectId)}
+          onCreateProject={handleCreateProject}
+          onOpenProjectFileClick={handleOpenProjectFileClick}
+          onProjectFileInputChange={handleOpenProjectFile}
+          onImportArchive={handleImportArchive}
+          moreMenuItems={moreMenuItems}
+        />
         {importWarnings?.length ? (
           <div className="statusBadge warning" style={{ marginBottom: 10, display: "block", textAlign: "left" }}>
             {importWarnings.map((warning, idx) => (

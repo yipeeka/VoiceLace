@@ -24,6 +24,7 @@ export default function Select({
 }) {
   // Only show a value in Radix when it isn't the "none" sentinel
   const radixValue = value === "" || value == null ? undefined : value;
+  const selectedOption = options.find((option) => option.value === value);
 
   return (
     <RadixSelect.Root
@@ -31,7 +32,7 @@ export default function Select({
       onValueChange={(v) => onValueChange?.(fromRadix(v))}
       disabled={disabled}
     >
-      <RadixSelect.Trigger className={cn("selectTrigger", className)}>
+      <RadixSelect.Trigger className={cn("selectTrigger", className)} title={selectedOption?.title || selectedOption?.label || placeholder}>
         <RadixSelect.Value placeholder={placeholder} />
         <RadixSelect.Icon>
           <ChevronDown size={13} style={{ color: "var(--text-muted)" }} />
@@ -44,8 +45,11 @@ export default function Select({
             {options.map((opt) => {
               const itemValue = toRadix(opt.value);
               return (
-                <RadixSelect.Item key={itemValue} value={itemValue} className="selectItem">
-                  <RadixSelect.ItemText>{opt.label}</RadixSelect.ItemText>
+                <RadixSelect.Item key={itemValue} value={itemValue} className="selectItem" textValue={opt.label}>
+                  <div className="selectItemBody">
+                    <RadixSelect.ItemText>{opt.label}</RadixSelect.ItemText>
+                    {opt.meta ? <span className="selectItemMeta">{opt.meta}</span> : null}
+                  </div>
                   <RadixSelect.ItemIndicator style={{ marginLeft: "auto" }}>
                     <Check size={12} />
                   </RadixSelect.ItemIndicator>
