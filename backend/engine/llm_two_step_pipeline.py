@@ -94,6 +94,37 @@ _ATTR_SPEAKER_RE = re.compile(
     r"(?P<verb>低声问道|高声喊道|哽咽道|迎出来道|出来道|忙道|劝道|问道|叹道|笑道|说道|喊道|叫道|哭道|应道|答道|道|问|说|喊|叫|哭|应|答)"
     r"[，,。；;：:]?$"
 )
+_SOURCE_QUOTE_RE = re.compile(r"“([^”]+)”")
+_SOURCE_SPEECH_MARKERS = [
+    "低声问道",
+    "高声喊道",
+    "哽咽道",
+    "迎出来道",
+    "出来道",
+    "忙道",
+    "劝道",
+    "问道",
+    "叹道",
+    "笑道",
+    "说道",
+    "喊道",
+    "叫道",
+    "哭道",
+    "应道",
+    "答道",
+    "说",
+    "道",
+    "问",
+    "喊",
+    "叫",
+    "答",
+    "应",
+    "对他说",
+    "对她说",
+    "对他们说",
+    "对她们说",
+    "对儿子说道",
+]
 
 
 def _resolve_step2_batch_size(
@@ -668,6 +699,193 @@ def _is_dialogue_leadin_narration(text: str) -> bool:
     return bool(_DIALOGUE_LEADIN_RE.search(value))
 
 
+def _extract_source_dialogue_speaker(before_text: str, after_text: str) -> str:
+    before = (before_text or "").strip()
+    after = (after_text or "").strip()
+
+    before_candidate = before.rstrip("，,：:。！？!?；; ")
+    split_leadin = _split_dialogue_leadin_speaker(before_candidate)
+    if split_leadin:
+        leadin_base, _suffix = split_leadin
+        if "有人" in leadin_base:
+            return "有人"
+        return _extract_speaker_from_leadin_base(leadin_base)
+
+    extracted_before = _extract_speaker_from_attribution_tail(before_candidate)
+    if extracted_before:
+        return extracted_before
+
+    after_candidate = after.split("“", 1)[0].strip().lstrip("，,")
+    split_after = _split_dialogue_leadin_speaker(after_candidate.rstrip("：:"))
+    if split_after:
+        leadin_base, _suffix = split_after
+        return _extract_speaker_from_leadin_base(leadin_base)
+
+    extracted_after = _extract_speaker_from_attribution_tail(after_candidate)
+    if extracted_after:
+        return extracted_after
+
+    return "有人"
+
+
+def _is_source_direct_speech_quote(quoted_text: str, before_text: str, after_text: str) -> bool:
+    content = (quoted_text or "").strip()
+    if not content:
+        return False
+
+    before = (before_text or "").strip()
+    after = (after_text or "").strip()
+    tail = before[-24:]
+    head = after[:32]
+    has_marker = any(marker in tail for marker in _SOURCE_SPEECH_MARKERS) or any(
+        marker in head for marker in _SOURCE_SPEECH_MARKERS
+    )
+    has_dialogue_punct = any(char in content for char in "，。？！；：…")
+    short_term_like = len(content) <= 8 and not has_dialogue_punct and not has_marker
+
+    if not before and not after:
+        return True
+    if short_term_like:
+        return False
+    if has_marker:
+        return True
+    if has_dialogue_punct and len(content) >= 4:
+        return True
+    return False
+
+
+def _build_source_corrected_segments(source_text: str) -> list[StructuredSegmentDraft]:
+    segments: list[StructuredSegmentDraft] = []
+    trailing_punct_chars = "，。？！；：、…"
+    for raw_line in (source_text or "").splitlines():
+        line = (raw_line or "").strip().lstrip("\u3000")
+        if not line:
+            continue
+        if "“" not in line or "”" not in line:
+            segments.append(
+                StructuredSegmentDraft(
+                    id=str(uuid4()),
+                    index=len(segments),
+                    type="narration",
+                    speaker="narrator",
+                    text=line,
+                )
+            )
+            continue
+
+        cursor = 0
+        narration_buffer = ""
+        for match in _SOURCE_QUOTE_RE.finditer(line):
+            start, end = match.span()
+            quoted_text = (match.group(1) or "").strip()
+            before = line[cursor:start]
+            after_cursor = end
+            trailing_punct = ""
+            while after_cursor < len(line) and line[after_cursor] in trailing_punct_chars:
+                trailing_punct += line[after_cursor]
+                after_cursor += 1
+            after = line[after_cursor:]
+            context_before = f"{narration_buffer}{before}"
+            if _is_source_direct_speech_quote(quoted_text, context_before, after):
+                if context_before.strip():
+                    segments.append(
+                        StructuredSegmentDraft(
+                            id=str(uuid4()),
+                            index=len(segments),
+                            type="narration",
+                            speaker="narrator",
+                            text=context_before.strip(),
+                        )
+                    )
+                dialogue_text = f"{quoted_text}{trailing_punct}".strip()
+                if dialogue_text:
+                    dialogue_speaker = _extract_source_dialogue_speaker(context_before, after)
+                    segments.append(
+                        StructuredSegmentDraft(
+                            id=str(uuid4()),
+                            index=len(segments),
+                            type="dialogue",
+                            speaker=dialogue_speaker,
+                            text=dialogue_text,
+                        )
+                    )
+                narration_buffer = ""
+            else:
+                narration_buffer = f"{narration_buffer}{before}“{quoted_text}”{trailing_punct}"
+            cursor = after_cursor
+
+        narration_buffer = f"{narration_buffer}{line[cursor:]}"
+        if narration_buffer.strip():
+            segments.append(
+                StructuredSegmentDraft(
+                    id=str(uuid4()),
+                    index=len(segments),
+                    type="narration",
+                    speaker="narrator",
+                    text=narration_buffer.strip(),
+                )
+            )
+    return segments
+
+
+def _build_source_corrected_draft(
+    source_text: str,
+    *,
+    title: str,
+    fallback_draft: StructuredScriptDraft,
+) -> StructuredScriptDraft:
+    corrected_segments = _build_source_corrected_segments(source_text)
+    if not corrected_segments:
+        return fallback_draft
+
+    fallback_dialogues = [segment for segment in fallback_draft.segments if segment.type == "dialogue"]
+    search_start = 0
+    for corrected in corrected_segments:
+        if corrected.type != "dialogue":
+            continue
+        corrected_key = _normalize_compare_text(_strip_non_verbal_tags(corrected.text))
+        if not corrected_key:
+            continue
+        for candidate_index in range(search_start, len(fallback_dialogues)):
+            candidate = fallback_dialogues[candidate_index]
+            candidate_key = _normalize_compare_text(_strip_non_verbal_tags(candidate.text))
+            if not candidate_key:
+                continue
+            if corrected_key != candidate_key:
+                continue
+            if corrected.speaker == "有人" and candidate.speaker.strip():
+                corrected.speaker = candidate.speaker.strip()
+            elif corrected.speaker.strip() != candidate.speaker.strip():
+                continue
+            transferred_tags = _extract_non_verbal_tags_from_text(candidate.text)
+            if transferred_tags:
+                corrected.text = apply_non_verbal_tags_to_text(corrected.text, transferred_tags)
+            search_start = candidate_index + 1
+            break
+
+    counter: Counter[str] = Counter(segment.speaker for segment in corrected_segments)
+    characters: list[StructuredCharacterDraft] = []
+    for name, count in counter.items():
+        description = "讲述故事的旁白，语调沉稳" if name == "narrator" else f"{name} 的角色档案"
+        characters.append(
+            StructuredCharacterDraft(
+                name=name,
+                description=description,
+                appearance_count=int(count),
+            )
+        )
+
+    metadata = dict(fallback_draft.metadata or {})
+    metadata["parser"] = "step1-line-parser+source-correction"
+    return StructuredScriptDraft(
+        title=title or fallback_draft.title or "未命名剧本",
+        source_text=source_text,
+        segments=corrected_segments,
+        characters=characters,
+        metadata=metadata,
+    )
+
+
 def _split_step1_prefixed_line(line: str, line_no: int) -> tuple[str, str, str]:
     if line.startswith("旁白：") or line.startswith("旁白:"):
         text = line.split("：", 1)[1] if "：" in line else line.split(":", 1)[1]
@@ -827,13 +1045,20 @@ def parse_step1_lines_to_structured_draft(raw_text: str, source_text: str, title
             )
         )
 
-    return StructuredScriptDraft(
+    parsed_draft = StructuredScriptDraft(
         title=title or "未命名剧本",
         source_text=source_text,
         segments=segments,
         characters=characters,
         metadata={"language": "zh", "parser": "step1-line-parser"},
     )
+    if "“" in (source_text or "") and "”" in (source_text or ""):
+        return _build_source_corrected_draft(
+            source_text,
+            title=title or "未命名剧本",
+            fallback_draft=parsed_draft,
+        )
+    return parsed_draft
 
 
 def structured_draft_to_script(draft: StructuredScriptDraft, source_text: str) -> Script:
@@ -1108,4 +1333,133 @@ def merge_two_step_output(
         segments=merged_segments,
         characters=final_characters,
         metadata=metadata,
+    )
+
+
+def _build_character_list_from_segments(
+    segments: list[StructuredSegmentDraft],
+    fallback_characters: list[Character] | None = None,
+) -> list[Character]:
+    fallback_map = {character.name: character for character in (fallback_characters or []) if character.name}
+    counts: Counter[str] = Counter(segment.speaker for segment in segments if segment.speaker)
+    characters: list[Character] = []
+    for name, count in counts.items():
+        fallback = fallback_map.get(name)
+        characters.append(
+            Character(
+                name=name,
+                description=(fallback.description if fallback is not None else ("讲述故事的旁白，语调沉稳" if name == "narrator" else f"{name} 的角色档案")),
+                appearance_count=int(count),
+                voice_preset_id=(fallback.voice_preset_id if fallback is not None else None),
+            )
+        )
+    return characters
+
+
+def merge_source_corrected_single_pass_output(
+    *,
+    corrected_draft: StructuredScriptDraft,
+    parsed_script: Script,
+    source_text: str,
+) -> Script:
+    def _loose_dialogue_key(text: str) -> str:
+        return re.sub(r"[，,。？！!?；;：:、“”\"'‘’\s]", "", _strip_non_verbal_tags(text or ""))
+
+    merged_segments: list[Segment] = []
+    search_start = 0
+    for corrected in corrected_draft.segments:
+        matched: Segment | None = None
+        corrected_key = _normalize_compare_text(_strip_non_verbal_tags(corrected.text))
+        exact_match = False
+        for candidate_index in range(search_start, len(parsed_script.segments)):
+            candidate = parsed_script.segments[candidate_index]
+            candidate_key = _normalize_compare_text(_strip_non_verbal_tags(candidate.text))
+            if not corrected_key or not candidate_key:
+                continue
+            if candidate.type != corrected.type:
+                continue
+            if corrected.speaker.strip() != candidate.speaker.strip():
+                continue
+            if corrected_key != candidate_key:
+                continue
+            matched = candidate
+            search_start = candidate_index + 1
+            exact_match = True
+            break
+
+        if matched is None and corrected_key:
+            corrected_loose = _loose_dialogue_key(corrected.text)
+            for candidate in parsed_script.segments:
+                candidate_key = _normalize_compare_text(_strip_non_verbal_tags(candidate.text))
+                candidate_loose = _loose_dialogue_key(candidate.text)
+                if not candidate_key:
+                    continue
+                if candidate.type != corrected.type:
+                    continue
+                if corrected.speaker.strip() != candidate.speaker.strip():
+                    continue
+                if (
+                    corrected_key not in candidate_key
+                    and candidate_key not in corrected_key
+                    and corrected_loose not in candidate_loose
+                    and candidate_loose not in corrected_loose
+                ):
+                    continue
+                matched = candidate
+                break
+
+        candidate_text = (matched.text if matched is not None else "").strip()
+        non_verbal_items = _normalize_non_verbal_items(
+            [str(item) for item in ((matched.non_verbal if matched is not None else []) or [])],
+            text=f"{candidate_text} {corrected.text}",
+        )
+        text_base = (
+            candidate_text
+            if exact_match and matched is not None and _is_step2_text_compatible(corrected.text, candidate_text)
+            else corrected.text
+        )
+        text_base = _strip_unknown_non_verbal_tags(text_base).strip()
+        merged_text = apply_non_verbal_tags_to_text(text_base, non_verbal_items)
+        merged_segments.append(
+            Segment(
+                id=str(corrected.id),
+                index=corrected.index,
+                type=corrected.type,
+                speaker=corrected.speaker,
+                text=merged_text,
+                emotion=((matched.emotion if matched is not None else "neutral") or "neutral").strip() or "neutral",
+                non_verbal=non_verbal_items,
+                tts_overrides=_sanitize_tts_overrides(matched.tts_overrides if matched is not None else {}),
+            )
+        )
+
+    metadata = dict(parsed_script.metadata or {})
+    metadata["source_structure_corrected"] = True
+    metadata["parse_pipeline"] = metadata.get("parse_pipeline") or "single_pass"
+    return Script(
+        title=corrected_draft.title or parsed_script.title or "未命名剧本",
+        source_text=source_text,
+        segments=merged_segments,
+        characters=_build_character_list_from_segments(corrected_draft.segments, parsed_script.characters),
+        metadata=metadata,
+    )
+
+
+def normalize_single_pass_script_with_source_structure(
+    parsed_script: Script,
+    *,
+    source_text: str,
+) -> Script:
+    if "“" not in (source_text or "") or "”" not in (source_text or ""):
+        return parsed_script
+    fallback_draft = to_structured_draft(parsed_script, source_text)
+    corrected_draft = _build_source_corrected_draft(
+        source_text,
+        title=parsed_script.title or fallback_draft.title or "未命名剧本",
+        fallback_draft=fallback_draft,
+    )
+    return merge_source_corrected_single_pass_output(
+        corrected_draft=corrected_draft,
+        parsed_script=parsed_script,
+        source_text=source_text,
     )

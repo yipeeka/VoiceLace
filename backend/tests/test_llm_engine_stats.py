@@ -53,6 +53,37 @@ class LlmEngineStatsTest(unittest.TestCase):
         self.assertEqual(stats.get("parse_mode"), "legacy_single_pass")
         self.assertIn(stats.get("mode"), {"single", "chunked"})
 
+    def test_legacy_single_pass_source_correction_restores_dialogue_narration_dialogue(self) -> None:
+        engine = LLMEngine()
+        script = engine._normalize_legacy_single_pass_script(
+            Script(
+                title="单步",
+                source_text="“不，”老人说。“你遇上了一条交好运的船。跟他们待下去吧。”",
+                segments=[
+                    Segment(
+                        id="s1",
+                        index=0,
+                        type="dialogue",
+                        speaker="老人",
+                        text="不。你遇上了一条交好运的船。跟他们待下去吧。",
+                        emotion="serious",
+                    )
+                ],
+                characters=[],
+                metadata={"parser": "mock-single"},
+            ),
+            source_text="“不，”老人说。“你遇上了一条交好运的船。跟他们待下去吧。”",
+        )
+        self.assertEqual(
+            [(segment.type, segment.speaker, segment.text) for segment in script.segments],
+            [
+                ("dialogue", "老人", "不，"),
+                ("narration", "narrator", "老人说。"),
+                ("dialogue", "老人", "你遇上了一条交好运的船。跟他们待下去吧。"),
+            ],
+        )
+        self.assertEqual(script.segments[0].emotion, "serious")
+
     def test_read_aloud_parse_mode_normalizes_to_single_narrator_and_preserves_dialogue(self) -> None:
         engine = LLMEngine()
         script = engine._normalize_read_aloud_script(

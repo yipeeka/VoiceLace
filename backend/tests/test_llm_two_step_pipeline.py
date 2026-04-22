@@ -118,7 +118,7 @@ class TwoStepPipelineTest(unittest.TestCase):
         )
         self.assertEqual(draft.segments[0].type, "dialogue")
         self.assertEqual(draft.segments[0].speaker, "孩子")
-        self.assertEqual(draft.segments[0].text, "圣地亚哥")
+        self.assertEqual(draft.segments[0].text, "圣地亚哥，")
         self.assertEqual(draft.segments[1].type, "narration")
         self.assertEqual(
             draft.segments[1].text,
@@ -127,6 +127,60 @@ class TwoStepPipelineTest(unittest.TestCase):
         self.assertEqual(draft.segments[2].type, "dialogue")
         self.assertEqual(draft.segments[2].speaker, "孩子")
         self.assertEqual(draft.segments[2].text, "我又能陪你出海了。我家挣到了一点儿钱。")
+
+    def test_parse_step1_lines_source_correction_restores_dialogue_narration_dialogue(self) -> None:
+        draft = parse_step1_lines_to_structured_draft(
+            "老人：不。你遇上了一条交好运的船。跟他们待下去吧。",
+            source_text="“不，”老人说。“你遇上了一条交好运的船。跟他们待下去吧。”",
+        )
+        self.assertEqual(
+            [(segment.type, segment.speaker, segment.text) for segment in draft.segments],
+            [
+                ("dialogue", "老人", "不，"),
+                ("narration", "narrator", "老人说。"),
+                ("dialogue", "老人", "你遇上了一条交好运的船。跟他们待下去吧。"),
+            ],
+        )
+
+    def test_parse_step1_lines_source_correction_restores_leading_quote_context_dialogue(self) -> None:
+        draft = parse_step1_lines_to_structured_draft(
+            "旁白：“圣地亚哥”，他们俩从小船停泊的地方爬上岸时，孩子对他说。\n孩子：我又能陪你出海了。我家挣到了一点儿钱。",
+            source_text="“圣地亚哥”，他们俩从小船停泊的地方爬上岸时，孩子对他说。“我又能陪你出海了。我家挣到了一点儿钱。”",
+        )
+        self.assertEqual(
+            [(segment.type, segment.speaker, segment.text) for segment in draft.segments],
+            [
+                ("dialogue", "孩子", "圣地亚哥，"),
+                ("narration", "narrator", "他们俩从小船停泊的地方爬上岸时，孩子对他说。"),
+                ("dialogue", "孩子", "我又能陪你出海了。我家挣到了一点儿钱。"),
+            ],
+        )
+
+    def test_parse_step1_lines_source_correction_handles_embedded_quote_dialogue(self) -> None:
+        draft = parse_step1_lines_to_structured_draft(
+            "旁白：店小二迎出来道：“客官，是打尖还是住店？”",
+            source_text="店小二迎出来道：“客官，是打尖还是住店？”",
+        )
+        self.assertEqual(
+            [(segment.type, segment.speaker, segment.text) for segment in draft.segments],
+            [
+                ("narration", "narrator", "店小二迎出来道："),
+                ("dialogue", "店小二", "客官，是打尖还是住店？"),
+            ],
+        )
+
+    def test_parse_step1_lines_source_correction_preserves_step1_speaker_for_plain_quote_line(self) -> None:
+        draft = parse_step1_lines_to_structured_draft(
+            "孩子：不过你该记得，你有一回八十七天钓不到一条鱼，跟着有三个礼拜，我们每天都逮住了大鱼。",
+            source_text="“不过你该记得，你有一回八十七天钓不到一条鱼，跟着有三个礼拜，我们每天都逮住了大鱼。”",
+        )
+        self.assertEqual(len(draft.segments), 1)
+        self.assertEqual(draft.segments[0].type, "dialogue")
+        self.assertEqual(draft.segments[0].speaker, "孩子")
+        self.assertEqual(
+            draft.segments[0].text,
+            "不过你该记得，你有一回八十七天钓不到一条鱼，跟着有三个礼拜，我们每天都逮住了大鱼。",
+        )
 
     def test_merge_two_step_output_filters_unknown_non_verbal_tags(self) -> None:
         draft = parse_step1_lines_to_structured_draft(

@@ -22,6 +22,7 @@ from backend.engine.llm_parse_orchestrator import run_chunked_parse_flow
 from backend.engine.llm_two_step_pipeline import (
     analyze_two_step_structure_drift,
     merge_two_step_output,
+    normalize_single_pass_script_with_source_structure,
     run_two_step_parse_pipeline,
     to_structured_draft,
 )
@@ -404,6 +405,7 @@ class LLMEngine:
                 parse_single_with_stats=self._parse_single_stream_with_stats,
                 logger=logger,
             )
+            script = self._normalize_legacy_single_pass_script(script, source_text=text)
             if on_stage is not None:
                 await on_stage("finalizing", "经典单步解析收尾中", 92)
         elif selected_mode == "read_aloud_single_voice":
@@ -1170,6 +1172,10 @@ class LLMEngine:
         normalized = re.sub(r"\[[^\]]+\]", "", text or "")
         normalized = re.sub(r"[“”\"'‘’\s]", "", normalized)
         return normalized
+
+    @staticmethod
+    def _normalize_legacy_single_pass_script(script: Script, *, source_text: str) -> Script:
+        return normalize_single_pass_script_with_source_structure(script, source_text=source_text)
 
     @staticmethod
     def _is_same_dialogue_text(base_text: str, model_text: str) -> bool:
