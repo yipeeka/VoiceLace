@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import re
 import sys
 import threading
 import time
@@ -32,9 +33,14 @@ from backend.engine.llm_parser import (
     structured_output_schema_tts_enrichment,
     to_gemini_schema_type,
 )
-from backend.engine.prompts import legacy_extraction_prompt, structure_extraction_prompt, tts_enrichment_prompt
+from backend.engine.prompts import (
+    legacy_extraction_prompt,
+    read_aloud_extraction_prompt,
+    structure_extraction_prompt,
+    tts_enrichment_prompt,
+)
 from backend.engine.llm_single_runner import run_single_parse_with_stats
-from backend.models import Script
+from backend.models import Character, Script, Segment
 
 logger = logging.getLogger(__name__)
 ChunkCallback = Callable[[str], Awaitable[None]]
@@ -375,7 +381,12 @@ class LLMEngine:
         on_stage: StageCallback | None = None,
     ) -> Script:
         opts = llm_options or {}
-        selected_mode = "legacy_single_pass" if parse_mode == "legacy_single_pass" else "two_step_pipeline"
+        if parse_mode == "legacy_single_pass":
+            selected_mode = "legacy_single_pass"
+        elif parse_mode == "read_aloud_single_voice":
+            selected_mode = "read_aloud_single_voice"
+        else:
+            selected_mode = "two_step_pipeline"
 
         if selected_mode == "legacy_single_pass":
             if on_stage is not None:
@@ -395,6 +406,25 @@ class LLMEngine:
             )
             if on_stage is not None:
                 await on_stage("finalizing", "经典单步解析收尾中", 92)
+        elif selected_mode == "read_aloud_single_voice":
+            if on_stage is not None:
+                await on_stage("finalizing", "快速朗读解析中", 16)
+            max_chunk_chars = self._resolve_read_aloud_chunk_chars(llm_options or {})
+            script, parse_stats = await run_chunked_parse_flow(
+                text=text,
+                prompt=prompt,
+                on_chunk=on_chunk,
+                on_chunk_progress=on_chunk_progress,
+                on_chunk_start=on_chunk_start,
+                llm_options=llm_options,
+                max_chunk_chars=max_chunk_chars,
+                backend_name=self.backend_name,
+                parse_single_with_stats=self._parse_read_aloud_stream_with_stats,
+                logger=logger,
+            )
+            script = self._normalize_read_aloud_script(script, source_text=text)
+            if on_stage is not None:
+                await on_stage("finalizing", "快速朗读解析收尾中", 94)
         else:
             script, parse_stats = await self._parse_text_two_step_pipeline(
                 text=text,
@@ -452,6 +482,23 @@ class LLMEngine:
             extraction_prompt=legacy_extraction_prompt(),
             schema=structured_output_schema(),
         )
+
+    async def _parse_read_aloud_stream_with_stats(
+        self,
+        text: str,
+        prompt: str | None = None,
+        on_chunk: ChunkCallback | None = None,
+        llm_options: dict[str, Any] | None = None,
+    ) -> tuple[Script, dict[str, Any]]:
+        script, stats = await self._parse_single_with_profile(
+            text=text,
+            prompt=prompt,
+            on_chunk=on_chunk,
+            llm_options=llm_options,
+            extraction_prompt=read_aloud_extraction_prompt(),
+            schema=structured_output_schema(),
+        )
+        return self._normalize_read_aloud_script(script, source_text=text), stats
 
     async def _parse_single_with_profile(
         self,
@@ -859,6 +906,282 @@ class LLMEngine:
         if n_ctx <= 16384:
             return min(int(by_tokens * 1.15), 2600)
         return min(int(by_tokens * 1.3), 3000)
+
+    @staticmethod
+    def _resolve_read_aloud_chunk_chars(llm_options: dict[str, Any]) -> int:
+        n_ctx = int(llm_options.get("n_ctx", settings.default_llm_n_ctx))
+        max_tokens = int(llm_options.get("max_tokens", settings.default_llm_max_tokens))
+        if max_tokens <= 2048:
+            by_tokens = 1200
+        elif max_tokens <= 3072:
+            by_tokens = 1600
+        elif max_tokens <= 4096:
+            by_tokens = 2000
+        elif max_tokens <= 6144:
+            by_tokens = 2400
+        else:
+            by_tokens = 2800
+        if n_ctx <= 4096:
+            return min(by_tokens, 1000)
+        if n_ctx <= 8192:
+            return by_tokens
+        if n_ctx <= 16384:
+            return min(int(by_tokens * 1.15), 3200)
+        return min(int(by_tokens * 1.3), 3600)
+
+    @staticmethod
+    def _normalize_read_aloud_script(script: Script, *, source_text: str) -> Script:
+        structure_segments = LLMEngine._build_read_aloud_structure_segments(source_text)
+        normalized_segments = LLMEngine._merge_read_aloud_segments(
+            structure_segments=structure_segments,
+            model_segments=script.segments,
+        )
+
+        metadata = dict(script.metadata or {})
+        parser_name = str(metadata.get("parser") or "read-aloud")
+        if "read-aloud" not in parser_name:
+            metadata["parser"] = f"{parser_name}-read-aloud"
+        else:
+            metadata["parser"] = parser_name
+        metadata["parse_mode"] = "read_aloud_single_voice"
+
+        return Script(
+            title=script.title or "未命名剧本",
+            source_text=source_text,
+            segments=normalized_segments,
+            characters=[
+                Character(
+                    name="narrator",
+                    description="单人旁白朗读者",
+                    appearance_count=len(normalized_segments),
+                    voice_preset_id=None,
+                )
+            ]
+            if normalized_segments
+            else [],
+            metadata=metadata,
+        )
+
+    @staticmethod
+    def _build_read_aloud_structure_segments(source_text: str) -> list[Segment]:
+        segments: list[Segment] = []
+        quote_pattern = re.compile(r"“([^”]+)”")
+        trailing_punct_chars = "，。？！；：、…"
+
+        for raw_line in (source_text or "").splitlines():
+            line = (raw_line or "").strip()
+            if not line:
+                continue
+            cursor = 0
+            narration_buffer = ""
+
+            for match in quote_pattern.finditer(line):
+                start, end = match.span()
+                quoted_text = (match.group(1) or "").strip()
+                before = line[cursor:start]
+                after_cursor = end
+                trailing_punct = ""
+                while after_cursor < len(line) and line[after_cursor] in trailing_punct_chars:
+                    trailing_punct += line[after_cursor]
+                    after_cursor += 1
+                after = line[after_cursor:]
+                context_before = f"{narration_buffer}{before}"
+
+                if LLMEngine._is_direct_speech_quote(quoted_text, context_before, after):
+                    if context_before.strip():
+                        segments.append(
+                            Segment(
+                                id="",
+                                index=len(segments),
+                                type="narration",
+                                speaker="narrator",
+                                text=context_before.strip(),
+                            )
+                        )
+                    dialogue_text = f"{quoted_text}{trailing_punct}".strip()
+                    if dialogue_text:
+                        segments.append(
+                            Segment(
+                                id="",
+                                index=len(segments),
+                                type="dialogue",
+                                speaker="narrator",
+                                text=dialogue_text,
+                            )
+                        )
+                    narration_buffer = ""
+                else:
+                    narration_buffer = f"{narration_buffer}{before}“{quoted_text}”{trailing_punct}"
+
+                cursor = after_cursor
+
+            narration_buffer = f"{narration_buffer}{line[cursor:]}"
+            if narration_buffer.strip():
+                segments.append(
+                    Segment(
+                        id="",
+                        index=len(segments),
+                        type="narration",
+                        speaker="narrator",
+                        text=narration_buffer.strip(),
+                    )
+                )
+
+        if segments:
+            return segments
+        line = (source_text or "").strip()
+        if not line:
+            return []
+        return [Segment(id="", index=0, type="narration", speaker="narrator", text=line)]
+
+    @staticmethod
+    def _is_direct_speech_quote(quoted_text: str, before_text: str, after_text: str) -> bool:
+        content = (quoted_text or "").strip()
+        if not content:
+            return False
+
+        before = (before_text or "").strip()
+        after = (after_text or "").strip()
+        tail = before[-18:]
+        head = after[:24]
+
+        speech_markers = [
+            "说道",
+            "说",
+            "道",
+            "问道",
+            "问",
+            "答道",
+            "答",
+            "喊道",
+            "喊",
+            "笑道",
+            "笑着说",
+            "哭道",
+            "叹道",
+            "忙道",
+            "叫道",
+            "叫",
+            "表示",
+            "指出",
+            "认为",
+            "告诉",
+            "提醒",
+            "回应",
+            "回道",
+            "应道",
+            "对他说",
+            "对她说",
+            "对儿子说道",
+            "对他说道",
+            "对她说道",
+        ]
+        has_context_marker = any(marker in tail for marker in speech_markers) or any(marker in head for marker in speech_markers)
+        has_dialogue_punct = any(char in content for char in "，。？！；：…")
+        short_term_like = len(content) <= 8 and not has_dialogue_punct and not has_context_marker
+
+        if not before and not after:
+            return True
+        if short_term_like:
+            return False
+        if has_context_marker:
+            return True
+        if has_dialogue_punct and len(content) >= 4:
+            return True
+        return False
+
+    @staticmethod
+    def _merge_read_aloud_segments(*, structure_segments: list[Segment], model_segments: list[Segment]) -> list[Segment]:
+        merged: list[Segment] = []
+        search_start = 0
+        for index, structure_segment in enumerate(structure_segments):
+            matched_index = None
+            matched_segment = None
+            target_key = LLMEngine._normalize_text_for_read_aloud_match(structure_segment.text)
+            for candidate_index in range(search_start, len(model_segments)):
+                candidate = model_segments[candidate_index]
+                candidate_type = "dialogue" if candidate.type == "dialogue" else "narration"
+                if candidate_type != structure_segment.type:
+                    continue
+                candidate_key = LLMEngine._normalize_text_for_read_aloud_match(candidate.text)
+                if not target_key or not candidate_key:
+                    continue
+                if target_key in candidate_key or candidate_key in target_key:
+                    matched_index = candidate_index
+                    matched_segment = candidate
+                    break
+
+            final_text = structure_segment.text
+            final_emotion = "neutral"
+            final_non_verbal: list[str] = []
+            final_tts_overrides: dict[str, str | int | float | bool] = {}
+
+            if matched_segment is not None:
+                search_start = matched_index + 1
+                final_text = LLMEngine._merge_read_aloud_segment_text(
+                    segment_type=structure_segment.type,
+                    base_text=structure_segment.text,
+                    model_text=matched_segment.text,
+                    non_verbal=matched_segment.non_verbal or [],
+                )
+                final_emotion = matched_segment.emotion or "neutral"
+                final_non_verbal = [str(item).strip() for item in (matched_segment.non_verbal or []) if str(item).strip()]
+                final_tts_overrides = matched_segment.tts_overrides or {}
+
+            merged.append(
+                Segment(
+                    id=structure_segment.id,
+                    index=index,
+                    type=structure_segment.type,
+                    speaker="narrator",
+                    text=final_text,
+                    emotion=final_emotion,
+                    non_verbal=final_non_verbal,
+                    tts_overrides=final_tts_overrides,
+                )
+            )
+        return merged
+
+    @staticmethod
+    def _merge_read_aloud_segment_text(
+        *,
+        segment_type: str,
+        base_text: str,
+        model_text: str,
+        non_verbal: list[str],
+    ) -> str:
+        if segment_type != "dialogue":
+            return (base_text or "").strip()
+        candidate = (model_text or "").strip()
+        base = (base_text or "").strip()
+        if not candidate:
+            return base
+        if LLMEngine._is_same_dialogue_text(base, candidate):
+            return candidate
+        tags = [str(item).strip() for item in (non_verbal or []) if str(item).strip()]
+        if tags:
+            joined_tags = " ".join(tags)
+            if joined_tags not in base:
+                return f"{joined_tags} {base}".strip()
+        return base
+
+    @staticmethod
+    def _normalize_text_for_read_aloud_match(text: str) -> str:
+        normalized = re.sub(r"\[[^\]]+\]", "", text or "")
+        normalized = re.sub(r"[“”\"'‘’\s]", "", normalized)
+        return normalized
+
+    @staticmethod
+    def _is_same_dialogue_text(base_text: str, model_text: str) -> bool:
+        def _collapse_dialogue_text(text: str) -> str:
+            collapsed = re.sub(r"\[[^\]]+\]", "", text or "")
+            collapsed = re.sub(r"([\u4e00-\u9fff])[A-Z]{1,12}[1-5]", r"\1", collapsed)
+            collapsed = re.sub(r"[“”\"'‘’\s]", "", collapsed)
+            return collapsed
+
+        base_key = _collapse_dialogue_text(base_text)
+        model_key = _collapse_dialogue_text(model_text)
+        return bool(base_key and model_key and base_key == model_key)
 
     def _build_llama_chat_kwargs(
         self,

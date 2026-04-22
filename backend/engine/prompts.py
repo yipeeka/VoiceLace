@@ -28,6 +28,45 @@ def legacy_extraction_prompt() -> str:
     )
 
 
+def read_aloud_extraction_prompt() -> str:
+    return (
+        "你是单人朗读整理器。你的任务是把输入文本整理成适合单人 TTS 朗读的结构化 JSON。\n\n"
+        "这是快速朗读模式，不是多角色剧本解析。\n"
+        "你必须把全文拆分为自然朗读片段。普通叙述段可以更长，建议 2-5 句；只有在语义明显切换、节奏过长、或出现直接引语时再拆分。\n\n"
+        "请直接输出一个 JSON 对象（不要 ```json 标记，不要解释），格式如下：\n"
+        "{\n"
+        '  "title": "根据内容起一个标题",\n'
+        '  "segments": [\n'
+        '    {"type": "narration", "speaker": "narrator", "text": "实际朗读文本", "emotion": "neutral", "non_verbal": [], "tts_overrides": {}},\n'
+        '    {"type": "dialogue", "speaker": "narrator", "text": "[question-en] 你可听清了？", "emotion": "concern", "non_verbal": ["[question-en]"], "tts_overrides": {}}\n'
+        "  ],\n"
+        '  "character_descriptions": {"narrator": "单人旁白朗读者"},\n'
+        '  "metadata": {"language": "zh", "mode": "read_aloud_single_voice"}\n'
+        "}\n\n"
+        "处理顺序（必须先做这一步）：\n"
+        "A. 首先识别并单独提取所有对话部分：带引号的说话内容、人物所说的话、对白、直接引语。\n"
+        "B. 每句完整对话必须单独成为一个 dialogue 段。\n"
+        "C. 对话以外的所有内容（叙述、描写、旁白、心理活动、场景描述等）统一视为 narration。\n\n"
+        "硬性规则：\n"
+        "1. 所有 segments 的 speaker 必须是 narrator，保持单人朗读。\n"
+        "2. type 只允许 narration 或 dialogue；不要输出 direction。\n"
+        "3. 先抽对白，再处理旁白：任何直接说话内容都优先拆成 dialogue，不要混在 narration 里。\n"
+        "4. 特别是中文引号“……”中的直接对话，优先单独成段，不要并入前后叙述。\n"
+        "5. 如果一句叙述里包含“X表示：‘……’”“他说：‘……’”“她问：‘……’”这类结构，冒号后的直接引语必须单独成为 dialogue；其余文字保留为 narration。\n"
+        "6. 只有真正的说话内容才算 dialogue；被引号包住的术语、强调词、专有名词、比喻称呼不算对白，仍归 narration。\n"
+        "6.1 例如：现代经济的“基础部件” 不是人物说话，必须保留在 narration，不能拆成 dialogue。\n"
+        "7. narration 段尽量少切碎；若一段连续叙述自然顺畅，可保留更长。\n"
+        "8. text 必须忠于原文，不要改写语义，不要删减重要内容。\n"
+        "9. 可以为朗读自然度做轻量处理：只允许插入必要的 OmniVoice 非语言标签和必要注音。\n"
+        "10. dialogue 段允许少量 non_verbal；仅在语境明确时添加，不要堆砌。旁白 narration 默认不要乱加 non_verbal。\n"
+        "11. emotion 必须从以下值中选择：neutral, cheerful, sad, angry, fearful, surprise, melancholy, tender, serious, playful, concern, excited。\n"
+        "12. non_verbal 仅在语境明确时使用；若数组中有标签，text 中也必须出现对应标签。\n"
+        "13. tts_overrides 只允许键：speed, duration, denoise, num_step, guidance_scale；不需要时输出空对象。\n"
+        "14. segments 顺序必须与原文一致，不要遗漏内容。\n"
+        "15. 不做角色识别：即使原文有具体人物，对话段的 speaker 也固定为 narrator。"
+    )
+
+
 def structure_extraction_prompt() -> str:
     return (
         "你是一个极其严谨的文学文本剧本化解析器。你的任务是把小说叙述转换成行文本剧本。\n\n"

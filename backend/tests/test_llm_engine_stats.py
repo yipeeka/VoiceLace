@@ -4,6 +4,7 @@ import asyncio
 import unittest
 
 from backend.engine.llm_engine import LLMEngine
+from backend.engine.prompts import read_aloud_extraction_prompt
 from backend.models import Script, Segment
 
 
@@ -52,6 +53,219 @@ class LlmEngineStatsTest(unittest.TestCase):
         self.assertEqual(stats.get("parse_mode"), "legacy_single_pass")
         self.assertIn(stats.get("mode"), {"single", "chunked"})
 
+    def test_read_aloud_parse_mode_normalizes_to_single_narrator_and_preserves_dialogue(self) -> None:
+        engine = LLMEngine()
+        script = engine._normalize_read_aloud_script(
+            Script(
+                title="朗读",
+                source_text="叙述。\n“你可听清了？”",
+                segments=[
+                    Segment(id="s1", index=0, type="narration", speaker="甲", text="叙述部分。"),
+                    Segment(
+                        id="s2",
+                        index=1,
+                        type="dialogue",
+                        speaker="乙",
+                        text="[question-en] 你可听清了？",
+                        non_verbal=["[question-en]"],
+                    ),
+                    Segment(id="s3", index=2, type="direction", speaker="乙", text="动作提示"),
+                ],
+                characters=[],
+                metadata={"parser": "mock"},
+            ),
+            source_text="叙述。\n“你可听清了？”",
+        )
+        self.assertGreaterEqual(len(script.segments), 1)
+        self.assertTrue(all(segment.speaker == "narrator" for segment in script.segments))
+        self.assertEqual(script.segments[0].type, "narration")
+        self.assertEqual(script.segments[1].type, "dialogue")
+        self.assertEqual(script.segments[1].non_verbal, ["[question-en]"])
+        self.assertEqual([character.name for character in script.characters], ["narrator"])
+        self.assertEqual(script.characters[0].appearance_count, len(script.segments))
+        self.assertEqual(script.metadata.get("parse_mode"), "read_aloud_single_voice")
+
+    def test_read_aloud_parse_mode_stats_are_reported(self) -> None:
+        engine = LLMEngine()
+        engine.backend_name = "mock"
+        script = asyncio.run(
+            engine.parse_text_chunked_stream(
+                "这是一段较长的叙述。\n“你可听清了？”",
+                prompt=None,
+                llm_options={},
+                parse_mode="read_aloud_single_voice",
+            )
+        )
+        self.assertGreaterEqual(len(script.segments), 1)
+        stats = engine.last_parse_stats
+        self.assertEqual(stats.get("parse_mode"), "read_aloud_single_voice")
+        self.assertIn(stats.get("mode"), {"single", "chunked"})
+
+    def test_read_aloud_structure_splits_narration_plus_dialogue(self) -> None:
+        segments = LLMEngine._build_read_aloud_structure_segments(
+            "店小二迎出来道：“客官，是打尖还是住店？”"
+        )
+        self.assertEqual([(seg.type, seg.text) for seg in segments], [
+            ("narration", "店小二迎出来道："),
+            ("dialogue", "客官，是打尖还是住店？"),
+        ])
+
+    def test_read_aloud_structure_splits_dialogue_plus_narration(self) -> None:
+        segments = LLMEngine._build_read_aloud_structure_segments(
+            "“圣地亚哥”，他们俩从小船停泊的地方爬上岸时，孩子对他说。"
+        )
+        self.assertEqual([(seg.type, seg.text) for seg in segments], [
+            ("dialogue", "圣地亚哥，"),
+            ("narration", "他们俩从小船停泊的地方爬上岸时，孩子对他说。"),
+        ])
+
+    def test_read_aloud_structure_splits_dialogue_narration_dialogue(self) -> None:
+        segments = LLMEngine._build_read_aloud_structure_segments(
+            "“不，”老人说。“你遇上了一条交好运的船。跟他们待下去吧。”"
+        )
+        self.assertEqual([(seg.type, seg.text) for seg in segments], [
+            ("dialogue", "不，"),
+            ("narration", "老人说。"),
+            ("dialogue", "你遇上了一条交好运的船。跟他们待下去吧。"),
+        ])
+
+    def test_read_aloud_structure_keeps_quoted_term_as_narration(self) -> None:
+        segments = LLMEngine._build_read_aloud_structure_segments(
+            "这类芯片虽然不算最先进，但却是现代经济的“基础部件”，广泛用于汽车、工业设备以及消费电子。"
+        )
+        self.assertEqual(len(segments), 1)
+        self.assertEqual(segments[0].type, "narration")
+        self.assertIn("“基础部件”", segments[0].text)
+
+    def test_read_aloud_merge_restores_missing_leading_narration(self) -> None:
+        engine = LLMEngine()
+        script = engine._normalize_read_aloud_script(
+            Script(
+                title="朗读",
+                source_text="店小二迎出来道：“客官，是打尖还是住店？”",
+                segments=[
+                    Segment(id="m1", index=0, type="dialogue", speaker="narrator", text="客官，是打尖还是住店？", emotion="concern"),
+                ],
+                characters=[],
+                metadata={"parser": "mock"},
+            ),
+            source_text="店小二迎出来道：“客官，是打尖还是住店？”",
+        )
+        self.assertEqual([(seg.type, seg.text) for seg in script.segments], [
+            ("narration", "店小二迎出来道："),
+            ("dialogue", "客官，是打尖还是住店？"),
+        ])
+        self.assertEqual(script.segments[1].emotion, "concern")
+
+    def test_read_aloud_merge_keeps_narration_from_structure_when_model_duplicates_dialogue(self) -> None:
+        engine = LLMEngine()
+        script = engine._normalize_read_aloud_script(
+            Script(
+                title="朗读",
+                source_text="巷子尽头忽有孩童哭声，一个妇人边跑边喊：“让一让！让一让！”",
+                segments=[
+                    Segment(
+                        id="m1",
+                        index=0,
+                        type="narration",
+                        speaker="narrator",
+                        text="巷子尽头忽有孩童哭声，一个妇人边跑边喊：让一让！让一让！",
+                        emotion="fearful",
+                    ),
+                    Segment(
+                        id="m2",
+                        index=1,
+                        type="dialogue",
+                        speaker="narrator",
+                        text="让一让！让一让！",
+                        emotion="neutral",
+                    ),
+                ],
+                characters=[],
+                metadata={"parser": "mock"},
+            ),
+            source_text="巷子尽头忽有孩童哭声，一个妇人边跑边喊：“让一让！让一让！”",
+        )
+        self.assertEqual([(seg.type, seg.text) for seg in script.segments], [
+            ("narration", "巷子尽头忽有孩童哭声，一个妇人边跑边喊："),
+            ("dialogue", "让一让！让一让！"),
+        ])
+        self.assertEqual(script.segments[0].emotion, "fearful")
+
+    def test_read_aloud_merge_does_not_expand_first_dialogue_into_following_dialogue(self) -> None:
+        engine = LLMEngine()
+        script = engine._normalize_read_aloud_script(
+            Script(
+                title="朗读",
+                source_text="“圣地亚哥”，他们俩从小船停泊的地方爬上岸时，孩子对他说。“我又能陪你出海了。我家挣到了一点儿钱。”",
+                segments=[
+                    Segment(
+                        id="m1",
+                        index=0,
+                        type="dialogue",
+                        speaker="narrator",
+                        text="[question-ah] 圣地亚哥，我又能陪你出海了。我家挣到了一点儿钱。",
+                        emotion="concern",
+                        non_verbal=["[question-ah]"],
+                    ),
+                    Segment(id="m2", index=1, type="narration", speaker="narrator", text="他们俩从小船停泊的地方爬上岸时，孩子对他说。"),
+                    Segment(id="m3", index=2, type="dialogue", speaker="narrator", text="我又能陪你出海了。我家挣到了一点儿钱。"),
+                ],
+                characters=[],
+                metadata={"parser": "mock"},
+            ),
+            source_text="“圣地亚哥”，他们俩从小船停泊的地方爬上岸时，孩子对他说。“我又能陪你出海了。我家挣到了一点儿钱。”",
+        )
+        self.assertEqual([(seg.type, seg.text) for seg in script.segments], [
+            ("dialogue", "[question-ah] 圣地亚哥，"),
+            ("narration", "他们俩从小船停泊的地方爬上岸时，孩子对他说。"),
+            ("dialogue", "我又能陪你出海了。我家挣到了一点儿钱。"),
+        ])
+
+    def test_read_aloud_merge_does_not_merge_dialogue_narration_dialogue_case(self) -> None:
+        engine = LLMEngine()
+        script = engine._normalize_read_aloud_script(
+            Script(
+                title="朗读",
+                source_text="“不，”老人说。“你遇上了一条交好运的船。跟他们待下去吧。”",
+                segments=[
+                    Segment(id="m1", index=0, type="dialogue", speaker="narrator", text="不，你遇上了一条交好运的船。跟他们待下去吧。", emotion="serious"),
+                    Segment(id="m2", index=1, type="narration", speaker="narrator", text="老人说。"),
+                    Segment(id="m3", index=2, type="dialogue", speaker="narrator", text="你遇上了一条交好运的船。跟他们待下去吧。"),
+                ],
+                characters=[],
+                metadata={"parser": "mock"},
+            ),
+            source_text="“不，”老人说。“你遇上了一条交好运的船。跟他们待下去吧。”",
+        )
+        self.assertEqual([(seg.type, seg.text) for seg in script.segments], [
+            ("dialogue", "不，"),
+            ("narration", "老人说。"),
+            ("dialogue", "你遇上了一条交好运的船。跟他们待下去吧。"),
+        ])
+
+    def test_read_aloud_merge_does_not_merge_cheerful_dialogue_case(self) -> None:
+        engine = LLMEngine()
+        script = engine._normalize_read_aloud_script(
+            Script(
+                title="朗读",
+                source_text="“那敢情好，”老人说。“都是打鱼人嘛。”",
+                segments=[
+                    Segment(id="m1", index=0, type="dialogue", speaker="narrator", text="那敢情好，都是打鱼人嘛。", emotion="cheerful"),
+                    Segment(id="m2", index=1, type="narration", speaker="narrator", text="老人说。"),
+                    Segment(id="m3", index=2, type="dialogue", speaker="narrator", text="都是打鱼人嘛。"),
+                ],
+                characters=[],
+                metadata={"parser": "mock"},
+            ),
+            source_text="“那敢情好，”老人说。“都是打鱼人嘛。”",
+        )
+        self.assertEqual([(seg.type, seg.text) for seg in script.segments], [
+            ("dialogue", "那敢情好，"),
+            ("narration", "老人说。"),
+            ("dialogue", "都是打鱼人嘛。"),
+        ])
+
     def test_structure_prompt_emphasizes_quoted_direct_speech(self) -> None:
         prompt = LLMEngine._structure_extraction_prompt()
         self.assertIn("只输出纯文本多行，不要 JSON", prompt)
@@ -60,6 +274,13 @@ class LlmEngineStatsTest(unittest.TestCase):
         self.assertIn("角色名：", prompt)
         self.assertIn("引语拆分强规则", prompt)
         self.assertIn("石头笑着说", prompt)
+
+    def test_read_aloud_prompt_prioritizes_dialogue_extraction(self) -> None:
+        prompt = read_aloud_extraction_prompt()
+        self.assertIn("首先识别并单独提取所有对话部分", prompt)
+        self.assertIn("每句完整对话必须单独成为一个 dialogue 段", prompt)
+        self.assertIn("对话以外的所有内容", prompt)
+        self.assertIn("现代经济的“基础部件”", prompt)
 
     def test_two_step_structure_drift_is_reported_not_raised(self) -> None:
         engine = LLMEngine()

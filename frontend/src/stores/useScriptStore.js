@@ -1,13 +1,14 @@
 import { create } from "zustand";
 
-import { api, getWsBaseUrl } from "../utils/api";
-import { formatError, getErrorMessage } from "../utils/errors";
-import { runTaskChannel } from "../utils/taskChannel";
-import { createTaskChannelBridge } from "../utils/taskChannelBridge";
-import { useUiStore } from "./useUiStore";
+import { api, getWsBaseUrl } from "../utils/api.js";
+import { formatError, getErrorMessage } from "../utils/errors.js";
+import { runTaskChannel } from "../utils/taskChannel.js";
+import { createTaskChannelBridge } from "../utils/taskChannelBridge.js";
+import { useUiStore } from "./useUiStore.js";
 
 const DEFAULT_PARSE_MODE = "two_step_pipeline";
 const PARSE_MODE_STORAGE_KEY = "beautyvoice.parse_mode";
+const SUPPORTED_PARSE_MODES = new Set(["two_step_pipeline", "legacy_single_pass", "read_aloud_single_voice"]);
 
 export const useScriptStore = create((set, get) => ({
   sourceText: "",
@@ -439,7 +440,7 @@ function buildParseStatsSummary(stats) {
 }
 
 function normalizeParseMode(value) {
-  return value === "legacy_single_pass" ? "legacy_single_pass" : DEFAULT_PARSE_MODE;
+  return SUPPORTED_PARSE_MODES.has(value) ? value : DEFAULT_PARSE_MODE;
 }
 
 function readParseModeFromStorage() {
