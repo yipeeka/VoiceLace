@@ -2,7 +2,7 @@ const DEFAULT_SYNTHESIS_CONFIG = {
   num_step: 32,
   guidance_scale: 2,
   denoise: true,
-  gap_duration_ms: 500,
+  gap_duration_ms: 300,
   output_format: "wav",
 };
 

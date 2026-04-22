@@ -14,9 +14,23 @@ function formatTime(seconds) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+function normalizeZoomValue(zoom) {
+  return Math.max(0, Math.min(1, Number(zoom || 0) / 100));
+}
+
+function mapZoomToPixelsPerSecond(zoom) {
+  const t = normalizeZoomValue(zoom);
+  if (t <= 0) return 1;
+  // Smoothstep gives gentler low-end movement while keeping the far end usable.
+  const eased = t * t * (3 - 2 * t);
+  return 1 + eased * 120;
+}
+
 function pickWaveformLevel(zoom) {
-  if (zoom >= 50) return 4096;
-  return 2048;
+  const t = normalizeZoomValue(zoom);
+  if (t >= 0.75) return 4096;
+  if (t >= 0.3) return 2048;
+  return 1024;
 }
 
 function buildChannelDataFromMinMax(data) {
@@ -33,7 +47,14 @@ function buildChannelDataFromMinMax(data) {
   return channel;
 }
 
-export default function SynthesisWaveSurfer({ projectId, audioUrl, segments = [], gapDurationMs = 500, height = 100 }) {
+export default function SynthesisWaveSurfer({
+  projectId,
+  audioUrl,
+  segments = [],
+  gapDurationMs = 300,
+  height = 100,
+  onCurrentTimeChange = null,
+}) {
   const containerRef = useRef(null);
   const wavesurferRef = useRef(null);
   const regionWarningLoggedRef = useRef(false);
@@ -47,6 +68,12 @@ export default function SynthesisWaveSurfer({ projectId, audioUrl, segments = []
   const [waveformPayload, setWaveformPayload] = useState({ data: [], duration_ms: 0, level: 1024 });
   const [waveformError, setWaveformError] = useState("");
   const [forcePlainLoad, setForcePlainLoad] = useState(false);
+
+  useEffect(() => {
+    if (typeof onCurrentTimeChange === "function") {
+      onCurrentTimeChange(currentTime);
+    }
+  }, [currentTime, onCurrentTimeChange]);
 
   const requestedLevel = useMemo(() => pickWaveformLevel(zoom), [zoom]);
 
@@ -250,11 +277,7 @@ export default function SynthesisWaveSurfer({ projectId, audioUrl, segments = []
   useEffect(() => {
     if (!wavesurferRef.current || !isReady) return;
     try {
-      if (zoom === 0) {
-        wavesurferRef.current.zoom(1);
-      } else {
-        wavesurferRef.current.zoom(10 + zoom * 3);
-      }
+      wavesurferRef.current.zoom(mapZoomToPixelsPerSecond(zoom));
     } catch {
       setWaveformError("缩放失败，已保持当前波形视图。");
     }
@@ -318,7 +341,7 @@ export default function SynthesisWaveSurfer({ projectId, audioUrl, segments = []
               onValueChange={([v]) => setZoom(v)}
               min={0}
               max={100}
-              step={1}
+              step={0.5}
               disabled={!isReady}
               hideValue
             />

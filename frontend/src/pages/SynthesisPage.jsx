@@ -60,6 +60,7 @@ export default function SynthesisPage() {
   const [activeSpeakerFilter, setActiveSpeakerFilter] = useState("all");
   const [recentlyUpdatedSegmentId, setRecentlyUpdatedSegmentId] = useState(null);
   const [resolvedSegmentDurations, setResolvedSegmentDurations] = useState({});
+  const [fullAudioCurrentTime, setFullAudioCurrentTime] = useState(0);
   const updatedRowTimerRef = useRef(null);
   const { saveScript, isSaving: isScriptSaving, error: scriptError } = useScriptStore();
   const pushToast = useUiStore.getState().pushToast;
@@ -68,7 +69,7 @@ export default function SynthesisPage() {
     num_step: 32,
     guidance_scale: 2,
     denoise: true,
-    gap_duration_ms: 500,
+    gap_duration_ms: 300,
     output_format: "wav",
   });
 
@@ -96,6 +97,7 @@ export default function SynthesisPage() {
       setActiveSpeakerFilter("all");
       setRecentlyUpdatedSegmentId(null);
       setResolvedSegmentDurations({});
+      setFullAudioCurrentTime(0);
       if (updatedRowTimerRef.current) {
         clearTimeout(updatedRowTimerRef.current);
         updatedRowTimerRef.current = null;
@@ -368,7 +370,7 @@ export default function SynthesisPage() {
 
   const segmentTimings = useMemo(() => {
     let cursor = 0;
-    const gapMs = Number(config.gap_duration_ms || 500);
+    const gapMs = Number(config.gap_duration_ms || 300);
     const timings = {};
     segments.forEach(seg => {
       const durationMs = Number(seg.duration_ms || 0) > 0
@@ -383,6 +385,18 @@ export default function SynthesisPage() {
   }, [segments, config.gap_duration_ms, resolvedSegmentDurations]);
 
   const { isAutoPlay, currentSegmentId, playFrom, stop } = usePlaybackQueue(visibleSegments);
+  const fullAudioCurrentSegmentId = useMemo(() => {
+    const currentMs = Math.max(0, Number(fullAudioCurrentTime || 0) * 1000);
+    const activeSegment = segments.find((segment) => {
+      const timing = segmentTimings[segment.segment_id];
+      if (!timing) {
+        return false;
+      }
+      return currentMs >= timing.start && currentMs < timing.end;
+    });
+    return activeSegment?.segment_id || null;
+  }, [fullAudioCurrentTime, segments, segmentTimings]);
+  const highlightedSegmentId = currentSegmentId || fullAudioCurrentSegmentId;
 
   const totalSegments = draftScript?.segments?.length ?? 0;
   const progressPct = totalSegments > 0 ? Math.round((progress.current / totalSegments) * 100) : 0;
@@ -621,7 +635,8 @@ export default function SynthesisPage() {
         projectId={currentProject?.id}
         fullAudioUrl={fullAudioUrl}
         segments={segments}
-        gapDurationMs={Number(config.gap_duration_ms || 500)}
+        gapDurationMs={Number(config.gap_duration_ms || 300)}
+        onCurrentTimeChange={setFullAudioCurrentTime}
       />
 
       <div className="pageGrid sidebarLayout">
@@ -671,7 +686,7 @@ export default function SynthesisPage() {
           getSegmentStaleLabel={getSegmentStaleLabel}
           segmentTimings={segmentTimings}
           formatTimeMs={formatTimeMs}
-          currentSegmentId={currentSegmentId}
+          currentSegmentId={highlightedSegmentId}
           recentlyUpdatedSegmentId={recentlyUpdatedSegmentId}
           editingSegmentId={editingSegmentId}
           segmentDraft={segmentDraft}

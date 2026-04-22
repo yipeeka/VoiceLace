@@ -1108,9 +1108,9 @@ select.textInput option {
 .synthSegmentRow {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
-  padding: 10px 12px;
+  padding: 7px 10px;
   background: var(--bg-elevated);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
@@ -1130,8 +1130,8 @@ select.textInput option {
 .synthSegmentMeta {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-width: 140px;
+  gap: 6px;
+  min-width: 128px;
 }
 
 .synthProgressBar { flex: 1; }

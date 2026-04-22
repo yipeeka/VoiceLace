@@ -18,7 +18,7 @@ class MixerEngine:
     def mix_segments(
         self,
         segment_inputs: list[dict],
-        gap_ms: int = 500,
+        gap_ms: int = 300,
         crossfade_ms: int = 30,
         normalize: bool = True,
         target_sample_rate: int = 24000,

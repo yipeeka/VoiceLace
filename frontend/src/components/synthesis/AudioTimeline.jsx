@@ -26,7 +26,7 @@ function buildTimeline(segments, gapDurationMs) {
   return { items, totalMs: Math.max(1, cursorMs - gapDurationMs) };
 }
 
-export default function AudioTimeline({ audioUrl, segments, gapDurationMs = 500, onActiveSegmentChange, focusSegmentId }) {
+export default function AudioTimeline({ audioUrl, segments, gapDurationMs = 300, onActiveSegmentChange, focusSegmentId }) {
   const containerRef = useRef(null);
   const wavesurferRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);

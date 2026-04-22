@@ -1,7 +1,7 @@
 import GlassCard from "../shared/GlassCard";
 import SynthesisWaveSurfer from "../shared/SynthesisWaveSurfer";
 
-export default function SynthesisFullAudioCard({ projectId, fullAudioUrl, segments, gapDurationMs }) {
+export default function SynthesisFullAudioCard({ projectId, fullAudioUrl, segments, gapDurationMs, onCurrentTimeChange }) {
   if (!fullAudioUrl) {
     return null;
   }
@@ -14,6 +14,7 @@ export default function SynthesisFullAudioCard({ projectId, fullAudioUrl, segmen
         segments={segments}
         gapDurationMs={gapDurationMs}
         height={80}
+        onCurrentTimeChange={onCurrentTimeChange}
       />
     </GlassCard>
   );
