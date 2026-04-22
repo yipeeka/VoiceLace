@@ -9,6 +9,7 @@ export default function SegmentEditorFields({
   includeAdvanced = true,
   textMinHeight = 64,
   speakerOptions = [],
+  compact = false,
 }) {
   const knownSpeakerOptions = useMemo(() => {
     const map = new Map();
@@ -33,14 +34,8 @@ export default function SegmentEditorFields({
   );
 
   return (
-    <div style={{ display: "grid", gap: 6 }}>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(110px, 1fr) minmax(120px, 0.8fr) minmax(190px, 1.35fr)",
-          gap: 6,
-        }}
-      >
+    <div className={`segmentEditorFields${compact ? " compact" : ""}`}>
+      <div className={`segmentEditorFieldGrid${compact ? " compact" : ""}`}>
         <Select
           value={speakerSelectValue}
           onValueChange={(value) => {

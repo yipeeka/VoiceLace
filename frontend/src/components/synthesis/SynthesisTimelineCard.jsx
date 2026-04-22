@@ -1,3 +1,6 @@
+import { DndContext, closestCenter } from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
+
 import EmptyState from "../shared/EmptyState";
 import GlassCard from "../shared/GlassCard";
 import Button from "../ui/Button";
@@ -5,7 +8,12 @@ import SegmentTimelineRow from "./SegmentTimelineRow";
 
 export default function SynthesisTimelineCard({
   API_ORIGIN,
+  sensors,
+  canReorderTimeline,
+  onTimelineDragEnd,
   segments,
+  totalVisibleSegments,
+  activeSpeakerFilter,
   shouldShowSegmentTimeline,
   selectedSegmentIds,
   setSelectedSegmentIds,
@@ -27,6 +35,9 @@ export default function SynthesisTimelineCard({
   cancelEditSegment,
   saveEditedSegment,
   handleSingleSegmentSynthesis,
+  handleDeleteSegment,
+  setInsertAfterSegmentId,
+  insertAfterSegmentId,
   playFrom,
   isAutoPlay,
   stop,
@@ -40,8 +51,18 @@ export default function SynthesisTimelineCard({
   ];
 
   return (
-    <GlassCard className="fullWidthCard">
+    <GlassCard>
       <h2 className="cardTitle">分段时间线</h2>
+      {totalVisibleSegments ? (
+        <div className="controlRow" style={{ marginBottom: 10 }}>
+          <span className="muted">
+            当前显示 {totalVisibleSegments} 段{activeSpeakerFilter !== "all" ? "（已按角色筛选）" : ""}
+          </span>
+          {activeSpeakerFilter !== "all" ? (
+            <span className="muted">筛选状态下暂不支持拖拽排序</span>
+          ) : null}
+        </div>
+      ) : null}
       {selectedSegmentIds.length ? (
         <div className="controlRow" style={{ marginBottom: 10 }}>
           <span className="muted">已选 {selectedSegmentIds.length} 段</span>
@@ -71,45 +92,55 @@ export default function SynthesisTimelineCard({
         </div>
       ) : null}
       {segments.length && shouldShowSegmentTimeline ? (
-        <div className="synthesisTimeline">
-          {segments.map((seg) => {
-            const selected = selectedSegmentIds.includes(seg.segment_id);
-            const staleItem = staleItemBySegmentId[seg.segment_id];
-            const staleLabel = getSegmentStaleLabel(staleItem);
-            const isEditing = editingSegmentId === seg.segment_id;
-            return (
-              <SegmentTimelineRow
-                key={seg.segment_id}
-                API_ORIGIN={API_ORIGIN}
-                seg={seg}
-                isRunning={isRunning}
-                selected={selected}
-                onToggleSelected={(checked) =>
-                  setSelectedSegmentIds((ids) =>
-                    checked ? (ids.includes(seg.segment_id) ? ids : [...ids, seg.segment_id]) : ids.filter((id) => id !== seg.segment_id)
-                  )
-                }
-                staleItem={staleItem}
-                staleLabel={staleLabel}
-                segmentTiming={segmentTimings[seg.segment_id]}
-                formatTimeMs={formatTimeMs}
-                currentSegmentId={currentSegmentId}
-                recentlyUpdatedSegmentId={recentlyUpdatedSegmentId}
-                isEditing={isEditing}
-                segmentDraft={segmentDraft}
-                speakerOptions={speakerOptions}
-                setSegmentDraft={setSegmentDraft}
-                isScriptSaving={isScriptSaving}
-                beginEditSegment={beginEditSegment}
-                cancelEditSegment={cancelEditSegment}
-                saveEditedSegment={saveEditedSegment}
-                handleSingleSegmentSynthesis={handleSingleSegmentSynthesis}
-                playFrom={playFrom}
-                pushToast={pushToast}
-              />
-            );
-          })}
-        </div>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onTimelineDragEnd}>
+          <SortableContext items={segments.map((seg) => seg.segment_id)} strategy={verticalListSortingStrategy}>
+            <div className="synthesisTimeline">
+              {segments.map((seg) => {
+                const selected = selectedSegmentIds.includes(seg.segment_id);
+                const staleItem = staleItemBySegmentId[seg.segment_id];
+                const staleLabel = getSegmentStaleLabel(staleItem);
+                const isEditing = editingSegmentId === seg.segment_id;
+                return (
+                  <SegmentTimelineRow
+                    key={seg.segment_id}
+                    API_ORIGIN={API_ORIGIN}
+                    seg={seg}
+                    canReorder={canReorderTimeline}
+                    isRunning={isRunning}
+                    selected={selected}
+                    onToggleSelected={(checked) =>
+                      setSelectedSegmentIds((ids) =>
+                        checked ? (ids.includes(seg.segment_id) ? ids : [...ids, seg.segment_id]) : ids.filter((id) => id !== seg.segment_id)
+                      )
+                    }
+                    staleItem={staleItem}
+                    staleLabel={staleLabel}
+                    segmentTiming={segmentTimings[seg.segment_id]}
+                    formatTimeMs={formatTimeMs}
+                    currentSegmentId={currentSegmentId}
+                    recentlyUpdatedSegmentId={recentlyUpdatedSegmentId}
+                    isEditing={isEditing}
+                    isInsertAnchor={insertAfterSegmentId === seg.segment_id}
+                    segmentDraft={segmentDraft}
+                    speakerOptions={speakerOptions}
+                    setSegmentDraft={setSegmentDraft}
+                    isScriptSaving={isScriptSaving}
+                    beginEditSegment={beginEditSegment}
+                    cancelEditSegment={cancelEditSegment}
+                    saveEditedSegment={saveEditedSegment}
+                    handleSingleSegmentSynthesis={handleSingleSegmentSynthesis}
+                    handleDeleteSegment={handleDeleteSegment}
+                    setInsertAfterSegmentId={setInsertAfterSegmentId}
+                    playFrom={playFrom}
+                    pushToast={pushToast}
+                  />
+                );
+              })}
+            </div>
+          </SortableContext>
+        </DndContext>
+      ) : activeSpeakerFilter !== "all" ? (
+        <EmptyState title="该角色暂无段落" description="切换角色或点击“总计”可查看其他段落。" />
       ) : shouldShowSegmentTimeline ? (
         <EmptyState title="还没有分段结果" description="点击「开始合成」后每段音频完成时会在此显示" />
       ) : (

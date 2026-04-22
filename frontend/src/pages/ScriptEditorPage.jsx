@@ -1,23 +1,23 @@
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Pencil, Plus, Save, Trash2, Users } from "lucide-react";
+import { GripVertical, Pencil, Plus, Save, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import CharacterBadge, { getCharColor } from "../components/shared/CharacterBadge";
 import EmptyState from "../components/shared/EmptyState";
 import GlassCard from "../components/shared/GlassCard";
 import SegmentEditorFields from "../components/script/SegmentEditorFields";
+import ScriptSidebarColumn from "../components/script/ScriptSidebarColumn";
 import Button from "../components/ui/Button";
-import Select from "../components/ui/Select";
-import { TYPE_OPTIONS } from "../constants/scriptOptions";
 import { useProjectStore } from "../stores/useProjectStore";
 import { useScriptStore } from "../stores/useScriptStore";
 import { useUiStore } from "../stores/useUiStore";
 import { formatError } from "../utils/errors";
 import { buildProjectFilePayload, saveProjectFile } from "../utils/projectFile";
+import { buildSegmentEditorDraft, createSegmentDraft, normalizeSegmentFromEditorDraft } from "../utils/segmentEditorState";
+import { buildCharacterStats, buildSpeakerOptions, filterSegmentsBySpeaker, getInsertAnchorLabel } from "../utils/scriptSidebar";
 import { hasEditingDraftChanges } from "../utils/scriptEditorDirty";
-import { parseCsvList, parseOverridesJson } from "../utils/segmentDraft";
 import { computeScriptDiff, normalizeDraftScript } from "../utils/scriptDiff";
 
 function SortableSegmentCard({
@@ -27,6 +27,7 @@ function SortableSegmentCard({
   draft,
   speakerOptions,
   canEdit,
+  canReorder,
   isSaving,
   onBeginEdit,
   onUpdateDraft,
@@ -35,7 +36,10 @@ function SortableSegmentCard({
   onSetInsertAnchor,
   onDelete,
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: segment.id });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: segment.id,
+    disabled: !canReorder || isEditing || isSaving,
+  });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -49,7 +53,12 @@ function SortableSegmentCard({
     <div ref={setNodeRef} style={style} className={`segmentCard ${isEditing ? "editing" : ""} ${isInsertAnchor ? "insertAnchor" : ""}`}>
       {/* Drag handle */}
       {canEdit && !isEditing && (
-        <div className="dragHandle" {...attributes} {...listeners}>
+        <div
+          className={`dragHandle ${canReorder ? "" : "disabled"}`}
+          title={canReorder ? "拖拽调整顺序" : "当前筛选状态下暂不支持拖拽排序"}
+          aria-label={canReorder ? "拖拽调整顺序" : "当前筛选状态下暂不支持拖拽排序"}
+          {...(canReorder ? { ...attributes, ...listeners } : {})}
+        >
           <GripVertical size={15} />
         </div>
       )}
@@ -132,42 +141,6 @@ function SortableSegmentCard({
   );
 }
 
-function createSegmentDraft(index) {
-  return {
-    id: crypto.randomUUID(),
-    index,
-    type: "dialogue",
-    speaker: "narrator",
-    text: "",
-    emotion: "neutral",
-    non_verbal: [],
-    tts_overrides: {},
-    nonVerbalText: "",
-    ttsOverridesText: "{}",
-  };
-}
-
-function normalizeSegmentFromEditorDraft(draft) {
-  const parsed = parseOverridesJson(draft?.ttsOverridesText || "{}");
-  if (!parsed.ok) {
-    return { ok: false, error: parsed.error };
-  }
-  return {
-    ok: true,
-    value: {
-      ...draft,
-      nonVerbalText: undefined,
-      ttsOverridesText: undefined,
-      speaker: (draft?.speaker || "").trim() || "narrator",
-      text: (draft?.text || "").trim(),
-      type: draft?.type || "dialogue",
-      emotion: draft?.emotion || "neutral",
-      non_verbal: parseCsvList(draft?.nonVerbalText),
-      tts_overrides: parsed.value,
-    },
-  };
-}
-
 export default function ScriptEditorPage() {
   const { currentProject, currentProjectFileHandle, bindCurrentProjectFile, refreshCurrentProject } = useProjectStore();
   const { script, replaceScript, saveScript, isSaving, error } = useScriptStore();
@@ -179,9 +152,8 @@ export default function ScriptEditorPage() {
   const [editingId, setEditingId] = useState(null);
   const [segmentDraft, setSegmentDraft] = useState(null);
   const [newSegment, setNewSegment] = useState(() => createSegmentDraft(0));
-  const [isCustomNewSpeaker, setIsCustomNewSpeaker] = useState(false);
-  const [customNewSpeakerName, setCustomNewSpeakerName] = useState("");
   const [insertAfterSegmentId, setInsertAfterSegmentId] = useState(null);
+  const [activeSpeakerFilter, setActiveSpeakerFilter] = useState("all");
   const setProjectSaveAction = useUiStore((state) => state.setProjectSaveAction);
   const clearProjectSaveAction = useUiStore((state) => state.clearProjectSaveAction);
 
@@ -209,9 +181,8 @@ export default function ScriptEditorPage() {
       setEditingId(null);
       setSegmentDraft(null);
       setInsertAfterSegmentId(null);
+      setActiveSpeakerFilter("all");
       setNewSegment(createSegmentDraft(normalized.segments.length));
-      setIsCustomNewSpeaker(false);
-      setCustomNewSpeakerName("");
       lastProjectIdRef.current = projectId;
       return;
     }
@@ -223,33 +194,31 @@ export default function ScriptEditorPage() {
   }, [currentProject?.id, script]);
 
   // Character stats
-  const characters = useMemo(() => {
-    const counts = {};
-    for (const seg of segments) {
-      const name = seg.speaker || "旁白";
-      counts[name] = (counts[name] || 0) + 1;
+  const characters = useMemo(() => buildCharacterStats(segments), [segments]);
+  const newSegmentSpeakerOptions = useMemo(
+    () => buildSpeakerOptions(characters, { includeCreateOption: true }),
+    [characters]
+  );
+  const segmentSpeakerOptions = useMemo(() => buildSpeakerOptions(characters), [characters]);
+  const visibleSegments = useMemo(
+    () => filterSegmentsBySpeaker(segments, activeSpeakerFilter),
+    [segments, activeSpeakerFilter]
+  );
+  const isFilterActive = activeSpeakerFilter !== "all";
+  const insertAfterLabel = useMemo(
+    () => getInsertAnchorLabel(segments, insertAfterSegmentId),
+    [segments, insertAfterSegmentId]
+  );
+
+  useEffect(() => {
+    if (activeSpeakerFilter === "all") {
+      return;
     }
-    return Object.entries(counts)
-      .sort((a, b) => b[1] - a[1])
-      .map(([name, count]) => ({ name, count }));
-  }, [segments]);
-  const newSegmentSpeakerOptions = useMemo(() => {
-    const existing = characters.map((item) => item.name).filter(Boolean);
-    const withoutNarrator = existing.filter((name) => name !== "narrator");
-    return [
-      { value: "narrator", label: "narrator（默认）" },
-      ...withoutNarrator.map((name) => ({ value: name, label: name })),
-      { value: "__new__", label: "+ 添加新角色" },
-    ];
-  }, [characters]);
-  const segmentSpeakerOptions = useMemo(() => {
-    const existing = characters.map((item) => item.name).filter(Boolean);
-    const withoutNarrator = existing.filter((name) => name !== "narrator");
-    return [
-      { value: "narrator", label: "narrator" },
-      ...withoutNarrator.map((name) => ({ value: name, label: name })),
-    ];
-  }, [characters]);
+    const exists = characters.some((character) => character.name === activeSpeakerFilter);
+    if (!exists) {
+      setActiveSpeakerFilter("all");
+    }
+  }, [activeSpeakerFilter, characters]);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -258,6 +227,7 @@ export default function ScriptEditorPage() {
 
   function handleDragEnd(event) {
     const { active, over } = event;
+    if (isFilterActive) return;
     if (!over || active.id === over.id) return;
     setDraftScript((current) => {
       const list = current.segments ?? [];
@@ -273,11 +243,7 @@ export default function ScriptEditorPage() {
 
   function beginEdit(segment) {
     setEditingId(segment.id);
-    setSegmentDraft({
-      ...segment,
-      nonVerbalText: Array.isArray(segment.non_verbal) ? segment.non_verbal.join(", ") : "",
-      ttsOverridesText: JSON.stringify(segment.tts_overrides || {}, null, 2),
-    });
+    setSegmentDraft(buildSegmentEditorDraft(segment));
   }
 
   function cancelEdit(id) {
@@ -321,23 +287,18 @@ export default function ScriptEditorPage() {
 
   function handleAddSegment() {
     if (!newSegment.text.trim()) return;
-    const parsed = parseOverridesJson(newSegment.ttsOverridesText || "{}");
-    if (!parsed.ok) {
+    const normalized = normalizeSegmentFromEditorDraft(newSegment);
+    if (!normalized.ok) {
       useUiStore.getState().pushToast({
-        title: `新增片段 tts_overrides JSON 格式错误：${parsed.error}`,
+        title: `新增片段 tts_overrides JSON 格式错误：${normalized.error}`,
         tone: "error",
       });
       return;
     }
     const toAdd = {
-      id: crypto.randomUUID(),
+      ...normalized.value,
+      id: normalized.value.id || crypto.randomUUID(),
       index: 0,
-      type: newSegment.type || "dialogue",
-      speaker: (isCustomNewSpeaker ? customNewSpeakerName : newSegment.speaker || "").trim() || "narrator",
-      text: (newSegment.text || "").trim(),
-      emotion: newSegment.emotion || "neutral",
-      non_verbal: parseCsvList(newSegment.nonVerbalText),
-      tts_overrides: parsed.value,
     };
     setDraftScript((current) => ({
       ...current,
@@ -352,8 +313,6 @@ export default function ScriptEditorPage() {
       })(),
     }));
     setNewSegment(createSegmentDraft(segments.length + 1));
-    setIsCustomNewSpeaker(false);
-    setCustomNewSpeakerName("");
     setInsertAfterSegmentId(null);
     useUiStore.getState().pushToast({
       title: "已加入草稿，点击“保存剧本”后生效",
@@ -497,40 +456,23 @@ export default function ScriptEditorPage() {
   return (
     <div className="pageGrid sidebarLayout">
       {/* Left: character panel */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <GlassCard>
-          <h2 className="cardTitle"><Users size={16} /> 角色面板</h2>
-          {characters.length ? (
-            <div className="listStack">
-              {characters.map(({ name, count }) => (
-                <div key={name} className="statRow" style={{ gap: 8 }}>
-                  <CharacterBadge name={name} />
-                  <span className="muted" style={{ marginLeft: "auto" }}>
-                    {count} 段
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState title="暂无角色" description="解析后角色将在此显示" />
-          )}
-          <div
-            className="statRow"
-            style={{ marginTop: 8, borderTop: "1px solid var(--border-subtle)", paddingTop: 10 }}
-          >
-            <span style={{ color: "var(--text-muted)" }}>总计</span>
-            <strong>{segments.length} 段</strong>
-          </div>
-        </GlassCard>
-
-        <GlassCard>
-          <h2 className="cardTitle">操作</h2>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {hasUnsavedChanges ? (
-              <div className="statusBadge warning">有未保存改动</div>
-            ) : (
-              <div className="statusBadge success">已保存</div>
-            )}
+      <ScriptSidebarColumn
+        characters={characters}
+        totalSegments={segments.length}
+        activeSpeakerFilter={activeSpeakerFilter}
+        onSelectSpeaker={setActiveSpeakerFilter}
+        hasUnsavedChanges={hasUnsavedChanges}
+        error={error}
+        newSegment={newSegment}
+        newSegmentSpeakerOptions={newSegmentSpeakerOptions}
+        canEdit={canEdit}
+        isSaving={isSaving}
+        insertAfterLabel={insertAfterLabel}
+        onClearInsertAnchor={() => setInsertAfterSegmentId(null)}
+        onNewSegmentFieldChange={(field, value) => setNewSegment((current) => ({ ...current, [field]: value }))}
+        onAddSegment={handleAddSegment}
+        actionContent={
+          <>
             <Button variant="primary" onClick={handleSaveScript} disabled={!canEdit || isSaving || !hasUnsavedChanges}>
               <Save size={14} />
               {isSaving ? "保存中..." : hasUnsavedChanges ? "保存剧本" : "已保存"}
@@ -542,72 +484,9 @@ export default function ScriptEditorPage() {
               导入 JSON
             </Button>
             <input ref={fileInputRef} type="file" accept=".json" style={{ display: "none" }} onChange={handleImportJson} />
-          </div>
-          {error && <div className="errorText">⚠ {error}</div>}
-        </GlassCard>
-
-        {/* Add segment */}
-        <GlassCard>
-          <h2 className="cardTitle">新增片段</h2>
-          <div className="controlRow" style={{ justifyContent: "space-between" }}>
-            <span className="muted">
-              {insertAfterSegmentId
-                ? `将插入到 #${(segments.find((item) => item.id === insertAfterSegmentId)?.index ?? 0) + 1} 之后`
-                : "默认追加到末尾"}
-            </span>
-            {insertAfterSegmentId ? (
-              <Button variant="ghost" size="sm" onClick={() => setInsertAfterSegmentId(null)}>
-                改为追加到末尾
-              </Button>
-            ) : null}
-          </div>
-          <div className="formGroup">
-            <label className="formLabel">角色</label>
-            <Select
-              value={isCustomNewSpeaker ? "__new__" : newSegment.speaker}
-              onValueChange={(value) => {
-                if (value === "__new__") {
-                  setIsCustomNewSpeaker(true);
-                  return;
-                }
-                setIsCustomNewSpeaker(false);
-                setCustomNewSpeakerName("");
-                setNewSegment((s) => ({ ...s, speaker: value || "narrator" }));
-              }}
-              options={newSegmentSpeakerOptions}
-            />
-            {isCustomNewSpeaker ? (
-              <input
-                className="textInput"
-                value={customNewSpeakerName}
-                onChange={(e) => setCustomNewSpeakerName(e.target.value)}
-                placeholder="输入新角色名（留空将使用 narrator）"
-              />
-            ) : null}
-          </div>
-          <div className="formGroup">
-            <label className="formLabel">类型</label>
-            <Select
-              value={newSegment.type}
-              onValueChange={(v) => setNewSegment((s) => ({ ...s, type: v }))}
-              options={TYPE_OPTIONS}
-            />
-          </div>
-          <textarea
-            className="textArea compactArea"
-            value={newSegment.text}
-            onChange={(e) => setNewSegment((s) => ({ ...s, text: e.target.value }))}
-            placeholder="台词或旁白内容..."
-          />
-          <Button
-            variant="primary"
-            disabled={!canEdit || isSaving || !newSegment.text.trim()}
-            onClick={handleAddSegment}
-          >
-            + 添加片段
-          </Button>
-        </GlassCard>
-      </div>
+          </>
+        }
+      />
 
       {/* Right: segment list */}
       <GlassCard>
@@ -615,16 +494,18 @@ export default function ScriptEditorPage() {
           <div className="sectionHeaderLeft">
             <h2 className="cardTitle">片段列表</h2>
             <p className="cardSubtitle">
-              拖动左侧手柄可调整顺序，点击内容编辑片段。{hasUnsavedChanges ? "（当前有未保存改动）" : "（当前已保存）"}
+              {isFilterActive
+                ? `当前按角色筛选显示，拖拽排序已暂时关闭。${hasUnsavedChanges ? "（当前有未保存改动）" : "（当前已保存）"}`
+                : `拖动左侧手柄可调整顺序，点击内容编辑片段。${hasUnsavedChanges ? "（当前有未保存改动）" : "（当前已保存）"}`}
             </p>
           </div>
         </div>
 
-        {segments.length ? (
+        {visibleSegments.length ? (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={segments.map((s) => s.id)} strategy={verticalListSortingStrategy}>
+            <SortableContext items={visibleSegments.map((s) => s.id)} strategy={verticalListSortingStrategy}>
               <div className="listStack">
-                {segments.map((segment) => (
+                {visibleSegments.map((segment) => (
                   <SortableSegmentCard
                     key={segment.id}
                     segment={segment}
@@ -633,6 +514,7 @@ export default function ScriptEditorPage() {
                     draft={segmentDraft?.id === segment.id ? segmentDraft : null}
                     speakerOptions={segmentSpeakerOptions}
                     canEdit={canEdit}
+                    canReorder={!isFilterActive}
                     isSaving={isSaving}
                     onBeginEdit={beginEdit}
                     onUpdateDraft={updateDraft}
@@ -645,6 +527,11 @@ export default function ScriptEditorPage() {
               </div>
             </SortableContext>
           </DndContext>
+        ) : segments.length ? (
+          <EmptyState
+            title="该角色暂无段落"
+            description="点击左侧“总计”可恢复查看全部片段"
+          />
         ) : (
           <EmptyState
             title="还没有剧本片段"

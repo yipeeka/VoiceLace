@@ -1,4 +1,6 @@
-import { Pencil, Play, Save, X } from "lucide-react";
+import { Pencil, Play, Plus, RefreshCw, Save, Trash2, X, GripVertical } from "lucide-react";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 import SegmentEditorFields from "../script/SegmentEditorFields";
 import CharacterBadge from "../shared/CharacterBadge";
@@ -11,6 +13,7 @@ const STATUS_ROW_CLS = { done: "done", running: "running", pending: "pending", e
 export default function SegmentTimelineRow({
   API_ORIGIN,
   seg,
+  canReorder,
   isRunning,
   selected,
   onToggleSelected,
@@ -21,6 +24,7 @@ export default function SegmentTimelineRow({
   currentSegmentId,
   recentlyUpdatedSegmentId,
   isEditing,
+  isInsertAnchor,
   segmentDraft,
   speakerOptions,
   setSegmentDraft,
@@ -29,21 +33,42 @@ export default function SegmentTimelineRow({
   cancelEditSegment,
   saveEditedSegment,
   handleSingleSegmentSynthesis,
+  handleDeleteSegment,
+  setInsertAfterSegmentId,
   playFrom,
   pushToast,
 }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: seg.segment_id,
+    disabled: !canReorder || isEditing || isRunning,
+  });
   const segStatus = seg.display_status ?? seg.status ?? "pending";
   const staleTone = staleItem?.status === "ready" ? "success" : "warning";
   const canPlaySegment = Boolean(seg.audio_url) && segStatus !== "missing";
 
   return (
     <div
+      ref={setNodeRef}
       className={`synthSegmentRow ${STATUS_ROW_CLS[segStatus] ?? "pending"} ${recentlyUpdatedSegmentId === seg.segment_id ? "updated" : ""}`}
       style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.6 : 1,
         ...(currentSegmentId === seg.segment_id ? { borderColor: "var(--accent-primary)" } : {}),
+        ...(isInsertAnchor ? { borderColor: "var(--accent-secondary)" } : {}),
         ...(isEditing ? { alignItems: "flex-start", flexWrap: "wrap" } : {}),
       }}
     >
+      {!isEditing ? (
+        <div
+          className={`dragHandle ${canReorder && !isRunning ? "" : "disabled"}`}
+          title={canReorder ? "拖拽调整顺序" : "当前筛选状态下暂不支持拖拽排序"}
+          aria-label={canReorder ? "拖拽调整顺序" : "当前筛选状态下暂不支持拖拽排序"}
+          {...(canReorder && !isRunning ? { ...attributes, ...listeners } : {})}
+        >
+          <GripVertical size={15} />
+        </div>
+      ) : null}
       <label className="controlRow" style={{ gap: 6 }}>
         <input type="checkbox" checked={selected} disabled={isRunning} onChange={(e) => onToggleSelected(e.target.checked)} />
       </label>
@@ -66,6 +91,7 @@ export default function SegmentTimelineRow({
           </span>
         )}
         {staleLabel ? <span className={`statusBadge ${staleTone}`}>{staleLabel}</span> : null}
+        {seg.draft_status === "unsaved" ? <span className="statusBadge warning">未保存改动</span> : null}
       </div>
 
       {isEditing ? (
@@ -98,24 +124,6 @@ export default function SegmentTimelineRow({
           <AudioPlayer audioUrl={`${API_ORIGIN}${seg.audio_url}`} peaks={seg.peaks} peaksUrl={seg.peaks_url} height={32} compact />
         </div>
       )}
-      {canPlaySegment && (
-        <Button
-          variant="ghost"
-          size="sm"
-          icon={Play}
-          onClick={async () => {
-            const ok = await playFrom(seg.segment_id, seg.audio_url);
-            if (!ok) {
-              pushToast({ title: "连续播放启动失败，请重试。", tone: "error" });
-            }
-          }}
-        >
-          从此处连播
-        </Button>
-      )}
-      <Button variant="secondary" size="sm" disabled={isRunning} onClick={() => handleSingleSegmentSynthesis(seg.segment_id)}>
-        重新生成
-      </Button>
       {isEditing ? (
         <>
           <Button
@@ -125,16 +133,66 @@ export default function SegmentTimelineRow({
             disabled={isRunning || isScriptSaving || !segmentDraft?.text?.trim()}
             onClick={() => saveEditedSegment(seg)}
           >
-            保存
+            应用到草稿
           </Button>
           <Button variant="ghost" size="sm" icon={X} disabled={isRunning || isScriptSaving} onClick={cancelEditSegment}>
             取消
           </Button>
         </>
       ) : (
-        <Button variant="ghost" size="sm" icon={Pencil} disabled={isRunning} onClick={() => beginEditSegment(seg)}>
-          编辑
-        </Button>
+        <div className="synthSegmentActionIcons">
+          {canPlaySegment && (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={Play}
+              title="从此处连播"
+              aria-label="从此处连播"
+              onClick={async () => {
+                const ok = await playFrom(seg.segment_id, seg.audio_url);
+                if (!ok) {
+                  pushToast({ title: "连续播放启动失败，请重试。", tone: "error" });
+                }
+              }}
+            />
+          )}
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={RefreshCw}
+            title="重新生成"
+            aria-label="重新生成"
+            disabled={isRunning}
+            onClick={() => handleSingleSegmentSynthesis(seg.segment_id)}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={Pencil}
+            title="编辑"
+            aria-label="编辑"
+            disabled={isRunning}
+            onClick={() => beginEditSegment(seg)}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={Trash2}
+            title="删除"
+            aria-label="删除"
+            disabled={isRunning}
+            onClick={() => handleDeleteSegment(seg.segment_id)}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={Plus}
+            title="设为插入点"
+            aria-label="设为插入点"
+            disabled={isRunning}
+            onClick={() => setInsertAfterSegmentId(seg.segment_id)}
+          />
+        </div>
       )}
 
       <span className="synthStatus">{STATUS_ICON[segStatus] ?? "⬜"}</span>

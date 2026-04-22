@@ -381,9 +381,15 @@ pre, code {
 
 .pageGrid.sidebarLayout {
   display: grid;
-  grid-template-columns: 240px 1fr;
+  grid-template-columns: 320px 1fr;
   gap: 20px;
   align-items: start;
+}
+
+@media (max-width: 1080px) {
+  .pageGrid.sidebarLayout {
+    grid-template-columns: 1fr;
+  }
 }
 
 .fullWidthCard {
@@ -1008,6 +1014,10 @@ select.textInput option {
 }
 .dragHandle:hover { color: var(--text-secondary); }
 .dragHandle:active { cursor: grabbing; }
+.dragHandle.disabled {
+  cursor: default;
+  opacity: 0.45;
+}
 
 /* ─────────────────────────────────────────────────────────────
    VOICE PRESET CARDS
@@ -1099,6 +1109,7 @@ select.textInput option {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
   padding: 10px 12px;
   background: var(--bg-elevated);
   border: 1px solid var(--border-default);
@@ -1130,6 +1141,17 @@ select.textInput option {
   flex-shrink: 0;
   width: 20px;
   text-align: center;
+}
+
+.synthSegmentActionIcons {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.synthSegmentActionIcons .btn {
+  min-width: 32px;
 }
 
 /* Full-audio waveform horizontal scrollbar (wavesurfer shadow part) */
@@ -1200,6 +1222,24 @@ select.textInput option {
   gap: 8px;
 }
 
+.segmentEditorFields {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.segmentEditorFieldGrid {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) minmax(120px, 0.8fr) minmax(190px, 1.35fr);
+  gap: 6px;
+  min-width: 0;
+}
+
+.segmentEditorFields.compact .segmentEditorFieldGrid,
+.segmentEditorFieldGrid.compact {
+  grid-template-columns: 1fr;
+}
+
 .statRow {
   display: flex;
   align-items: center;
@@ -1208,6 +1248,24 @@ select.textInput option {
   background: var(--bg-elevated);
   border-radius: var(--radius-sm);
   font-size: 13px;
+}
+
+.statRowButton {
+  width: 100%;
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--duration-fast) ease,
+              background var(--duration-fast) ease;
+}
+
+.statRowButton:hover:not(:disabled) {
+  border-color: rgba(255,255,255,0.12);
+}
+
+.statRowButton.active {
+  border-color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary-dim) 58%, transparent);
 }
 
 .statRow > span { color: var(--text-secondary); }
