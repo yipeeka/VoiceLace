@@ -834,6 +834,18 @@ def _build_source_corrected_draft(
     title: str,
     fallback_draft: StructuredScriptDraft,
 ) -> StructuredScriptDraft:
+    def _normalized_dialogue_match_key(text: str) -> str:
+        value = _strip_non_verbal_tags(text or "")
+        value = _strip_pinyin_annotations(value)
+        value = _strip_wrapping_quotes(value)
+        return _normalize_compare_text(value)
+
+    def _loose_dialogue_match_key(text: str) -> str:
+        value = _strip_non_verbal_tags(text or "")
+        value = _strip_pinyin_annotations(value)
+        value = _strip_wrapping_quotes(value)
+        return re.sub(r"[，,。？！!?；;：:、“”\"'‘’\s]", "", value)
+
     corrected_segments = _build_source_corrected_segments(source_text)
     if not corrected_segments:
         return fallback_draft
@@ -843,20 +855,27 @@ def _build_source_corrected_draft(
     for corrected in corrected_segments:
         if corrected.type != "dialogue":
             continue
-        corrected_key = _normalize_compare_text(_strip_non_verbal_tags(corrected.text))
+        corrected_key = _normalized_dialogue_match_key(corrected.text)
+        corrected_loose_key = _loose_dialogue_match_key(corrected.text)
         if not corrected_key:
             continue
         for candidate_index in range(search_start, len(fallback_dialogues)):
             candidate = fallback_dialogues[candidate_index]
-            candidate_key = _normalize_compare_text(_strip_non_verbal_tags(candidate.text))
+            candidate_key = _normalized_dialogue_match_key(candidate.text)
+            candidate_loose_key = _loose_dialogue_match_key(candidate.text)
             if not candidate_key:
                 continue
-            if corrected_key != candidate_key:
+            if (
+                corrected_key != candidate_key
+                and corrected_loose_key != candidate_loose_key
+                and corrected_key not in candidate_key
+                and candidate_key not in corrected_key
+                and corrected_loose_key not in candidate_loose_key
+                and candidate_loose_key not in corrected_loose_key
+            ):
                 continue
-            if corrected.speaker == "有人" and candidate.speaker.strip():
+            if candidate.speaker.strip():
                 corrected.speaker = candidate.speaker.strip()
-            elif corrected.speaker.strip() != candidate.speaker.strip():
-                continue
             transferred_tags = _extract_non_verbal_tags_from_text(candidate.text)
             if transferred_tags:
                 corrected.text = apply_non_verbal_tags_to_text(corrected.text, transferred_tags)

@@ -182,6 +182,44 @@ class TwoStepPipelineTest(unittest.TestCase):
             "不过你该记得，你有一回八十七天钓不到一条鱼，跟着有三个礼拜，我们每天都逮住了大鱼。",
         )
 
+    def test_parse_step1_lines_source_correction_preserves_step1_speaker_when_fallback_dialogue_keeps_quotes(self) -> None:
+        draft = parse_step1_lines_to_structured_draft(
+            "孩子：“他没多大的信心。”",
+            source_text="“他没多大的信心。”",
+        )
+        self.assertEqual(len(draft.segments), 1)
+        self.assertEqual(draft.segments[0].type, "dialogue")
+        self.assertEqual(draft.segments[0].speaker, "孩子")
+        self.assertEqual(draft.segments[0].text, "他没多大的信心。")
+
+    def test_parse_step1_lines_source_correction_preserves_step1_speaker_over_bad_source_extraction(self) -> None:
+        draft = parse_step1_lines_to_structured_draft(
+            "旁白：差役喝道：\n差役：乱什么！按次序来！\n旁白：儿子却盯着前头那人背上的刀，轻声问道：\n儿子：爹，他是兵吗？",
+            source_text="差役喝道：“乱什么！按次序来！”\n儿子却盯着前头那人背上的刀，轻声问道：“爹，他是兵吗？”",
+        )
+        self.assertEqual(
+            [(segment.type, segment.speaker, segment.text) for segment in draft.segments],
+            [
+                ("narration", "narrator", "差役喝道："),
+                ("dialogue", "差役", "乱什么！按次序来！"),
+                ("narration", "narrator", "儿子却盯着前头那人背上的刀，轻声问道："),
+                ("dialogue", "儿子", "爹，他是兵吗？"),
+            ],
+        )
+
+    def test_parse_step1_lines_source_correction_preserves_step1_speaker_for_action_chain(self) -> None:
+        draft = parse_step1_lines_to_structured_draft(
+            "旁白：老周在巷口停下，朝右一指道：\n老周：先去当铺，把这块表押了。",
+            source_text="老周在巷口停下，朝右一指道：“先去当铺，把这块表押了。”",
+        )
+        self.assertEqual(
+            [(segment.type, segment.speaker, segment.text) for segment in draft.segments],
+            [
+                ("narration", "narrator", "老周在巷口停下，朝右一指道："),
+                ("dialogue", "老周", "先去当铺，把这块表押了。"),
+            ],
+        )
+
     def test_merge_two_step_output_filters_unknown_non_verbal_tags(self) -> None:
         draft = parse_step1_lines_to_structured_draft(
             "旁白：引导。\n孩子：我又能陪你出海了。",
