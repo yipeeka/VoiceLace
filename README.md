@@ -1,61 +1,128 @@
 # BeautyVoiceTTS
 
-本项目是一个本地运行的多角色有声书系统，主流程为：
+本项目是一个本地运行的多角色有声书工作台，核心流程是：
 
-1. 文本输入并调用 LLM 解析为剧本片段
-2. 剧本编辑与角色声音分配
-3. 调用 TTS 批量合成并导出音频
+1. 文本输入（LLM 解析剧本）
+2. 剧本编辑（逐段改写/新增/删除）
+3. 声音配置（角色绑定预设）
+4. 合成导出（全量或局部重生成）
 
-当前版本已支持真实模型后端，并具备 WebSocket 实时事件、任务取消、事件日志回放能力。
+当前版本支持真实模型（`llama-cpp-python` / `OmniVoice` / `Whisper`），并提供 WebSocket 实时进度、任务取消、事件回放、工程导入导出。
 
-## 当前状态
+---
 
-- Backend: FastAPI
-- Frontend: Vite + React
-- LLM: `llama-cpp-python`（可回退 mock）
-- TTS: `omnivoice`（可回退 mock）
-- ASR: Whisper（`openai-whisper` / `faster-whisper`）
-- 实时能力: WebSocket 任务流（LLM chunk、TTS segment/progress）
-- 持久化: JSON（项目）+ JSONL（项目任务事件日志）
+## 3 分钟上手（推荐先看）
 
-运行时配置策略：
-- 设置页配置保存到 `backend/data/config.json`
-- `.env` 仅用于启动默认值和敏感项（如 API Key）
-- 设置页修改不会自动改写 `.env`
-
-## 快速启动
-
-### 1) 创建并激活虚拟环境
+### 1) 启动
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
+pip install -r backend\requirements.txt
+.\.venv\Scripts\python.exe -m pip install -r backend\requirements-real.txt
+cd frontend
+npm install
+cd ..
+.\.venv\Scripts\python.exe start.py
 ```
 
-### 2) 安装依赖
+启动后：
+- 前端默认 `http://127.0.0.1:5173`
+- 后端默认 `http://127.0.0.1:8000`
 
-基础依赖：
+### 2) 系统设置页先配模型路径
+
+至少确认：
+- `LLM 后端`（`llama_cpp` / `openai` / `gemini` / `mock`）
+- `LLM 模型路径`（本地 GGUF 时）
+- `TTS 模型目录`
+- `ASR 模型目录/名称`
+
+说明：
+- 设置页保存到 `backend/data/config.json`
+- `.env` 只作为启动默认值和敏感项（API Key）
+- 设置页修改不会自动改写 `.env`
+
+### 3) 按页面顺序跑一次完整流程
+
+1. **文本输入**：新建项目 -> 粘贴文本 -> 选择解析模式 -> 开始解析  
+2. **剧本编辑**：检查分段和说话人，修改后记得保存  
+3. **声音配置**：给每个角色分配声音预设  
+4. **合成导出**：先全量合成一次；后续只重生成“需更新段落”  
+
+### 4) 日常高频操作
+
+- 打开项目文件：文本输入页 -> `打开项目文件`
+- 导入工程 ZIP：文本输入页 -> `导入工程 ZIP`
+- 项目改名：文本输入页工具栏 `项目新名称` + `改名`
+- 删除同名副本/清理重复：文本输入页工具栏 `更多`
+- 局部修音：合成导出页逐段 `重新生成` 或 `需更新段落重新生成`
+
+---
+
+## 用户使用手册（详细）
+
+## 页面 1：文本输入
+
+- 项目工具栏支持：
+  - 项目切换
+  - 新建项目
+  - 改名
+  - 打开项目文件
+  - 导入工程 ZIP
+  - 更多菜单（删除当前项目、删除同名副本、清理重复项目）
+- 解析模式：
+  - `两步解析（推荐）`：更稳，适合复杂长文
+  - `经典单步解析`：更快，兼容旧行为
+- 自定义提示词：
+  - 仅对单步链路生效
+  - 两步链路使用内置 Step1/Step2 提示词
+
+## 页面 2：剧本编辑
+
+- 可逐段编辑：`speaker/type/text/emotion/tts_overrides`
+- 新增片段可插入指定位置
+- 任何添加/删除/修改都先进入草稿态，保存后才写入项目
+- 有未保存改动会有明确提示
+
+## 页面 3：声音配置
+
+- 角色分配列表按剧本真实角色聚合
+- 支持声音预设创建、试听、绑定
+- 预设支持排序与保存成功提示
+
+## 页面 4：合成导出
+
+- 显示每段状态：已同步 / 缺失音频 / 配置变化待重生成 / 已修改待重生成
+- 支持：
+  - 单段 `重新生成`
+  - 批量 `需更新段落重新生成`
+  - 从某段开始连播
+- 完整音频与分段音频都支持波形显示（后端预计算 peaks）
+
+---
+
+## 安装与配置（开发/部署）
+
+## 依赖安装
 
 ```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r backend\requirements.txt
+.\.venv\Scripts\python.exe -m pip install -r backend\requirements-real.txt
 cd frontend
 npm install
 cd ..
 ```
 
-真实模型依赖（LLM/TTS/ASR）：
+## `.env` 常用项
 
-```powershell
-.\.venv\Scripts\python.exe -m pip install -r backend\requirements-real.txt
-```
-
-### 3) 配置 `.env`
-
-参考 [`.env.example`](/E:/softs/BeautyVoiceTTS/.env.example)，常用项如下：
+参考 [`.env.example`](/E:/softs/BeautyVoiceTTS/.env.example)。
 
 ```env
-BV_LLM_MODEL_PATH=D:\path\to\model.gguf
 BV_LLM_BACKEND=llama_cpp
+BV_LLM_MODEL_PATH=D:\path\to\model.gguf
 BV_LLM_API_MODEL=gpt-4.1-mini
 BV_LLM_CHAT_FORMAT=chatml
 BV_LLM_N_CTX=8192
@@ -68,13 +135,11 @@ BV_LLM_MIN_P=0.0
 BV_LLM_PRESENCE_PENALTY=0.0
 BV_LLM_REPEAT_PENALTY=1.0
 BV_LLM_MAX_TOKENS=2048
+
 BV_OPENAI_API_KEY=your-openai-key
 BV_OPENAI_MODEL=gpt-4.1-mini
 BV_GEMINI_API_KEY=your-gemini-key
 BV_GEMINI_MODEL=gemini-2.5-flash
-BV_AUTO_SERIAL=true
-BV_AUTO_UNLOAD_LLM_AFTER_PARSE=true
-BV_AUTO_LOAD_TTS_BEFORE_SYNTH=true
 
 BV_TTS_MODEL_PATH=E:\softs\BeautyVoiceTTS\models\OmniVoice
 BV_TTS_DEVICE=cuda:0
@@ -82,25 +147,26 @@ BV_TTS_DEVICE=cuda:0
 BV_ASR_MODEL_PATH=base
 BV_ASR_DEVICE=cuda:0
 
+BV_AUTO_SERIAL=true
+BV_AUTO_UNLOAD_LLM_AFTER_PARSE=true
+BV_AUTO_LOAD_TTS_BEFORE_SYNTH=true
 BV_ALLOW_MOCK_FALLBACK=true
 ```
 
 说明：
-
 - `BV_LLM_BACKEND` 支持 `llama_cpp` / `openai` / `gemini` / `mock`
-- `BV_ASR_MODEL_PATH`
-  - `openai-whisper` 模式可用 `tiny/base/small/...`
-  - `faster-whisper` 模式可用模型名或本地目录
-- `BV_ALLOW_MOCK_FALLBACK=false` 时，LLM/TTS 加载失败将直接报错，不回退 mock
-- 如果 `backend/data/config.json` 存在，运行时会优先读取该文件中的配置
+- `BV_ALLOW_MOCK_FALLBACK=false` 时，模型加载失败会直接报错，不自动回退 mock
+- 若 `backend/data/config.json` 存在，运行时优先读该配置
 
-### 4) 启动项目
+## 启动方式
+
+一键：
 
 ```powershell
 .\.venv\Scripts\python.exe start.py
 ```
 
-或分别启动：
+分开启动：
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload
@@ -111,137 +177,125 @@ cd frontend
 npm run dev
 ```
 
-## 关键接口
+---
+
+## API 与 WS 速查
 
 Base URL: `http://localhost:8000/api/v1`
 
+### API
+
 - 系统状态：`GET /system/status`
 - 工程导入：`POST /projects/import/archive`
-- LLM 解析任务：`POST /llm/parse`，查询：`GET /llm/parse/{task_id}`
+- 项目文件导入：`POST /projects/import/project-file`
+- 项目文件导出：`GET /projects/{project_id}/export/project-file`
+- 项目列表：`GET /projects`
+- 项目更新（含改名）：`PUT /projects/{project_id}`
+- LLM 解析：`POST /llm/parse`
+- LLM 状态：`GET /llm/parse/{task_id}`
 - LLM 取消：`POST /llm/parse/{task_id}/cancel`
-- TTS 合成任务：`POST /tts/synthesize`，查询：`GET /tts/synthesize/{task_id}`
-- TTS 局部重新生成：`POST /tts/synthesize/segments`
+- TTS 合成：`POST /tts/synthesize`
+- TTS 局部重生成：`POST /tts/synthesize/segments`
+- TTS 状态：`GET /tts/synthesize/{task_id}`
 - TTS 取消：`POST /tts/synthesize/{task_id}/cancel`
-- 项目待重新生成报告：`GET /tts/projects/{project_id}/stale-report`
-- 项目分段音频：`GET /tts/projects/{project_id}/segments/{segment_id}/audio`
+- 待重生成报告：`GET /tts/projects/{project_id}/stale-report`
+- 分段音频：`GET /tts/projects/{project_id}/segments/{segment_id}/audio`
 - 声音试听：`POST /voices/preview`
 - 参考音频转写：`POST /voices/transcribe`
-- 项目事件日志：`GET /projects/{project_id}/events`
-- 文件浏览：`POST /system/files/browse`（仅允许白名单目录）
+- 项目事件：`GET /projects/{project_id}/events`
 
-## WebSocket
+### WebSocket
 
 - LLM 流：`/api/v1/ws/llm-stream/{task_id}`
 - TTS 进度：`/api/v1/ws/tts-progress/{task_id}`
 - 系统事件：`/api/v1/ws/system-events`
 
-LLM/TTS 任务会推送 `task_status`、`model_loading`、`progress`、`complete`、`error`，并支持刷新后事件回放。
+---
 
-## 导入与重新生成工作流
+## 测试与验收
 
-当前推荐工作流：
-
-1. 在“文本输入”页点击“导入工程 ZIP”，恢复项目
-2. 在“剧本编辑”页修改片段内容
-3. 到“合成导出”页查看“已修改待重新生成/配置变化待重新生成/缺失音频”标识
-4. 点击“选择段落重新生成”自动勾选推荐段
-5. 点击“重新生成已选段落”执行局部重建并自动更新整本音频与字幕
-
-说明：
-
-- 合成导出页支持每段“编辑 + 保存 + 重新生成”快捷闭环
-- `stale-report` 返回 `reasons`（例如 `text_changed`、`tts_overrides_changed`、`missing_audio`）用于前端提示与推荐勾选
-
-## 兼容性说明（工程 ZIP）
-
-- 优先支持 v2 归档结构（`project/project.json`、`audio/full`、`audio/segments`、`subtitles`、`voices/presets.json`）
-- 兼容旧归档常见结构：
-  - 根目录 `project.json`
-  - `audio/*`
-  - `segments/*`
-  - 根目录 `{project_id}.srt/.lrc`
-- 兼容导入会通过 `warnings` 返回提示（前端会展示）
-
-## P0 验收项对应
-
-- README 与当前实现一致：已完成
-- ASR 从占位返回改为真实 Whisper 转写：已完成
-- 基础自动化冒烟测试：已完成
-  - 测试文件：[test_api_smoke.py](/E:/softs/BeautyVoiceTTS/backend/tests/test_api_smoke.py)
-  - 运行命令：
-
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover backend/tests -v
-```
-
-## Phase 3 自动验收
-
-新增了 Phase 3 的自动化验收入口（覆盖删除清理、导出链路、核心任务流）：
-
-```powershell
-.\.venv\Scripts\python.exe -m backend.tests.phase3_acceptance_runner
-```
-
-说明：
-- 该脚本会按项输出 `PASS/FAIL` 汇总。
-- 当前前端验收仍建议同时执行：
+## 前端
 
 ```powershell
 cd frontend
 npm test
+npm run build
 ```
 
-## P2 回归验收
+## 后端核心回归
 
-后端关键回归（配置/任务流/状态工厂/调度器）可一键执行：
+```powershell
+.\.venv\Scripts\python.exe -m unittest backend.tests.test_api_smoke backend.tests.test_task_flows backend.tests.test_persistence
+.\.venv\Scripts\python.exe -m unittest backend.tests.test_llm_json_utils backend.tests.test_api_smoke backend.tests.test_task_flows backend.tests.test_persistence
+```
+
+## 阶段验收脚本
 
 ```powershell
 .\.venv\Scripts\python.exe -m backend.tests.p2_acceptance_runner
+.\.venv\Scripts\python.exe -m backend.tests.phase3_acceptance_runner
 ```
 
-前端任务通道与 API 错误模型回归：
+---
+
+## 常见问题（Troubleshooting）
+
+## 1) 解析失败后回退到 mock
+
+先看系统状态：
 
 ```powershell
-cd frontend
-npm test
+curl "http://127.0.0.1:8000/api/v1/system/status"
 ```
 
-## implementation_plan03 验收清单
+重点确认：
+- `llm_backend`、`llama_cpp_available`
+- 模型路径是否存在
+- API Key / model 名是否正确
 
-可使用以下文档做逐项打勾验收：
+## 2) Gemini 400/404
 
-- [implementation03-acceptance-checklist.md](/E:/softs/BeautyVoiceTTS/docs/implementation03-acceptance-checklist.md)
+- 先确认模型名是否可用（与你账号区域一致）
+- 对 Gemini/OpenAI 建议仅传 `temperature`，其余惩罚项不要传
+- 如果日志出现 `responseSchema unsupported`，当前实现会自动回退 `responseMimeType`
 
-## 依赖注意事项
+## 3) WaveSurfer 初始化失败/波形异常
 
-- `openai-whisper` 依赖系统 `ffmpeg`，请确保已安装并在 PATH 中可用。
-- 若你只安装了其中一种 ASR 后端（例如仅 `faster-whisper`），系统会自动尝试可用后端。
-- 若 ASR 后端都不可用，`/voices/transcribe` 会返回 `503` 和明确错误原因。
+- 先确认音频 URL 可访问
+- 刷新页面后重试
+- 若完整音频可播但波形异常，系统会保留播放能力并降级交互
 
-## 运行时数据边界
+## 4) “项目删除不完”
 
-运行时数据统一位于 `backend/data`，目录职责如下：
+通常是同名不同 ID 的历史副本：
+- 用工具栏 `更多 -> 删除同名副本`
+- 或 `更多 -> 清理重复项目`
 
-- `config.json`：运行时配置（设置页保存结果）
-- `projects/*.json`：项目主体数据（长期保留）
-- `projects/*.events.jsonl`：项目事件日志（可按周期清理）
-- `voices/`：声音预设与参考音频（长期保留）
-- `output/`：导出音频、字幕、任务临时目录（可按时间清理）
-- `cache/tts/`：可重建缓存（磁盘紧张时可清理）
-- `tmp-tests/`：测试临时文件（可清理）
+## 5) ASR 不可用
+
+- 检查 `BV_ASR_MODEL_PATH` 与设备配置
+- 仅安装了一个 ASR 后端也可运行，系统会自动选择可用后端
+
+---
+
+## 数据目录说明
+
+运行时数据位于 `backend/data`：
+
+- `config.json`：运行时配置
+- `projects/*.json`：项目数据
+- `projects/*.events.jsonl`：任务事件日志
+- `voices/`：声音预设与参考音频
+- `output/`：合成产物与导出文件
+- `cache/tts/`：可重建缓存
+- `tmp-tests/`：测试临时文件
 
 详细规则见：
 - [runtime-data-governance.md](/E:/softs/BeautyVoiceTTS/docs/runtime-data-governance.md)
 
-常用清理命令（PowerShell）：
+---
 
-```powershell
-# 清理 TTS 缓存
-Get-ChildItem .\backend\data\cache\tts -Recurse -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+## 相关文档
 
-# 清理 7 天前的任务输出目录
-Get-ChildItem .\backend\data\output -Directory | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } | Remove-Item -Recurse -Force
-
-# 清理 30 天前的事件日志
-Get-ChildItem .\backend\data\projects\*.events.jsonl | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-30) } | Remove-Item -Force
-```
+- [implementation03-acceptance-checklist.md](/E:/softs/BeautyVoiceTTS/docs/implementation03-acceptance-checklist.md)
+- [comprehensive-repair-improvement-plan.md](/E:/softs/BeautyVoiceTTS/docs/comprehensive-repair-improvement-plan.md)
