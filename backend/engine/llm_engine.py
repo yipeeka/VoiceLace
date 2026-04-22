@@ -380,7 +380,7 @@ class LLMEngine:
         if selected_mode == "legacy_single_pass":
             if on_stage is not None:
                 await on_stage("finalizing", "经典单步解析中", 20)
-            max_chunk_chars = self._resolve_chunk_chars(llm_options or {})
+            max_chunk_chars = self._resolve_legacy_single_pass_chunk_chars(llm_options or {})
             script, parse_stats = await run_chunked_parse_flow(
                 text=text,
                 prompt=prompt,
@@ -834,6 +834,31 @@ class LLMEngine:
         if n_ctx <= 16384:
             return min(by_tokens, 5000)
         return by_tokens
+
+    @staticmethod
+    def _resolve_legacy_single_pass_chunk_chars(llm_options: dict[str, Any]) -> int:
+        n_ctx = int(llm_options.get("n_ctx", settings.default_llm_n_ctx))
+        max_tokens = int(llm_options.get("max_tokens", settings.default_llm_max_tokens))
+        # Legacy single-pass emits a verbose JSON schema per segment, so output expansion
+        # is much higher than two-step flow. Use conservative chunk sizes to avoid
+        # silent max_tokens truncation (e.g. only first few segments returned).
+        if max_tokens <= 2048:
+            by_tokens = 900
+        elif max_tokens <= 3072:
+            by_tokens = 1200
+        elif max_tokens <= 4096:
+            by_tokens = 1500
+        elif max_tokens <= 6144:
+            by_tokens = 1900
+        else:
+            by_tokens = 2300
+        if n_ctx <= 4096:
+            return min(by_tokens, 800)
+        if n_ctx <= 8192:
+            return by_tokens
+        if n_ctx <= 16384:
+            return min(int(by_tokens * 1.15), 2600)
+        return min(int(by_tokens * 1.3), 3000)
 
     def _build_llama_chat_kwargs(
         self,
