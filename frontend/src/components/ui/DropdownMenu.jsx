@@ -41,8 +41,8 @@ export default function DropdownMenu({
           )}
         >
           {Icon ? <Icon size={size === "sm" ? 13 : size === "lg" ? 17 : 15} /> : null}
-          <span>{label}</span>
-          <ChevronDown size={size === "sm" ? 13 : size === "lg" ? 17 : 15} />
+          <span className="dropdownMenuLabel">{label}</span>
+          <ChevronDown className="dropdownMenuChevron" size={size === "sm" ? 13 : size === "lg" ? 17 : 15} />
         </button>
       </Popover.Trigger>
 

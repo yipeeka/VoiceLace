@@ -1,4 +1,4 @@
-import { FolderOpen, MoreHorizontal, Upload } from "lucide-react";
+import { FolderOpen, Upload } from "lucide-react";
 
 import Button from "../ui/Button";
 import DropdownMenu from "../ui/DropdownMenu";
@@ -103,7 +103,6 @@ export default function ProjectToolbarCard({
         <div className="projectToolbarGroupTitle">更多操作</div>
         <DropdownMenu
           label="更多"
-          icon={MoreHorizontal}
           items={moreMenuItems}
           className="projectToolbarMoreButton"
           disabled={!moreMenuItems?.length}

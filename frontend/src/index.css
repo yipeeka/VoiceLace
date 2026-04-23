@@ -1327,7 +1327,7 @@ select.textInput option {
 
 .projectToolbar {
   display: grid;
-  grid-template-columns: minmax(280px, 1.2fr) minmax(360px, 1.4fr) minmax(140px, 0.5fr);
+  grid-template-columns: minmax(280px, 1.28fr) minmax(360px, 1.48fr) minmax(82px, 0.22fr);
   gap: 12px;
   margin-bottom: 12px;
 }
@@ -1393,26 +1393,36 @@ select.textInput option {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  width: 100%;
 }
 
 .projectToolbarRenameRow {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  width: 100%;
 }
 
 .projectToolbarNameInput {
-  flex: 1 1 180px;
+  flex: 0 1 clamp(130px, 18vw, 190px);
+  max-width: 190px;
   min-width: 0;
+}
+
+.projectToolbarCreateRow .btn,
+.projectToolbarRenameRow .btn {
+  margin-left: auto;
 }
 
 .projectToolbarActionsPrimary {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  width: 100%;
+}
+
+.projectToolbarActionsPrimary .btn:last-child {
+  margin-left: auto;
 }
 
 .projectToolbarGroupMore {
@@ -1421,6 +1431,22 @@ select.textInput option {
 
 .projectToolbarMoreButton {
   width: 100%;
+  font-weight: 600;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 10px;
+}
+
+.projectToolbarMoreButton .dropdownMenuLabel {
+  flex-shrink: 0;
+}
+
+.projectToolbarMoreButton .dropdownMenuChevron {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: var(--text-primary);
+  opacity: 1;
 }
 
 @media (max-width: 1180px) {
@@ -1440,6 +1466,23 @@ select.textInput option {
 
   .projectToolbarGroupMore {
     grid-column: auto;
+  }
+
+  .projectToolbarNameInput {
+    flex: 1 1 180px;
+    max-width: none;
+  }
+
+  .projectToolbarCreateRow,
+  .projectToolbarRenameRow,
+  .projectToolbarActionsPrimary {
+    flex-wrap: wrap;
+  }
+
+  .projectToolbarCreateRow .btn,
+  .projectToolbarRenameRow .btn,
+  .projectToolbarActionsPrimary .btn:last-child {
+    margin-left: 0;
   }
 }
 
