@@ -46,12 +46,29 @@ _EMOTION_VALUES = {
     "concern",
     "excited",
 }
+_ALLOWED_NON_VERBAL_BARE = {
+    "laughter",
+    "sigh",
+    "whisper",
+    "dissatisfaction-hnn",
+    "confirmation-en",
+    "question-en",
+    "question-ah",
+    "question-oh",
+    "question-ei",
+    "question-yi",
+    "surprise-ah",
+    "surprise-oh",
+    "surprise-wa",
+    "surprise-yo",
+}
 _EMOTION_PREFIX_RE = re.compile(
     r"^\s*[（(]\s*"
     r"(?P<emotion>neutral|cheerful|sad|angry|fearful|surprise|melancholy|tender|serious|playful|concern|excited)"
     r"\s*[）)]\s*",
     re.IGNORECASE,
 )
+_PAREN_TAG_RE = re.compile(r"[（(]\s*([a-z][a-z0-9\-]{1,40})\s*[）)]", re.IGNORECASE)
 
 
 def _segment_prefix(segment_type: str, speaker: str) -> str:
@@ -92,6 +109,52 @@ def _log_verified_step_result(logger: Any, step_name: str, content: str, *, max_
         suffix,
         step_name,
     )
+
+
+def _normalize_non_verbal_array(items: list[str], text: str) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    merged = [str(item) for item in (items or [])]
+    merged.extend(_extract_non_verbal_tags_from_text(text))
+    for raw in merged:
+        value = (raw or "").strip()
+        if not value:
+            continue
+        if value.startswith("[") and value.endswith("]"):
+            bare = value[1:-1].strip().lower()
+        else:
+            bare = value.strip("[] \t\r\n").lower()
+        if not bare or bare in seen:
+            continue
+        if bare not in _ALLOWED_NON_VERBAL_BARE:
+            continue
+        seen.add(bare)
+        normalized.append(f"[{bare}]")
+    return normalized
+
+
+def _normalize_step3_parenthesized_non_verbal(script: Script) -> int:
+    """Fix Step3 outputs like `(confirmation-en)` to `[confirmation-en]` without dropping tags."""
+    fixed_count = 0
+    for segment in script.segments:
+        original_text = segment.text or ""
+
+        def _replace(match: re.Match[str]) -> str:
+            nonlocal fixed_count
+            token = (match.group(1) or "").strip().lower()
+            if not token:
+                return match.group(0)
+            if token in _EMOTION_VALUES:
+                return match.group(0)
+            if token in _ALLOWED_NON_VERBAL_BARE:
+                fixed_count += 1
+                return f"[{token}]"
+            return match.group(0)
+
+        normalized_text = _PAREN_TAG_RE.sub(_replace, original_text)
+        segment.text = normalized_text
+        segment.non_verbal = _normalize_non_verbal_array(list(segment.non_verbal or []), normalized_text)
+    return fixed_count
 
 
 def _empty_fallback_draft(*, source_text: str, title: str) -> StructuredScriptDraft:
@@ -826,6 +889,9 @@ async def run_verified_five_step_parse_pipeline(
             parse_single_with_stats=_parse_step3_chunk,
             logger=logger,
         )
+    step3_paren_fixed_count = _normalize_step3_parenthesized_non_verbal(step3_script)
+    if step3_paren_fixed_count > 0:
+        step3_stats["parenthesized_non_verbal_fixed_count"] = int(step3_paren_fixed_count)
     _log_verified_step_result(logger, "step3_script", _script_to_prefixed_lines(step3_script))
 
     if on_stage is not None:

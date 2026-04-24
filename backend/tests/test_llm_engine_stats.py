@@ -603,6 +603,43 @@ class LlmEngineStatsTest(unittest.TestCase):
         self.assertIn("STEP1_STREAM", streamed)
         self.assertIn("STEP3_STREAM", streamed)
 
+    def test_verified_five_step_step3_parenthesized_non_verbal_is_normalized_to_brackets(self) -> None:
+        async def _parse_step_raw_with_stats(
+            *,
+            text: str,
+            prompt: str | None,
+            on_chunk,
+            llm_options,
+            extraction_prompt: str,
+        ):
+            if "资深的有声书导演" in extraction_prompt:
+                return "小孩：对，", {"attempts": 1}
+            return "小孩：(confirmation-en) 对，", {"attempts": 1}
+
+        async def _run() -> Script:
+            script, _stats = await run_verified_five_step_parse_pipeline(
+                text="对，",
+                prompt=None,
+                on_chunk=None,
+                on_chunk_progress=None,
+                on_chunk_start=None,
+                llm_options={},
+                on_stage=None,
+                backend_name="gemini",
+                resolve_chunk_chars=lambda _opts: 10000,
+                parse_step_raw_with_stats=_parse_step_raw_with_stats,
+                step1_script_prompt=verified_five_step_structure_prompt(),
+                step3_enrich_prompt="STEP3_PROMPT",
+                logger=type("L", (), {"info": lambda *args, **kwargs: None, "warning": lambda *args, **kwargs: None})(),
+            )
+            return script
+
+        final_script = asyncio.run(_run())
+        self.assertEqual(len(final_script.segments), 1)
+        self.assertIn("[confirmation-en]", final_script.segments[0].text)
+        self.assertNotIn("(confirmation-en)", final_script.segments[0].text)
+        self.assertIn("[confirmation-en]", final_script.segments[0].non_verbal)
+
     def test_two_step_structure_drift_is_reported_not_raised(self) -> None:
         engine = LLMEngine()
         step1 = Script(
