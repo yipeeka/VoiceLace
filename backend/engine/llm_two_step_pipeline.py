@@ -937,7 +937,7 @@ def parse_step1_lines_to_structured_draft(
     source_text: str,
     title: str = "未命名剧本",
     *,
-    apply_source_correction: bool = True,
+    apply_source_correction: bool = False,
 ) -> StructuredScriptDraft:
     lines = (raw_text or "").splitlines()
     if not lines:
@@ -946,11 +946,18 @@ def parse_step1_lines_to_structured_draft(
     segments: list[StructuredSegmentDraft] = []
     counter: Counter[str] = Counter()
     pending_non_verbal_for_dialogue: list[str] = []
+    skipped_lines: list[str] = []
     for line_no, original in enumerate(lines, start=1):
         line = (original or "").strip()
         if not line:
-            raise ValueError(f"Step1 line parse error at line {line_no}: empty line is not allowed")
-        seg_type, speaker, content = _split_step1_prefixed_line(line, line_no)
+            # LLM 常在段落间插入空行，skip 而不是崩溃整个 chunk
+            continue
+        try:
+            seg_type, speaker, content = _split_step1_prefixed_line(line, line_no)
+        except ValueError as exc:
+            # 格式不合规的单行：记录并跳过，不让它污染整个 chunk
+            skipped_lines.append(f"line {line_no}: {exc}")
+            continue
         if _is_pure_non_verbal_text(content) and not _source_contains_non_verbal_tags(source_text, content):
             # Step1 偶发幻觉出纯标签行（如 [laughter]）：不落成段，迁移到后续最近一条 dialogue。
             pending_non_verbal_for_dialogue.extend(_extract_non_verbal_tags_from_text(content))
