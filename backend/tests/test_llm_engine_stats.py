@@ -4,6 +4,7 @@ import asyncio
 import unittest
 
 from backend.engine.llm_engine import LLMEngine
+from backend.engine.llm_verified_five_step_pipeline import verify_step1_script_with_source
 from backend.engine.prompts import read_aloud_extraction_prompt, verified_five_step_structure_prompt
 from backend.models import Script, Segment
 
@@ -346,6 +347,42 @@ class LlmEngineStatsTest(unittest.TestCase):
         self.assertIn("老人: 不，", prompt)
         self.assertIn("完整性：必须 100% 覆盖用户输入的全部文本", prompt)
         self.assertIn("只输出纯文本多行", prompt)
+
+    def test_verified_five_step_step2_preserves_step1_dialogue_speaker(self) -> None:
+        source = "掌柜抬手示意道：“都坐下，慢慢说。”"
+        step1_script = Script(
+            title="test",
+            source_text=source,
+            segments=[
+                Segment(
+                    id="s1",
+                    index=0,
+                    type="narration",
+                    speaker="narrator",
+                    text="掌柜抬手示意道：",
+                ),
+                Segment(
+                    id="s2",
+                    index=1,
+                    type="dialogue",
+                    speaker="掌柜",
+                    text="都坐下，慢慢说。",
+                ),
+            ],
+            characters=[],
+            metadata={},
+        )
+
+        corrected_draft, report = verify_step1_script_with_source(
+            step1_script=step1_script,
+            source_text=source,
+        )
+
+        self.assertEqual([(seg.type, seg.speaker, seg.text) for seg in corrected_draft.segments], [
+            ("narration", "narrator", "掌柜抬手示意道："),
+            ("dialogue", "掌柜", "都坐下，慢慢说。"),
+        ])
+        self.assertGreaterEqual(report.get("speaker_preserved_count", 0), 0)
 
     def test_two_step_structure_drift_is_reported_not_raised(self) -> None:
         engine = LLMEngine()

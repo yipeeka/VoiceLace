@@ -81,6 +81,63 @@ def _segment_signature(segment_type: str, speaker: str, text: str) -> tuple[str,
     return segment_type, (speaker or "").strip(), (text or "").strip()
 
 
+def _speaker_preserve_match_key(text: str) -> str:
+    return re.sub(r"[，,。？！!?；;：:、“”\"'‘’\s]", "", text or "")
+
+
+def _preserve_step1_dialogue_speakers(
+    *,
+    corrected_draft: StructuredScriptDraft,
+    step1_draft: StructuredScriptDraft,
+) -> int:
+    """Keep Step1 speakers when Step2 verification only changed speaker names.
+
+    The source verifier may re-derive speakers from narration lead-ins. When Step1
+    already produced the same dialogue text at the same position, its speaker is
+    the safer truth because it came from the model's explicit prefixed line.
+    """
+    changed_count = 0
+    compared_len = min(len(corrected_draft.segments), len(step1_draft.segments))
+    for idx in range(compared_len):
+        corrected = corrected_draft.segments[idx]
+        original = step1_draft.segments[idx]
+        if corrected.type != "dialogue" or original.type != "dialogue":
+            continue
+        if corrected.type != original.type:
+            continue
+        if _speaker_preserve_match_key(corrected.text) != _speaker_preserve_match_key(original.text):
+            continue
+        original_speaker = (original.speaker or "").strip()
+        if not original_speaker:
+            continue
+        if (corrected.speaker or "").strip() == original_speaker:
+            continue
+        corrected.speaker = original_speaker
+        changed_count += 1
+    step1_dialogues = [segment for segment in step1_draft.segments if segment.type == "dialogue"]
+    search_start = 0
+    for corrected in corrected_draft.segments:
+        if corrected.type != "dialogue":
+            continue
+        if search_start >= len(step1_dialogues):
+            break
+        corrected_key = _speaker_preserve_match_key(corrected.text)
+        if not corrected_key:
+            continue
+        for candidate_index in range(search_start, len(step1_dialogues)):
+            candidate = step1_dialogues[candidate_index]
+            candidate_key = _speaker_preserve_match_key(candidate.text)
+            if not candidate_key or corrected_key != candidate_key:
+                continue
+            candidate_speaker = (candidate.speaker or "").strip()
+            if candidate_speaker and (corrected.speaker or "").strip() != candidate_speaker:
+                corrected.speaker = candidate_speaker
+                changed_count += 1
+            search_start = candidate_index + 1
+            break
+    return changed_count
+
+
 def _scan_source_coverage(*, source_text: str, segments: list[Segment]) -> dict[str, int]:
     source = (source_text or "").replace("\u3000", "").strip()
     cursor = 0
@@ -116,6 +173,10 @@ def verify_step1_script_with_source(
         source_text,
         title=step1_draft.title or "未命名剧本",
         fallback_draft=step1_draft,
+    )
+    speaker_preserved_count = _preserve_step1_dialogue_speakers(
+        corrected_draft=corrected_draft,
+        step1_draft=step1_draft,
     )
     step1_counter = Counter(
         _segment_signature(segment.type, segment.speaker, segment.text)
@@ -157,6 +218,7 @@ def verify_step1_script_with_source(
             missing_count
             or duplicate_count
             or out_of_order_count
+            or speaker_preserved_count
             or len(step1_draft.segments) != len(corrected_draft.segments)
         ),
         "segment_count_before": len(step1_draft.segments),
@@ -164,6 +226,7 @@ def verify_step1_script_with_source(
         "missing_count": int(missing_count),
         "duplicate_count": int(duplicate_count),
         "out_of_order_count": int(out_of_order_count),
+        "speaker_preserved_count": int(speaker_preserved_count),
         "invalid_prefix_count": 0,
         **coverage_report,
     }
