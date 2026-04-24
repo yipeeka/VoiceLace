@@ -8,7 +8,12 @@ import { useUiStore } from "./useUiStore.js";
 
 const DEFAULT_PARSE_MODE = "two_step_pipeline";
 const PARSE_MODE_STORAGE_KEY = "beautyvoice.parse_mode";
-const SUPPORTED_PARSE_MODES = new Set(["two_step_pipeline", "legacy_single_pass", "read_aloud_single_voice"]);
+const SUPPORTED_PARSE_MODES = new Set([
+  "two_step_pipeline",
+  "legacy_single_pass",
+  "read_aloud_single_voice",
+  "verified_five_step_pipeline",
+]);
 
 export const useScriptStore = create((set, get) => ({
   sourceText: "",

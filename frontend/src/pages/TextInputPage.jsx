@@ -29,6 +29,7 @@ const PARSE_MODE_OPTIONS = [
   { value: "two_step_pipeline", label: "两步解析（推荐）" },
   { value: "legacy_single_pass", label: "经典单步解析" },
   { value: "read_aloud_single_voice", label: "朗读模式（单人快速）" },
+  { value: "verified_five_step_pipeline", label: "校对增强（单人/多人）" },
 ];
 
 export default function TextInputPage({ onNavigate }) {
@@ -380,6 +381,7 @@ export default function TextInputPage({ onNavigate }) {
 
   const wordCount = sourceText.length;
   const estimatedSegments = sourceText.split(/\n/).filter((l) => l.trim()).length;
+  const fixedPromptMode = parseMode === "verified_five_step_pipeline";
 
   const sortedProjects = useMemo(
     () => [...projects].sort((a, b) => Date.parse(b.updated_at || "") - Date.parse(a.updated_at || "")),
@@ -550,6 +552,11 @@ export default function TextInputPage({ onNavigate }) {
               placeholder="留空使用默认系统提示词..."
             />
           )}
+          {fixedPromptMode ? (
+            <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
+              该模式使用固定提示词模板，会忽略自定义提示词。
+            </div>
+          ) : null}
         </div>
 
         {/* Action row */}

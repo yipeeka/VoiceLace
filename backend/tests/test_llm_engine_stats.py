@@ -4,7 +4,7 @@ import asyncio
 import unittest
 
 from backend.engine.llm_engine import LLMEngine
-from backend.engine.prompts import read_aloud_extraction_prompt
+from backend.engine.prompts import read_aloud_extraction_prompt, verified_five_step_structure_prompt
 from backend.models import Script, Segment
 
 
@@ -131,6 +131,29 @@ class LlmEngineStatsTest(unittest.TestCase):
         stats = engine.last_parse_stats
         self.assertEqual(stats.get("parse_mode"), "read_aloud_single_voice")
         self.assertIn(stats.get("mode"), {"single", "chunked"})
+
+    def test_verified_five_step_parse_mode_stats_are_reported(self) -> None:
+        engine = LLMEngine()
+        engine.backend_name = "mock"
+        script = asyncio.run(
+            engine.parse_text_chunked_stream(
+                "旁白：第一行\n甲：第二行",
+                prompt="用户自定义提示词",
+                llm_options={},
+                parse_mode="verified_five_step_pipeline",
+            )
+        )
+        self.assertGreaterEqual(len(script.segments), 1)
+        stats = engine.last_parse_stats
+        self.assertEqual(stats.get("parse_mode"), "verified_five_step_pipeline")
+        self.assertEqual(stats.get("mode"), "verified_five_step")
+        self.assertTrue(stats.get("custom_prompt_ignored"))
+        step_stats = stats.get("step_stats") or {}
+        self.assertIn("step1_script_gen", step_stats)
+        self.assertIn("step2_verify_script", step_stats)
+        self.assertIn("step3_enrich", step_stats)
+        self.assertIn("step4_verify_enrich", step_stats)
+        self.assertIn("step5_json_build", step_stats)
 
     def test_read_aloud_structure_splits_narration_plus_dialogue(self) -> None:
         segments = LLMEngine._build_read_aloud_structure_segments(
@@ -312,6 +335,17 @@ class LlmEngineStatsTest(unittest.TestCase):
         self.assertIn("每句完整对话必须单独成为一个 dialogue 段", prompt)
         self.assertIn("对话以外的所有内容", prompt)
         self.assertIn("现代经济的“基础部件”", prompt)
+
+    def test_verified_five_step_structure_prompt_uses_director_protocol(self) -> None:
+        prompt = verified_five_step_structure_prompt()
+        self.assertIn("资深的有声书导演", prompt)
+        self.assertIn("脚本拆解与重构（Script Parsing & Reconstruction）", prompt)
+        self.assertIn("时序一致性（最高优先级）", prompt)
+        self.assertIn("提示语剥离", prompt)
+        self.assertIn("小孩: 圣地亚哥，", prompt)
+        self.assertIn("老人: 不，", prompt)
+        self.assertIn("完整性：必须 100% 覆盖用户输入的全部文本", prompt)
+        self.assertIn("只输出纯文本多行", prompt)
 
     def test_two_step_structure_drift_is_reported_not_raised(self) -> None:
         engine = LLMEngine()

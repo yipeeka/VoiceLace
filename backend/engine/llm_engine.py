@@ -26,6 +26,7 @@ from backend.engine.llm_two_step_pipeline import (
     run_two_step_parse_pipeline,
     to_structured_draft,
 )
+from backend.engine.llm_verified_five_step_pipeline import run_verified_five_step_parse_pipeline
 from backend.engine.llm_parser import (
     decode_json_payload,
     decode_json_payload_with_meta,
@@ -39,6 +40,8 @@ from backend.engine.prompts import (
     read_aloud_extraction_prompt,
     structure_extraction_prompt,
     tts_enrichment_prompt,
+    verified_five_step_enrichment_prompt,
+    verified_five_step_structure_prompt,
 )
 from backend.engine.llm_single_runner import run_single_parse_with_stats
 from backend.models import Character, Script, Segment
@@ -386,6 +389,8 @@ class LLMEngine:
             selected_mode = "legacy_single_pass"
         elif parse_mode == "read_aloud_single_voice":
             selected_mode = "read_aloud_single_voice"
+        elif parse_mode == "verified_five_step_pipeline":
+            selected_mode = "verified_five_step_pipeline"
         else:
             selected_mode = "two_step_pipeline"
 
@@ -427,6 +432,16 @@ class LLMEngine:
             script = self._normalize_read_aloud_script(script, source_text=text)
             if on_stage is not None:
                 await on_stage("finalizing", "快速朗读解析收尾中", 94)
+        elif selected_mode == "verified_five_step_pipeline":
+            script, parse_stats = await self._parse_text_verified_five_step_pipeline(
+                text=text,
+                prompt=prompt,
+                on_chunk=on_chunk,
+                on_chunk_progress=on_chunk_progress,
+                on_chunk_start=on_chunk_start,
+                llm_options=llm_options,
+                on_stage=on_stage,
+            )
         else:
             script, parse_stats = await self._parse_text_two_step_pipeline(
                 text=text,
@@ -578,6 +593,33 @@ class LLMEngine:
             structure_extraction_prompt=structure_extraction_prompt(),
             tts_extraction_prompt=tts_enrichment_prompt(),
             tts_schema=structured_output_schema_tts_enrichment(),
+            logger=logger,
+        )
+
+    async def _parse_text_verified_five_step_pipeline(
+        self,
+        *,
+        text: str,
+        prompt: str | None,
+        on_chunk: ChunkCallback | None,
+        on_chunk_progress: ChunkProgressCallback | None,
+        on_chunk_start: ChunkProgressCallback | None,
+        llm_options: dict[str, Any] | None,
+        on_stage: StageCallback | None,
+    ) -> tuple[Script, dict[str, Any]]:
+        return await run_verified_five_step_parse_pipeline(
+            text=text,
+            prompt=prompt,
+            on_chunk=on_chunk,
+            on_chunk_progress=on_chunk_progress,
+            on_chunk_start=on_chunk_start,
+            llm_options=llm_options,
+            on_stage=on_stage,
+            backend_name=self.backend_name,
+            resolve_chunk_chars=self._resolve_chunk_chars,
+            parse_step_raw_with_stats=self._parse_step1_raw_with_stats,
+            step1_script_prompt=verified_five_step_structure_prompt(),
+            step3_enrich_prompt=verified_five_step_enrichment_prompt(),
             logger=logger,
         )
 

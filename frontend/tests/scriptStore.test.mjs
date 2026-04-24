@@ -59,6 +59,14 @@ test("setParseMode accepts read_aloud_single_voice and persists it", async () =>
   });
 });
 
+test("setParseMode accepts verified_five_step_pipeline and persists it", async () => {
+  await withWindowStorage(async (storage) => {
+    useScriptStore.getState().setParseMode("verified_five_step_pipeline");
+    assert.equal(useScriptStore.getState().parseMode, "verified_five_step_pipeline");
+    assert.equal(storage.get("beautyvoice.parse_mode"), "verified_five_step_pipeline");
+  });
+});
+
 test("setParseMode normalizes unsupported values back to default", async () => {
   await withWindowStorage(async (storage) => {
     useScriptStore.getState().setParseMode("unknown_mode");

@@ -160,6 +160,36 @@ class TaskFlowTest(unittest.TestCase):
             parse_call = parse_mock.await_args_list[0]
             self.assertEqual(parse_call.kwargs.get("parse_mode"), "read_aloud_single_voice")
 
+    def test_llm_parse_verified_five_step_mode_is_accepted(self) -> None:
+        project_id = self._create_project("verified-five-step")
+        parsed_script = Script(
+            title="校对增强",
+            source_text="输入文本",
+            segments=[
+                Segment(id="seg-1", index=0, type="narration", speaker="narrator", text="第一段", emotion="neutral"),
+                Segment(id="seg-2", index=1, type="dialogue", speaker="甲", text="第二段", emotion="serious"),
+            ],
+        )
+
+        parse_mock = AsyncMock(return_value=parsed_script)
+        with (
+            patch.object(self.app_state.orchestrator, "ensure_llm_ready", new=AsyncMock(return_value=None)),
+            patch.object(self.app_state.orchestrator, "unload_llm", new=AsyncMock(return_value=None)),
+            patch.object(self.app_state.llm_engine, "parse_text_chunked_stream", new=parse_mock),
+        ):
+            started = self.client.post(
+                "/api/v1/llm/parse",
+                json={"text": "输入文本", "project_id": project_id, "parse_mode": "verified_five_step_pipeline"},
+            )
+            self.assertEqual(started.status_code, 200)
+            task_id = started.json()["task_id"]
+
+            status_code, body = self._wait_for_parse(task_id)
+            self.assertEqual(status_code, 200)
+            self.assertEqual(len(body["segments"]), 2)
+            parse_call = parse_mock.await_args_list[0]
+            self.assertEqual(parse_call.kwargs.get("parse_mode"), "verified_five_step_pipeline")
+
     def test_tts_synthesis_task_completes(self) -> None:
         project_id = self._create_project("tts")
         self._update_script(
