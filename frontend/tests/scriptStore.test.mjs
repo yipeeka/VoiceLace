@@ -8,7 +8,7 @@ function resetScriptStore() {
     sourceText: "",
     llmStreamOutput: "",
     parseProgress: 0,
-    parseMode: "two_step_pipeline",
+    parseMode: "verified_five_step_pipeline",
     parseStage: "",
     parseStageLabel: "",
     parseStageProgress: 0,
@@ -70,7 +70,7 @@ test("setParseMode accepts verified_five_step_pipeline and persists it", async (
 test("setParseMode normalizes unsupported values back to default", async () => {
   await withWindowStorage(async (storage) => {
     useScriptStore.getState().setParseMode("unknown_mode");
-    assert.equal(useScriptStore.getState().parseMode, "two_step_pipeline");
-    assert.equal(storage.get("beautyvoice.parse_mode"), "two_step_pipeline");
+    assert.equal(useScriptStore.getState().parseMode, "verified_five_step_pipeline");
+    assert.equal(storage.get("beautyvoice.parse_mode"), "verified_five_step_pipeline");
   });
 });

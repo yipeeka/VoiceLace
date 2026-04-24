@@ -6,7 +6,7 @@ import { runTaskChannel } from "../utils/taskChannel.js";
 import { createTaskChannelBridge } from "../utils/taskChannelBridge.js";
 import { useUiStore } from "./useUiStore.js";
 
-const DEFAULT_PARSE_MODE = "two_step_pipeline";
+const DEFAULT_PARSE_MODE = "verified_five_step_pipeline";
 const PARSE_MODE_STORAGE_KEY = "beautyvoice.parse_mode";
 const SUPPORTED_PARSE_MODES = new Set([
   "two_step_pipeline",

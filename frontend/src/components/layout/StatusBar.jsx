@@ -89,11 +89,15 @@ export default function StatusBar() {
       return "";
     }
     const parseModeLabel =
-      parseStats.parse_mode === "two_step_pipeline"
-        ? "两步"
-        : parseStats.parse_mode === "legacy_single_pass"
-          ? "单步"
-          : "未知";
+      parseStats.parse_mode === "verified_five_step_pipeline"
+        ? "校对增强"
+        : parseStats.parse_mode === "two_step_pipeline"
+          ? "两步"
+          : parseStats.parse_mode === "legacy_single_pass"
+            ? "单步"
+            : parseStats.parse_mode === "read_aloud_single_voice"
+              ? "朗读"
+              : "未知";
     const modeLabel =
       parseStats.mode === "two_step"
         ? "两步流程"
