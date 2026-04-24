@@ -4,6 +4,7 @@ import asyncio
 import unittest
 
 from backend.engine.llm_engine import LLMEngine
+from backend.engine.llm_verified_five_step_pipeline import run_verified_five_step_parse_pipeline
 from backend.engine.llm_two_step_pipeline import parse_step1_lines_to_structured_draft
 from backend.engine.llm_verified_five_step_pipeline import verify_step1_script_with_source
 from backend.engine.prompts import read_aloud_extraction_prompt, verified_five_step_structure_prompt
@@ -496,7 +497,111 @@ class LlmEngineStatsTest(unittest.TestCase):
         ])
         self.assertFalse(any(seg.speaker == "有人" for seg in corrected_draft.segments))
         self.assertFalse(report.get("used_source_corrected"))
-        self.assertEqual(report.get("source_corrected_reason"), "step1_preserved_hard_guard")
+        self.assertEqual(report.get("source_corrected_reason"), "step1_preserved_local_corrections")
+
+    def test_verified_five_step_step4_merge_keeps_step2_structure_when_step3_drifts(self) -> None:
+        engine = LLMEngine()
+        source = "旁白一。甲说：你好。旁白二。"
+        step2_script = Script(
+            title="test",
+            source_text=source,
+            segments=[
+                Segment(id="s1", index=0, type="narration", speaker="narrator", text="旁白一。"),
+                Segment(id="s2", index=1, type="dialogue", speaker="甲", text="你好。"),
+                Segment(id="s3", index=2, type="narration", speaker="narrator", text="旁白二。"),
+            ],
+            characters=[],
+            metadata={},
+        )
+        step2_draft = engine._to_structured_draft(step2_script, source_text=source)
+        step3_script = Script(
+            title="test",
+            source_text=source,
+            segments=[
+                Segment(
+                    id="m1",
+                    index=0,
+                    type="narration",
+                    speaker="narrator",
+                    text="旁白一。你好。旁白二。",
+                    emotion="serious",
+                ),
+                Segment(
+                    id="m2",
+                    index=1,
+                    type="dialogue",
+                    speaker="有人",
+                    text="你好。",
+                    emotion="concern",
+                    non_verbal=["[question-en]"],
+                ),
+                Segment(
+                    id="m3",
+                    index=2,
+                    type="narration",
+                    speaker="narrator",
+                    text="旁白二。",
+                    emotion="neutral",
+                ),
+            ],
+            characters=[],
+            metadata={},
+        )
+        guard = engine._analyze_two_step_structure_drift(step2_draft, step3_script)
+        merged = engine._merge_two_step_output(
+            structure_draft=step2_draft,
+            tts_script=step3_script,
+            source_text=source,
+            structure_guard=guard,
+        )
+        self.assertEqual([(seg.type, seg.speaker, seg.text) for seg in merged.segments], [
+            ("narration", "narrator", "旁白一。"),
+            ("dialogue", "甲", "你好。"),
+            ("narration", "narrator", "旁白二。"),
+        ])
+        self.assertEqual(merged.segments[0].emotion, "serious")
+        # speaker drift on idx=1 blocks enrichment transfer for that segment
+        self.assertEqual(merged.segments[1].emotion, "neutral")
+
+    def test_verified_five_step_step3_raw_chunks_are_streamed(self) -> None:
+        streamed: list[str] = []
+
+        async def _parse_step_raw_with_stats(
+            *,
+            text: str,
+            prompt: str | None,
+            on_chunk,
+            llm_options,
+            extraction_prompt: str,
+        ):
+            if "资深的有声书导演" in extraction_prompt:
+                if on_chunk is not None:
+                    await on_chunk("STEP1_STREAM")
+                return "旁白：第一句。", {"attempts": 1}
+            if on_chunk is not None:
+                await on_chunk("STEP3_STREAM")
+            return "旁白：(neutral)第一句。", {"attempts": 1}
+
+        async def _run() -> None:
+            await run_verified_five_step_parse_pipeline(
+                text="第一句。",
+                prompt=None,
+                on_chunk=lambda token: streamed.append(token) or asyncio.sleep(0),
+                on_chunk_progress=None,
+                on_chunk_start=None,
+                llm_options={},
+                on_stage=None,
+                backend_name="gemini",
+                resolve_chunk_chars=lambda _opts: 10000,
+                parse_step_raw_with_stats=_parse_step_raw_with_stats,
+                step1_script_prompt=verified_five_step_structure_prompt(),
+                step3_enrich_prompt="STEP3_PROMPT",
+                logger=type("L", (), {"info": lambda *args, **kwargs: None, "warning": lambda *args, **kwargs: None})(),
+            )
+
+        asyncio.run(_run())
+        self.assertIn("STEP1_STREAM", streamed)
+        self.assertIn("STEP3_STREAM", streamed)
 
     def test_two_step_structure_drift_is_reported_not_raised(self) -> None:
         engine = LLMEngine()

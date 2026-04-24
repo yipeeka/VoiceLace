@@ -11,6 +11,9 @@ from backend.engine.llm_parse_orchestrator import run_chunked_parse_flow
 from backend.engine.llm_two_step_pipeline import (
     _build_source_corrected_draft,
     _extract_non_verbal_tags_from_text,
+    _extract_speaker_from_attribution_tail,
+    _extract_speaker_from_leadin_base,
+    _split_dialogue_leadin_speaker,
     _split_step1_prefixed_line,
     analyze_two_step_structure_drift,
     merge_two_step_output,
@@ -187,6 +190,180 @@ def _scan_source_coverage(*, source_text: str, segments: list[Segment]) -> dict[
     }
 
 
+def _normalize_for_source_match(text: str) -> str:
+    return re.sub(r"\s+", "", (text or "").replace("\u3000", "")).strip()
+
+
+def _text_present_in_source(source_text: str, text: str) -> bool:
+    needle = _normalize_for_source_match(text)
+    if not needle:
+        return False
+    source = _normalize_for_source_match(source_text)
+    return needle in source
+
+
+def _looks_like_invalid_dialogue_speaker(speaker: str) -> bool:
+    value = (speaker or "").strip()
+    if not value:
+        return True
+    if value == "有人":
+        return True
+    if len(value) > 20:
+        return True
+    if any(ch in value for ch in "，,。？！!?；;：:\"'“”‘’（）()[]【】"):
+        return True
+    split_leadin = _split_dialogue_leadin_speaker(value)
+    return split_leadin is not None
+
+
+def _infer_dialogue_speaker_from_prev_narration(prev_narration: str) -> str | None:
+    text = (prev_narration or "").strip()
+    if not text:
+        return None
+    from_leadin = _extract_speaker_from_attribution_tail(text)
+    if from_leadin and from_leadin != "有人":
+        return from_leadin
+    split_leadin = _split_dialogue_leadin_speaker(text.rstrip("：:"))
+    if split_leadin is not None:
+        leadin_base, _suffix = split_leadin
+        inferred = _extract_speaker_from_leadin_base(leadin_base)
+        if inferred and inferred != "有人":
+            return inferred
+    return None
+
+
+def _rebuild_characters_from_draft(draft: StructuredScriptDraft) -> None:
+    counts: Counter[str] = Counter(segment.speaker for segment in draft.segments if segment.speaker)
+    rebuilt: list[StructuredCharacterDraft] = []
+    for name, count in counts.items():
+        rebuilt.append(
+            StructuredCharacterDraft(
+                name=name,
+                description="讲述故事的旁白，语调沉稳" if name == "narrator" else f"{name} 的角色档案",
+                appearance_count=int(count),
+            )
+        )
+    draft.characters = rebuilt
+
+
+def _apply_local_step2_corrections(
+    *,
+    step1_draft: StructuredScriptDraft,
+    corrected_draft: StructuredScriptDraft | None,
+    source_text: str,
+) -> tuple[StructuredScriptDraft, dict[str, int]]:
+    working = step1_draft.model_copy(deep=True)
+    speaker_fixed_count = 0
+    text_fixed_count = 0
+
+    corrected_segments = list((corrected_draft.segments if corrected_draft is not None else []))
+    can_align_by_index = len(corrected_segments) == len(working.segments)
+
+    for idx, segment in enumerate(working.segments):
+        if segment.type != "dialogue":
+            continue
+        if _looks_like_invalid_dialogue_speaker(segment.speaker):
+            prev_text = working.segments[idx - 1].text if idx > 0 and working.segments[idx - 1].type == "narration" else ""
+            inferred = _infer_dialogue_speaker_from_prev_narration(prev_text)
+            if not inferred and can_align_by_index:
+                candidate = (corrected_segments[idx].speaker or "").strip()
+                if candidate and candidate != "有人":
+                    inferred = candidate
+            if inferred and inferred != segment.speaker:
+                segment.speaker = inferred
+                speaker_fixed_count += 1
+
+    if can_align_by_index:
+        for idx, segment in enumerate(working.segments):
+            corrected = corrected_segments[idx]
+            if corrected.type != segment.type:
+                continue
+            if segment.type != "dialogue" and corrected.speaker.strip() != segment.speaker.strip():
+                continue
+            if _text_present_in_source(source_text, segment.text):
+                continue
+            if not _text_present_in_source(source_text, corrected.text):
+                continue
+            if _normalize_for_source_match(segment.text) == _normalize_for_source_match(corrected.text):
+                continue
+            segment.text = corrected.text
+            text_fixed_count += 1
+
+    if speaker_fixed_count or text_fixed_count:
+        _rebuild_characters_from_draft(working)
+    return working, {
+        "speaker_fixed_count": int(speaker_fixed_count),
+        "text_fixed_count": int(text_fixed_count),
+    }
+
+
+def _parse_step1_lines_to_structured_draft_lenient(
+    raw_text: str,
+    *,
+    source_text: str,
+    title: str = "未命名剧本",
+) -> tuple[StructuredScriptDraft, dict[str, int]]:
+    lines = (raw_text or "").splitlines()
+    if not lines:
+        raise ValueError("Step1 line parse error at line 1: empty output")
+
+    segments: list[StructuredSegmentDraft] = []
+    counts: Counter[str] = Counter()
+    invalid_prefix_count = 0
+    empty_line_count = 0
+
+    for line_no, original in enumerate(lines, start=1):
+        line = (original or "").strip()
+        if not line:
+            empty_line_count += 1
+            continue
+        try:
+            seg_type, speaker, content = _split_step1_prefixed_line(line, line_no)
+        except Exception:
+            invalid_prefix_count += 1
+            seg_type, speaker, content = "narration", "narrator", line
+        content = (content or "").strip()
+        if not content:
+            continue
+        segments.append(
+            StructuredSegmentDraft(
+                id=str(uuid4()),
+                index=len(segments),
+                type=seg_type,
+                speaker=speaker,
+                text=content,
+            )
+        )
+        counts[speaker] += 1
+
+    if not segments:
+        raise ValueError("Step1 line parse error: lenient parse produced no segments")
+
+    characters: list[StructuredCharacterDraft] = []
+    for name, count in counts.items():
+        characters.append(
+            StructuredCharacterDraft(
+                name=name,
+                description="讲述故事的旁白，语调沉稳" if name == "narrator" else f"{name} 的角色档案",
+                appearance_count=int(count),
+            )
+        )
+
+    return (
+        StructuredScriptDraft(
+            title=title or "未命名剧本",
+            source_text=source_text,
+            segments=segments,
+            characters=characters,
+            metadata={"language": "zh", "parser": "step1-line-parser-lenient"},
+        ),
+        {
+            "lenient_invalid_prefix_count": int(invalid_prefix_count),
+            "lenient_empty_line_count": int(empty_line_count),
+        },
+    )
+
+
 def _should_use_source_corrected_step2(
     *,
     step1_draft: StructuredScriptDraft,
@@ -236,22 +413,34 @@ def verify_step1_script_with_source(
     step1_draft = to_structured_draft(step1_script, source_text=source_text)
     step1_valid_segment_count = sum(1 for segment in step1_draft.segments if (segment.text or "").strip())
     if step1_valid_segment_count > 0:
+        corrected_for_reference = _build_source_corrected_draft(
+            source_text,
+            title=step1_draft.title or "未命名剧本",
+            fallback_draft=step1_draft,
+        )
+        locally_corrected, local_fix_report = _apply_local_step2_corrections(
+            step1_draft=step1_draft,
+            corrected_draft=corrected_for_reference,
+            source_text=source_text,
+        )
         coverage_report = _scan_source_coverage(
             source_text=source_text,
-            segments=structured_draft_to_script(step1_draft, source_text=source_text).segments,
+            segments=structured_draft_to_script(locally_corrected, source_text=source_text).segments,
         )
-        return step1_draft, {
-            "changed": False,
+        changed = bool(local_fix_report.get("speaker_fixed_count") or local_fix_report.get("text_fixed_count"))
+        return locally_corrected, {
+            "changed": changed,
             "segment_count_before": len(step1_draft.segments),
-            "segment_count_after": len(step1_draft.segments),
+            "segment_count_after": len(locally_corrected.segments),
             "missing_count": 0,
             "duplicate_count": 0,
             "out_of_order_count": 0,
-            "speaker_preserved_count": 0,
+            "speaker_preserved_count": int(local_fix_report.get("speaker_fixed_count", 0)),
+            "text_fixed_count": int(local_fix_report.get("text_fixed_count", 0)),
             "invalid_prefix_count": 0,
             "step1_valid_segment_count": step1_valid_segment_count,
             "corrected_valid_segment_count": 0,
-            "source_corrected_reason": "step1_preserved_hard_guard",
+            "source_corrected_reason": "step1_preserved_local_corrections",
             "used_source_corrected": False,
             **coverage_report,
         }
@@ -515,15 +704,30 @@ async def run_verified_five_step_parse_pipeline(
                 apply_source_correction=False,
             )
         except Exception as exc:
-            logger.warning("Verified five-step Step1 line parse failed, fallback to source-corrected draft: %s", exc)
+            logger.warning("Verified five-step Step1 strict parse failed, retry with lenient line parser: %s", exc)
             stats["fallback"] = True
             stats["error"] = str(exc)
-            fallback_draft = _empty_fallback_draft(source_text=chunk_text, title="未命名剧本")
-            draft = _build_source_corrected_draft(
-                chunk_text,
-                title="未命名剧本",
-                fallback_draft=fallback_draft,
-            )
+            try:
+                draft, lenient_report = _parse_step1_lines_to_structured_draft_lenient(
+                    raw_text,
+                    source_text=chunk_text,
+                    title="未命名剧本",
+                )
+                stats.update(lenient_report)
+                stats["fallback_mode"] = "step1_lenient"
+            except Exception as lenient_exc:
+                logger.warning(
+                    "Verified five-step Step1 lenient parse failed, fallback to source-corrected draft: %s",
+                    lenient_exc,
+                )
+                stats["fallback_mode"] = "source_corrected"
+                stats["lenient_error"] = str(lenient_exc)
+                fallback_draft = _empty_fallback_draft(source_text=chunk_text, title="未命名剧本")
+                draft = _build_source_corrected_draft(
+                    chunk_text,
+                    title="未命名剧本",
+                    fallback_draft=fallback_draft,
+                )
         script = structured_draft_to_script(draft, source_text=chunk_text)
         stats["step1_line_count"] = len(draft.segments)
         stats["step1_raw_chars"] = len(raw_text or "")
