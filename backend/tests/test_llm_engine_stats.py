@@ -4,6 +4,7 @@ import asyncio
 import unittest
 
 from backend.engine.llm_engine import LLMEngine
+from backend.engine.llm_two_step_pipeline import parse_step1_lines_to_structured_draft
 from backend.engine.llm_verified_five_step_pipeline import verify_step1_script_with_source
 from backend.engine.prompts import read_aloud_extraction_prompt, verified_five_step_structure_prompt
 from backend.models import Script, Segment
@@ -383,6 +384,119 @@ class LlmEngineStatsTest(unittest.TestCase):
             ("dialogue", "掌柜", "都坐下，慢慢说。"),
         ])
         self.assertGreaterEqual(report.get("speaker_preserved_count", 0), 0)
+
+    def test_verified_step1_parser_can_disable_source_rebuild(self) -> None:
+        source = (
+            "话说山东登州府东门外有一座大山，名叫蓬莱山。"
+            "山上有个阁子，名叫蓬莱阁。"
+        )
+        raw_step1_lines = "\n".join([
+            "旁白：话说山东登州府东门外有一座大山，名叫蓬莱山。",
+            "旁白：山上有个阁子，名叫蓬莱阁。",
+        ])
+        draft = parse_step1_lines_to_structured_draft(
+            raw_step1_lines,
+            source_text=source,
+            apply_source_correction=False,
+        )
+        self.assertEqual([segment.text for segment in draft.segments], [
+            "话说山东登州府东门外有一座大山，名叫蓬莱山。",
+            "山上有个阁子，名叫蓬莱阁。",
+        ])
+
+    def test_verified_five_step_step2_keeps_step1_natural_narration_splits(self) -> None:
+        source = "话说山东登州府东门外有一座大山，名叫蓬莱山。山上有个阁子，名叫蓬莱阁。这阁造得画栋飞云，珠帘卷雨，十分壮丽。"
+        step1_script = Script(
+            title="test",
+            source_text=source,
+            segments=[
+                Segment(
+                    id="s1",
+                    index=0,
+                    type="narration",
+                    speaker="narrator",
+                    text="话说山东登州府东门外有一座大山，名叫蓬莱山。",
+                ),
+                Segment(
+                    id="s2",
+                    index=1,
+                    type="narration",
+                    speaker="narrator",
+                    text="山上有个阁子，名叫蓬莱阁。",
+                ),
+                Segment(
+                    id="s3",
+                    index=2,
+                    type="narration",
+                    speaker="narrator",
+                    text="这阁造得画栋飞云，珠帘卷雨，十分壮丽。",
+                ),
+            ],
+            characters=[],
+            metadata={},
+        )
+
+        corrected_draft, report = verify_step1_script_with_source(
+            step1_script=step1_script,
+            source_text=source,
+        )
+
+        self.assertEqual([seg.text for seg in corrected_draft.segments], [
+            "话说山东登州府东门外有一座大山，名叫蓬莱山。",
+            "山上有个阁子，名叫蓬莱阁。",
+            "这阁造得画栋飞云，珠帘卷雨，十分壮丽。",
+        ])
+        self.assertFalse(report.get("used_source_corrected"))
+
+    def test_verified_five_step_step2_does_not_rebuild_valid_step1_from_source(self) -> None:
+        source = (
+            "因慕懒残和尚煨芋的故事，遂取这“残”字做号。"
+            "大家因他为人颇不讨厌，契重他的意思，都叫他老残。"
+            "不知不觉，这“老残”二字便成了个别号了。"
+        )
+        step1_script = Script(
+            title="test",
+            source_text=source,
+            segments=[
+                Segment(
+                    id="s1",
+                    index=0,
+                    type="narration",
+                    speaker="narrator",
+                    text="因慕懒残和尚煨芋的故事，遂取这“残”字做号。",
+                ),
+                Segment(
+                    id="s2",
+                    index=1,
+                    type="narration",
+                    speaker="narrator",
+                    text="大家因他为人颇不讨厌，契重他的意思，都叫他老残。",
+                ),
+                Segment(
+                    id="s3",
+                    index=2,
+                    type="narration",
+                    speaker="narrator",
+                    text="不知不觉，这“老残”二字便成了个别号了。",
+                ),
+            ],
+            characters=[],
+            metadata={},
+        )
+
+        corrected_draft, report = verify_step1_script_with_source(
+            step1_script=step1_script,
+            source_text=source,
+        )
+
+        self.assertEqual([seg.text for seg in corrected_draft.segments], [
+            "因慕懒残和尚煨芋的故事，遂取这“残”字做号。",
+            "大家因他为人颇不讨厌，契重他的意思，都叫他老残。",
+            "不知不觉，这“老残”二字便成了个别号了。",
+        ])
+        self.assertFalse(any(seg.speaker == "有人" for seg in corrected_draft.segments))
+        self.assertFalse(report.get("used_source_corrected"))
+        self.assertEqual(report.get("source_corrected_reason"), "step1_preserved_hard_guard")
 
     def test_two_step_structure_drift_is_reported_not_raised(self) -> None:
         engine = LLMEngine()

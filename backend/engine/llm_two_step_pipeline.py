@@ -932,7 +932,13 @@ def _split_step1_prefixed_line(line: str, line_no: int) -> tuple[str, str, str]:
     return "dialogue", speaker, content
 
 
-def parse_step1_lines_to_structured_draft(raw_text: str, source_text: str, title: str = "未命名剧本") -> StructuredScriptDraft:
+def parse_step1_lines_to_structured_draft(
+    raw_text: str,
+    source_text: str,
+    title: str = "未命名剧本",
+    *,
+    apply_source_correction: bool = True,
+) -> StructuredScriptDraft:
     lines = (raw_text or "").splitlines()
     if not lines:
         raise ValueError("Step1 line parse error at line 1: empty output")
@@ -1071,7 +1077,7 @@ def parse_step1_lines_to_structured_draft(raw_text: str, source_text: str, title
         characters=characters,
         metadata={"language": "zh", "parser": "step1-line-parser"},
     )
-    if "“" in (source_text or "") and "”" in (source_text or ""):
+    if apply_source_correction and "“" in (source_text or "") and "”" in (source_text or ""):
         return _build_source_corrected_draft(
             source_text,
             title=title or "未命名剧本",

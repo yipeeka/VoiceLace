@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import time
 from collections import Counter
@@ -65,6 +66,29 @@ def draft_to_prefixed_lines(draft: StructuredScriptDraft) -> str:
         if (segment.text or "").strip()
     ]
     return "\n".join(lines)
+
+
+def _script_to_prefixed_lines(script: Script) -> str:
+    lines = [
+        f"{_segment_prefix(segment.type, segment.speaker)}：{(segment.text or '').strip()}"
+        for segment in script.segments
+        if (segment.text or "").strip()
+    ]
+    return "\n".join(lines)
+
+
+def _log_verified_step_result(logger: Any, step_name: str, content: str, *, max_chars: int = 120000) -> None:
+    text = content or ""
+    truncated = len(text) > max_chars
+    visible = text[:max_chars]
+    suffix = f"\n[TRUNCATED {len(text) - max_chars} chars]" if truncated else ""
+    logger.info(
+        "\n========== verified_five_step %s result ==========\n%s%s\n========== end %s ==========",
+        step_name,
+        visible,
+        suffix,
+        step_name,
+    )
 
 
 def _empty_fallback_draft(*, source_text: str, title: str) -> StructuredScriptDraft:
@@ -163,17 +187,101 @@ def _scan_source_coverage(*, source_text: str, segments: list[Segment]) -> dict[
     }
 
 
+def _should_use_source_corrected_step2(
+    *,
+    step1_draft: StructuredScriptDraft,
+    corrected_draft: StructuredScriptDraft,
+    source_text: str,
+) -> tuple[bool, dict[str, Any]]:
+    step1_script = structured_draft_to_script(step1_draft, source_text=source_text)
+    corrected_script = structured_draft_to_script(corrected_draft, source_text=source_text)
+    step1_coverage = _scan_source_coverage(source_text=source_text, segments=step1_script.segments)
+    corrected_coverage = _scan_source_coverage(source_text=source_text, segments=corrected_script.segments)
+    step1_missing = int(step1_coverage.get("coverage_missing_count", 0) or 0)
+    corrected_missing = int(corrected_coverage.get("coverage_missing_count", 0) or 0)
+    step1_out_of_order = int(step1_coverage.get("coverage_out_of_order_count", 0) or 0)
+    corrected_out_of_order = int(corrected_coverage.get("coverage_out_of_order_count", 0) or 0)
+    source_dialogue_count = len(re.findall(r"[“\"][^”\"]+[”\"]", source_text or ""))
+    step1_dialogue_count = sum(1 for segment in step1_draft.segments if segment.type == "dialogue")
+    corrected_dialogue_count = sum(1 for segment in corrected_draft.segments if segment.type == "dialogue")
+    step1_valid_segment_count = sum(1 for segment in step1_draft.segments if (segment.text or "").strip())
+    corrected_valid_segment_count = sum(1 for segment in corrected_draft.segments if (segment.text or "").strip())
+
+    # Step2 is a verifier, not a second parser. The source-corrected draft is
+    # useful as diagnostics, but rebuilding from source collapses Step1's
+    # natural line breaks and can misread quoted terms as dialogue. Only use it
+    # as an emergency fallback when Step1 produced no usable text at all.
+    use_corrected = step1_valid_segment_count == 0 and corrected_valid_segment_count > 0
+    source_corrected_reason = "step1_empty_fallback" if use_corrected else "step1_preserved"
+    return use_corrected, {
+        "step1_coverage_missing_count": step1_missing,
+        "corrected_coverage_missing_count": corrected_missing,
+        "step1_coverage_out_of_order_count": step1_out_of_order,
+        "corrected_coverage_out_of_order_count": corrected_out_of_order,
+        "source_dialogue_count": source_dialogue_count,
+        "step1_dialogue_count": step1_dialogue_count,
+        "corrected_dialogue_count": corrected_dialogue_count,
+        "step1_valid_segment_count": step1_valid_segment_count,
+        "corrected_valid_segment_count": corrected_valid_segment_count,
+        "source_corrected_reason": source_corrected_reason,
+        "used_source_corrected": use_corrected,
+    }
+
+
 def verify_step1_script_with_source(
     *,
     step1_script: Script,
     source_text: str,
 ) -> tuple[StructuredScriptDraft, dict[str, Any]]:
     step1_draft = to_structured_draft(step1_script, source_text=source_text)
+    step1_valid_segment_count = sum(1 for segment in step1_draft.segments if (segment.text or "").strip())
+    if step1_valid_segment_count > 0:
+        coverage_report = _scan_source_coverage(
+            source_text=source_text,
+            segments=structured_draft_to_script(step1_draft, source_text=source_text).segments,
+        )
+        return step1_draft, {
+            "changed": False,
+            "segment_count_before": len(step1_draft.segments),
+            "segment_count_after": len(step1_draft.segments),
+            "missing_count": 0,
+            "duplicate_count": 0,
+            "out_of_order_count": 0,
+            "speaker_preserved_count": 0,
+            "invalid_prefix_count": 0,
+            "step1_valid_segment_count": step1_valid_segment_count,
+            "corrected_valid_segment_count": 0,
+            "source_corrected_reason": "step1_preserved_hard_guard",
+            "used_source_corrected": False,
+            **coverage_report,
+        }
     corrected_draft = _build_source_corrected_draft(
         source_text,
         title=step1_draft.title or "未命名剧本",
         fallback_draft=step1_draft,
     )
+    use_corrected, selection_report = _should_use_source_corrected_step2(
+        step1_draft=step1_draft,
+        corrected_draft=corrected_draft,
+        source_text=source_text,
+    )
+    if not use_corrected:
+        coverage_report = _scan_source_coverage(
+            source_text=source_text,
+            segments=structured_draft_to_script(step1_draft, source_text=source_text).segments,
+        )
+        return step1_draft, {
+            "changed": False,
+            "segment_count_before": len(step1_draft.segments),
+            "segment_count_after": len(step1_draft.segments),
+            "missing_count": 0,
+            "duplicate_count": 0,
+            "out_of_order_count": 0,
+            "speaker_preserved_count": 0,
+            "invalid_prefix_count": 0,
+            **coverage_report,
+            **selection_report,
+        }
     speaker_preserved_count = _preserve_step1_dialogue_speakers(
         corrected_draft=corrected_draft,
         step1_draft=step1_draft,
@@ -228,6 +336,7 @@ def verify_step1_script_with_source(
         "out_of_order_count": int(out_of_order_count),
         "speaker_preserved_count": int(speaker_preserved_count),
         "invalid_prefix_count": 0,
+        **selection_report,
         **coverage_report,
     }
 
@@ -397,9 +506,14 @@ async def run_verified_five_step_parse_pipeline(
             llm_options=llm_options,
             extraction_prompt=step1_script_prompt,
         )
+        _log_verified_step_result(logger, "step1_raw_chunk", raw_text)
         stats = dict(raw_stats or {})
         try:
-            draft = parse_step1_lines_to_structured_draft(raw_text, source_text=chunk_text)
+            draft = parse_step1_lines_to_structured_draft(
+                raw_text,
+                source_text=chunk_text,
+                apply_source_correction=False,
+            )
         except Exception as exc:
             logger.warning("Verified five-step Step1 line parse failed, fallback to source-corrected draft: %s", exc)
             stats["fallback"] = True
@@ -427,6 +541,7 @@ async def run_verified_five_step_parse_pipeline(
         parse_single_with_stats=_parse_step1_chunk,
         logger=logger,
     )
+    _log_verified_step_result(logger, "step1_script", _script_to_prefixed_lines(step1_script))
 
     if on_stage is not None:
         await on_stage("step2_verify_script", "Step 2：校对 Step1 剧本", 34)
@@ -434,6 +549,7 @@ async def run_verified_five_step_parse_pipeline(
     step2_started = time.perf_counter()
     step2_draft, step2_report = verify_step1_script_with_source(step1_script=step1_script, source_text=text)
     step2_lines_text = draft_to_prefixed_lines(step2_draft)
+    _log_verified_step_result(logger, "step2_verified_script", step2_lines_text)
     step2_stats = {
         "duration_ms": int((time.perf_counter() - step2_started) * 1000),
         **step2_report,
@@ -473,6 +589,7 @@ async def run_verified_five_step_parse_pipeline(
                 llm_options=llm_options,
                 extraction_prompt=step3_enrich_prompt,
             )
+            _log_verified_step_result(logger, "step3_raw_chunk", raw_text)
             stats = dict(raw_stats or {})
             try:
                 script = parse_step3_enriched_lines_to_script(
@@ -505,6 +622,7 @@ async def run_verified_five_step_parse_pipeline(
             parse_single_with_stats=_parse_step3_chunk,
             logger=logger,
         )
+    _log_verified_step_result(logger, "step3_script", _script_to_prefixed_lines(step3_script))
 
     if on_stage is not None:
         await on_stage("step4_verify_enrich", "Step 4：校对 Enrich 结果", 76)
@@ -517,6 +635,7 @@ async def run_verified_five_step_parse_pipeline(
         source_text=text,
         structure_guard=step4_guard,
     )
+    _log_verified_step_result(logger, "step4_merged_script", _script_to_prefixed_lines(merged_script))
     step4_coverage = _scan_source_coverage(source_text=text, segments=merged_script.segments)
     step4_stats = {
         "duration_ms": int((time.perf_counter() - step4_started) * 1000),
@@ -544,6 +663,11 @@ async def run_verified_five_step_parse_pipeline(
         ],
         characters=final_characters,
         metadata=metadata,
+    )
+    _log_verified_step_result(
+        logger,
+        "step5_final_json",
+        json.dumps(final_script.model_dump(mode="json"), ensure_ascii=False, indent=2),
     )
     step5_stats = {
         "duration_ms": int((time.perf_counter() - step5_started) * 1000),
