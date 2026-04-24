@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.metadata
 import wave
 from pathlib import Path
 from typing import Any
@@ -141,8 +142,7 @@ class TTSEngine:
 
             try:
                 audio = self._model.generate(**kwargs)
-                tensor = audio[0].detach().cpu().clamp(-1, 1)
-                waveform = (tensor.squeeze(0).numpy() * 32767).astype("int16").tobytes()
+                waveform = self._to_pcm16_bytes(audio)
                 with wave.open(str(output_path), "wb") as wav_file:
                     wav_file.setnchannels(1)
                     wav_file.setsampwidth(2)
@@ -210,29 +210,86 @@ class TTSEngine:
     def _install_omnivoice_audio_patch(self, torch_module: Any) -> None:
         if self._audio_patch_applied:
             return
+        # OmniVoice 0.1.4+ already switched to soundfile+librosa upstream.
+        # Keep our legacy patch only for older versions to avoid API/shape mismatches.
+        try:
+            raw_version = importlib.metadata.version("omnivoice")
+        except Exception:
+            raw_version = ""
+
+        def _parse_version_tuple(value: str) -> tuple[int, ...]:
+            parts: list[int] = []
+            for token in value.split("."):
+                num = ""
+                for ch in token:
+                    if ch.isdigit():
+                        num += ch
+                    else:
+                        break
+                if not num:
+                    break
+                parts.append(int(num))
+            return tuple(parts)
+
+        if _parse_version_tuple(raw_version) >= (0, 1, 4):
+            self._audio_patch_applied = True
+            return
+
         try:
             import numpy as np
-            import torchaudio
             from omnivoice.models import omnivoice as omnivoice_model_module
             from omnivoice.utils import audio as omnivoice_audio_module
             from pydub import AudioSegment
             import soundfile as sf
         except Exception:
             return
+        try:
+            import librosa  # type: ignore
+        except Exception:
+            librosa = None
+        try:
+            import torchaudio  # type: ignore
+        except Exception:
+            torchaudio = None
+
+        def _resample_waveform(waveform, prompt_sampling_rate: int, sampling_rate: int):
+            if prompt_sampling_rate == sampling_rate:
+                return waveform
+            if librosa is not None:
+                arr = waveform.detach().cpu().numpy()
+                arr = librosa.resample(arr, orig_sr=prompt_sampling_rate, target_sr=sampling_rate, axis=-1)
+                return torch_module.from_numpy(arr).to(dtype=waveform.dtype)
+            if torchaudio is not None:
+                return torchaudio.functional.resample(
+                    waveform,
+                    orig_freq=prompt_sampling_rate,
+                    new_freq=sampling_rate,
+                )
+            # Last fallback without extra deps: linear interpolation in torch.
+            # Shape expected by interpolate: [N, C, T]
+            import torch.nn.functional as F
+
+            source = waveform.unsqueeze(0)
+            target_len = int(source.shape[-1] * (sampling_rate / max(prompt_sampling_rate, 1)))
+            target_len = max(target_len, 1)
+            resampled = F.interpolate(source, size=target_len, mode="linear", align_corners=False)
+            return resampled.squeeze(0)
 
         def _load_audio_compat(audio_path: str, sampling_rate: int):
             waveform = None
             prompt_sampling_rate = None
             try:
-                waveform, prompt_sampling_rate = torchaudio.load(audio_path, backend="soundfile")
+                audio_data, prompt_sampling_rate = sf.read(
+                    audio_path,
+                    dtype="float32",
+                    always_2d=True,
+                )
+                waveform = torch_module.from_numpy(audio_data.T)
             except Exception:
                 try:
-                    audio_data, prompt_sampling_rate = sf.read(
-                        audio_path,
-                        dtype="float32",
-                        always_2d=True,
-                    )
-                    waveform = torch_module.from_numpy(audio_data.T)
+                    if torchaudio is None:
+                        raise RuntimeError("torchaudio unavailable")
+                    waveform, prompt_sampling_rate = torchaudio.load(audio_path, backend="soundfile")
                 except Exception:
                     aseg = AudioSegment.from_file(audio_path)
                     audio_data = np.array(aseg.get_array_of_samples()).astype(np.float32) / 32768.0
@@ -243,11 +300,7 @@ class TTSEngine:
                     prompt_sampling_rate = aseg.frame_rate
 
             if prompt_sampling_rate != sampling_rate:
-                waveform = torchaudio.functional.resample(
-                    waveform,
-                    orig_freq=prompt_sampling_rate,
-                    new_freq=sampling_rate,
-                )
+                waveform = _resample_waveform(waveform, int(prompt_sampling_rate), int(sampling_rate))
             if waveform.shape[0] > 1:
                 waveform = torch_module.mean(waveform, dim=0, keepdim=True)
             return waveform
@@ -255,3 +308,55 @@ class TTSEngine:
         omnivoice_audio_module.load_audio = _load_audio_compat
         omnivoice_model_module.load_audio = _load_audio_compat
         self._audio_patch_applied = True
+
+    def _to_pcm16_bytes(self, generated_audio: Any) -> bytes:
+        import numpy as np
+
+        sample = generated_audio
+        inferred_rate: int | None = None
+
+        if isinstance(sample, dict):
+            payload = sample
+            if isinstance(payload.get("sample_rate"), (int, float)):
+                inferred_rate = int(payload["sample_rate"])
+            for key in ("audio", "wav", "waveform", "samples"):
+                if key in payload:
+                    sample = payload[key]
+                    break
+
+        if isinstance(sample, tuple) and len(sample) == 2 and isinstance(sample[1], (int, float)):
+            inferred_rate = int(sample[1])
+            sample = sample[0]
+
+        if isinstance(sample, (list, tuple)) and sample:
+            sample = sample[0]
+
+        if hasattr(sample, "detach"):
+            arr = sample.detach().cpu().numpy()
+        else:
+            arr = np.asarray(sample)
+
+        if arr.size == 0:
+            raise RuntimeError("OmniVoice 返回空音频数据")
+
+        while arr.ndim > 1 and arr.shape[0] == 1:
+            arr = arr[0]
+        if arr.ndim > 1:
+            # Mix channels to mono conservatively.
+            axis = 0 if arr.shape[0] <= arr.shape[-1] else -1
+            arr = arr.mean(axis=axis)
+
+        if arr.dtype.kind in ("i", "u"):
+            info = np.iinfo(arr.dtype)
+            max_abs = max(abs(info.min), info.max) or 1
+            arr = arr.astype(np.float32) / float(max_abs)
+        else:
+            arr = arr.astype(np.float32)
+
+        arr = np.nan_to_num(arr, nan=0.0, posinf=1.0, neginf=-1.0)
+        arr = np.clip(arr, -1.0, 1.0)
+
+        if inferred_rate and inferred_rate > 0:
+            self.sample_rate = inferred_rate
+
+        return (arr * 32767.0).astype("<i2").tobytes()

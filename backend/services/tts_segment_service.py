@@ -11,6 +11,44 @@ from backend.models import SegmentAsset
 from backend.services.tts_path_service import to_output_relpath
 
 
+def _read_wav_info(path: Path) -> dict:
+    with wave.open(str(path), "rb") as segment_wav:
+        frame_rate = segment_wav.getframerate()
+        frame_count = segment_wav.getnframes()
+        duration_ms = int((frame_count / frame_rate) * 1000) if frame_rate else 0
+        frames = segment_wav.readframes(frame_count)
+    return {
+        "frame_rate": frame_rate,
+        "frame_count": frame_count,
+        "duration_ms": duration_ms,
+        "frames": frames,
+        "has_signal": any(byte != 0 for byte in frames),
+    }
+
+
+def _allows_silent_output(tts_backend: str) -> bool:
+    return (tts_backend or "").strip().lower() == "mock"
+
+
+async def _generate_segment_audio(
+    *,
+    tts_engine,
+    segment,
+    segment_path: Path,
+    preset,
+    config,
+    normalized_overrides: dict,
+) -> dict:
+    await tts_engine.synthesize_to_file(
+        segment.text,
+        segment_path,
+        preset,
+        config,
+        tts_overrides=normalized_overrides,
+    )
+    return _read_wav_info(segment_path)
+
+
 async def process_synthesis_segment(
     *,
     tts_engine,
@@ -42,49 +80,92 @@ async def process_synthesis_segment(
 ) -> dict:
     reused = False
     generated = 0
+    source = "generated"
     if can_reuse and project_asset_path is not None:
         shutil.copyfile(project_asset_path, segment_path)
         reused = True
+        source = "reused"
     elif cache_hit:
         shutil.copyfile(cached_path, segment_path)
+        source = "cache"
     else:
-        await tts_engine.synthesize_to_file(
-            segment.text,
-            segment_path,
-            preset,
-            config,
-            tts_overrides=normalized_overrides,
+        wav_info = await _generate_segment_audio(
+            tts_engine=tts_engine,
+            segment=segment,
+            segment_path=segment_path,
+            preset=preset,
+            config=config,
+            normalized_overrides=normalized_overrides,
         )
-        if segment_path.exists() and segment_path.stat().st_size > 0:
+        if wav_info["has_signal"] and segment_path.exists() and segment_path.stat().st_size > 0:
             shutil.copyfile(segment_path, cached_path)
         generated = 1
 
     try:
-        with wave.open(str(segment_path), "rb") as segment_wav:
-            frame_rate = segment_wav.getframerate()
-            frame_count = segment_wav.getnframes()
-            duration_ms = int((frame_count / frame_rate) * 1000)
-            combined_frames.extend(segment_wav.readframes(frame_count))
+        if generated:
+            wav_info
+        else:
+            wav_info = _read_wav_info(segment_path)
     except Exception:
-        if cache_hit:
-            await tts_engine.synthesize_to_file(
-                segment.text,
-                segment_path,
-                preset,
-                config,
-                tts_overrides=normalized_overrides,
+        if cache_hit or reused:
+            wav_info = await _generate_segment_audio(
+                tts_engine=tts_engine,
+                segment=segment,
+                segment_path=segment_path,
+                preset=preset,
+                config=config,
+                normalized_overrides=normalized_overrides,
             )
-            if segment_path.exists() and segment_path.stat().st_size > 0:
+            if wav_info["has_signal"] and segment_path.exists() and segment_path.stat().st_size > 0:
                 shutil.copyfile(segment_path, cached_path)
-            with wave.open(str(segment_path), "rb") as segment_wav:
-                frame_rate = segment_wav.getframerate()
-                frame_count = segment_wav.getnframes()
-                duration_ms = int((frame_count / frame_rate) * 1000)
-                combined_frames.extend(segment_wav.readframes(frame_count))
             cache_hit = False
+            reused = False
             generated = 1
+            source = "generated"
         else:
             raise
+
+    if (cache_hit or reused) and not wav_info["has_signal"]:
+        # Cached/reused silent WAVs make UI look successful while actually producing no audio.
+        # Force one regeneration with current backend/model and refresh cache with valid output.
+        wav_info = await _generate_segment_audio(
+            tts_engine=tts_engine,
+            segment=segment,
+            segment_path=segment_path,
+            preset=preset,
+            config=config,
+            normalized_overrides=normalized_overrides,
+        )
+        if wav_info["has_signal"] and segment_path.exists() and segment_path.stat().st_size > 0:
+            shutil.copyfile(segment_path, cached_path)
+        cache_hit = False
+        reused = False
+        generated = 1
+        source = "generated"
+
+    expected_backend = (tts_backend or "").strip().lower()
+    runtime_backend = (getattr(tts_engine, "backend_name", tts_backend) or "").strip().lower()
+    runtime_error = (getattr(tts_engine, "last_error", "") or "").strip()
+
+    if expected_backend and expected_backend != "mock" and runtime_backend == "mock":
+        detail = runtime_error or "未知错误"
+        raise RuntimeError(
+            f"TTS 后端从 {expected_backend} 降级为 mock，导致无法正常合成：{detail}"
+        )
+
+    silent_audio = not wav_info["has_signal"]
+    if silent_audio and generated and not _allows_silent_output(runtime_backend or expected_backend):
+        detail_suffix = f" 最近错误: {runtime_error}" if runtime_error else ""
+        backend_text = runtime_backend or expected_backend or "unknown"
+        raise RuntimeError(
+            "TTS 生成了静音音频，请检查 TTS 模型、参考音频或声音预设配置后重试。"
+            f" backend={backend_text}, segment_id={segment.id}.{detail_suffix}"
+        )
+
+    frame_rate = int(wav_info["frame_rate"])
+    frame_count = int(wav_info["frame_count"])
+    duration_ms = int(wav_info["duration_ms"])
+    combined_frames.extend(wav_info["frames"])
 
     if rebuild_full and index < total - 1:
         # Use the actual frame rate read from the WAV, not the caller-supplied sample_rate,
@@ -134,6 +215,8 @@ async def process_synthesis_segment(
         "duration_ms": duration_ms,
         "cached": bool(cache_hit),
         "reused": reused,
+        "source": source,
+        "silent_audio": silent_audio,
         "peaks": {
             "format": segment_peaks_payload.get("format", "minmax_i16"),
             "bins": int(segment_peaks_payload.get("bins", 0)),

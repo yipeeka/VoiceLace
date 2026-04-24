@@ -18,6 +18,15 @@ def _write_sine_like_wav(path: Path, *, frames: int = 2400, sample_rate: int = 2
         wav_file.writeframes(b"\x01\x00" * frames)
 
 
+def _write_silent_wav(path: Path, *, frames: int = 2400, sample_rate: int = 24000) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(b"\x00\x00" * frames)
+
+
 class _FakeTTSEngine:
     def __init__(self) -> None:
         self.calls = 0
@@ -139,6 +148,63 @@ class TtsSegmentServiceTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["generated_count_delta"], 0)
             self.assertTrue(result["reused"])
             self.assertTrue((project_segments_dir / "seg-2.wav").exists())
+
+    async def test_process_segment_regenerates_silent_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "output"
+            cache_dir = Path(tmp_dir) / "cache"
+            temp_dir = Path(tmp_dir) / "temp"
+            project_segments_dir = output_dir / "projects" / "p1" / "segments"
+            project_segment_waveforms_dir = output_dir / "projects" / "p1" / "waveforms" / "segments"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            project_segments_dir.mkdir(parents=True, exist_ok=True)
+            project_segment_waveforms_dir.mkdir(parents=True, exist_ok=True)
+
+            segment = Segment(id="seg-3", index=0, type="narration", speaker="narrator", text="cached silence")
+            segment_path = temp_dir / "seg-3.wav"
+            cached_path = cache_dir / "cache-key-3.wav"
+            _write_silent_wav(cached_path)
+            engine = _FakeTTSEngine()
+            combined = bytearray()
+            project = Project(name="segment-test")
+
+            result = await process_synthesis_segment(
+                tts_engine=engine,
+                segment=segment,
+                segment_path=segment_path,
+                preset=None,
+                config=project.synthesis_config,
+                normalized_overrides={},
+                cached_path=cached_path,
+                cache_hit=True,
+                can_reuse=False,
+                project_asset_path=None,
+                rebuild_full=False,
+                index=0,
+                total=1,
+                combined_frames=combined,
+                sample_rate=24000,
+                project_segments_dir=project_segments_dir,
+                project_segment_waveforms_dir=project_segment_waveforms_dir,
+                output_dir=output_dir,
+                fingerprint="fp-3",
+                preset_id=None,
+                preset_hash="",
+                config_hash="cfg",
+                tts_backend="omnivoice",
+                tts_model_path="model",
+                task_id="task-1",
+                gap_duration_ms=500,
+            )
+
+            self.assertEqual(engine.calls, 1)
+            self.assertEqual(result["generated_count_delta"], 1)
+            self.assertFalse(result["cache_hit"])
+            self.assertFalse(result["segment_result"]["cached"])
+            self.assertFalse(result["segment_result"]["silent_audio"])
+            self.assertTrue(any(byte != 0 for byte in combined))
 
 
 if __name__ == "__main__":

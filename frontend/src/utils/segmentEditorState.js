@@ -11,7 +11,7 @@ export function createSegmentDraft(index = 0) {
   return {
     id: generateSegmentId(),
     index,
-    type: "dialogue",
+    type: "narration",
     speaker: "narrator",
     text: "",
     emotion: "neutral",

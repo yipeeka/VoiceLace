@@ -3,7 +3,9 @@ openai
 torch
 torchaudio
 torchcodec
-omnivoice
+omnivoice>=0.1.4
+soundfile
+librosa
 openai-whisper
 faster-whisper
 pydub
