@@ -498,8 +498,9 @@ export default function VoiceConfigPage() {
         }
         return next;
       });
+      setActiveBackend(targetBackend);
       useUiStore.getState().pushToast({
-        title: `已同步到 ${targetBackend === "voxcpm2" ? "VoxCPM2" : "OmniVoice"} profile`,
+        title: `已同步到 ${targetBackend === "voxcpm2" ? "VoxCPM2" : "OmniVoice"} profile（已填充 clone 参数，点击“更新预设”保存）`,
         tone: "success",
       });
     } catch (error) {

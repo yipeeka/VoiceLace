@@ -11,6 +11,7 @@ function formatTime(seconds) {
 }
 
 const peaksCache = new Map();
+const decodedPeaksCache = new Map();
 
 function normalizePeaksData(peaks) {
   if (!peaks || !Array.isArray(peaks.data) || peaks.data.length < 2) {
@@ -49,6 +50,59 @@ function resolveUrl(path) {
   if (!path) return "";
   if (path.startsWith("http://") || path.startsWith("https://")) return path;
   return `${API_ORIGIN}${path}`;
+}
+
+async function buildPeaksFromAudioUrl(audioUrl, bins = 320) {
+  if (!audioUrl) return null;
+  const response = await fetch(audioUrl);
+  if (!response.ok) return null;
+  const arrayBuffer = await response.arrayBuffer();
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor) return null;
+  const audioContext = new AudioContextCtor();
+  try {
+    const audioBuffer = await new Promise((resolve, reject) => {
+      audioContext.decodeAudioData(
+        arrayBuffer.slice(0),
+        (buffer) => resolve(buffer),
+        (error) => reject(error),
+      );
+    });
+    const channelData = audioBuffer.getChannelData(0);
+    if (!channelData || !channelData.length) return null;
+    const targetBins = Math.max(64, Math.min(1024, Number(bins) || 320));
+    const samplesPerBin = Math.max(1, Math.floor(channelData.length / targetBins));
+    const data = [];
+    for (let i = 0; i < targetBins; i += 1) {
+      const start = i * samplesPerBin;
+      const end = i === targetBins - 1 ? channelData.length : Math.min(channelData.length, start + samplesPerBin);
+      if (start >= channelData.length || end <= start) {
+        data.push(0, 0);
+        continue;
+      }
+      let min = 1;
+      let max = -1;
+      for (let j = start; j < end; j += 1) {
+        const value = channelData[j];
+        if (value < min) min = value;
+        if (value > max) max = value;
+      }
+      const minI16 = Math.max(-32768, Math.min(32767, Math.round(min * 32767)));
+      const maxI16 = Math.max(-32768, Math.min(32767, Math.round(max * 32767)));
+      data.push(minI16, maxI16);
+    }
+    return {
+      format: "minmax_i16",
+      bins: targetBins,
+      data,
+    };
+  } finally {
+    try {
+      await audioContext.close();
+    } catch {
+      // noop
+    }
+  }
 }
 
 export default function AudioPlayer({ audioUrl, peaks = null, peaksUrl = null, height = 60, compact = false }) {
@@ -140,6 +194,31 @@ export default function AudioPlayer({ audioUrl, peaks = null, peaksUrl = null, h
       canceled = true;
     };
   }, [peaksUrl, resolvedPeaks]);
+
+  useEffect(() => {
+    let canceled = false;
+    async function buildDecodedPeaks() {
+      if (!audioUrl || resolvedPeaks) {
+        return;
+      }
+      if (decodedPeaksCache.has(audioUrl)) {
+        setResolvedPeaks(decodedPeaksCache.get(audioUrl));
+        return;
+      }
+      try {
+        const decoded = await buildPeaksFromAudioUrl(audioUrl);
+        if (!decoded || canceled) return;
+        decodedPeaksCache.set(audioUrl, decoded);
+        setResolvedPeaks(decoded);
+      } catch {
+        // keep silent fallback line when decode fails
+      }
+    }
+    buildDecodedPeaks();
+    return () => {
+      canceled = true;
+    };
+  }, [audioUrl, resolvedPeaks]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
