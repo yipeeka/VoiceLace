@@ -117,7 +117,10 @@ async def transcribe_audio(payload: TranscribeRequest, state=Depends(get_app_sta
 
 @router.post("/preview")
 async def preview_voice(payload: VoicePreviewRequest, state=Depends(get_app_state)):
-    await state.orchestrator.ensure_tts_ready()
+    target_backend = (payload.tts_backend or "omnivoice").strip().lower()
+    if target_backend not in {"omnivoice", "voxcpm2", "mock"}:
+        target_backend = "omnivoice"
+    await state.orchestrator.ensure_tts_ready(tts_backend=target_backend)
     _cleanup_expired_previews(state.settings.output_dir)
     output = state.settings.output_dir / f"preview_{uuid4().hex[:8]}.wav"
     await state.tts_engine.synthesize_to_file(payload.text, output, payload.preset)

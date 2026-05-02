@@ -137,17 +137,24 @@ export const useVoiceStore = create((set) => ({
       throw error;
     }
   },
-  previewVoice: async ({ preset, text }) => {
+  previewVoice: async ({ preset, text, ttsBackend }) => {
     set({ isSaving: true, error: "" });
     try {
-      const blob = await api.postBlob("/voices/preview", { preset, text });
+      const blob = await api.postBlob("/voices/preview", {
+        preset,
+        text,
+        tts_backend: ttsBackend || "omnivoice",
+      });
       const previousUrl = useVoiceStore.getState().previewAudioUrl;
       if (previousUrl) {
         URL.revokeObjectURL(previousUrl);
       }
       const url = URL.createObjectURL(blob);
       set({ previewAudioUrl: url, isSaving: false });
-      useUiStore.getState().pushToast({ title: "试听音频已生成", tone: "success" });
+      useUiStore.getState().pushToast({
+        title: `试听音频已生成（${(ttsBackend || "omnivoice").toUpperCase()}）`,
+        tone: "success",
+      });
       return url;
     } catch (error) {
       const message = getErrorMessage(error, "试听失败");
