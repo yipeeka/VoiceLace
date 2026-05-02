@@ -66,12 +66,22 @@ export default function OrchestratorConfigCard({ form, isSaving, onSetField, onS
           </div>
 
           <div className="formGroup">
-            <label className="formLabel">TTS 模型目录</label>
+            <label className="formLabel">OmniVoice TTS 模型目录</label>
             <input
               className="textInput"
               value={form.tts_model_path ?? ""}
               onChange={(e) => onSetField("tts_model_path", e.target.value)}
               placeholder="e.g. D:/models/omnivoice"
+            />
+          </div>
+
+          <div className="formGroup">
+            <label className="formLabel">VoxCPM2 TTS 模型目录</label>
+            <input
+              className="textInput"
+              value={form.voxcpm_tts_model_path ?? "openbmb/VoxCPM2"}
+              onChange={(e) => onSetField("voxcpm_tts_model_path", e.target.value)}
+              placeholder="openbmb/VoxCPM2 或 E:/models/VoxCPM2"
             />
           </div>
 

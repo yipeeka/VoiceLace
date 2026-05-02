@@ -85,7 +85,8 @@ async def run_synthesis_task(*, task_id: str, payload: SynthesizeRequest, state,
     )
 
     try:
-        await state.orchestrator.ensure_tts_ready()
+        target_tts_backend = config.get_tts_backend() if config is not None else "omnivoice"
+        await state.orchestrator.ensure_tts_ready(tts_backend=target_tts_backend)
         await emit_task_event(
             state=state,
             task=task,
@@ -94,8 +95,17 @@ async def run_synthesis_task(*, task_id: str, payload: SynthesizeRequest, state,
         )
 
         total = len(run_segments)
-        tts_backend = getattr(state.tts_engine, "backend_name", "unknown")
-        tts_model_path = getattr(state.tts_engine, "model_path", "") or getattr(state.orchestrator.config, "tts_model_path", "")
+        tts_backend = target_tts_backend
+        if tts_backend == "voxcpm2":
+            tts_model_path = (
+                getattr(state.tts_engine, "model_path", "")
+                or getattr(state.orchestrator.config, "voxcpm_tts_model_path", "")
+            )
+        else:
+            tts_model_path = (
+                getattr(state.tts_engine, "model_path", "")
+                or getattr(state.orchestrator.config, "tts_model_path", "")
+            )
         scan_plan = build_synthesis_scan_plan(
             run_segments=run_segments,
             voice_assignments=project.voice_assignments,

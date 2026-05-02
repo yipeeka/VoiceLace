@@ -4,6 +4,20 @@ from pathlib import Path
 from typing import Callable
 
 
+def _preset_payload_for_backend(*, preset, tts_backend: str) -> dict:
+    if preset is None:
+        return {}
+    backend = (tts_backend or "omnivoice").strip().lower()
+    try:
+        if backend == "voxcpm2" and hasattr(preset, "resolved_voxcpm2_profile"):
+            return preset.resolved_voxcpm2_profile().model_dump(mode="json")
+        if backend == "omnivoice" and hasattr(preset, "resolved_omnivoice_profile"):
+            return preset.resolved_omnivoice_profile().model_dump(mode="json")
+        return preset.model_dump(mode="json")
+    except Exception:
+        return {"id": getattr(preset, "id", "")}
+
+
 def build_synthesis_scan_plan(
     *,
     run_segments: list,
@@ -41,12 +55,7 @@ def build_synthesis_scan_plan(
         normalized_overrides = normalize_segment_tts_overrides(segment)
         preset_id = voice_assignments.get(segment.speaker)
         preset = presets_by_id.get(preset_id) if preset_id else None
-        preset_payload = {}
-        if preset is not None:
-            try:
-                preset_payload = preset.model_dump()
-            except Exception:
-                preset_payload = {"id": getattr(preset, "id", "")}
+        preset_payload = _preset_payload_for_backend(preset=preset, tts_backend=tts_backend)
         preset_hash = hash_payload(preset_payload)
         key = segment_cache_key(
             text=segment.text,

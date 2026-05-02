@@ -66,9 +66,21 @@ export default function SynthesisPage() {
   const pushToast = useUiStore.getState().pushToast;
 
   const config = useSynthesisStore((s) => s.config ?? {
+    tts_backend: "omnivoice",
     num_step: 32,
     guidance_scale: 2,
     denoise: true,
+    omnivoice: {
+      num_step: 32,
+      guidance_scale: 2,
+      denoise: true,
+    },
+    voxcpm2: {
+      inference_timesteps: 10,
+      cfg_value: 2,
+      denoise: false,
+      normalize: true,
+    },
     gap_duration_ms: 300,
     output_format: "wav",
   });

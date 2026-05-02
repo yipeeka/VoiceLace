@@ -39,13 +39,28 @@ async def _generate_segment_audio(
     config,
     normalized_overrides: dict,
 ) -> dict:
-    await tts_engine.synthesize_to_file(
-        segment.text,
-        segment_path,
-        preset,
-        config,
-        tts_overrides=normalized_overrides,
-    )
+    try:
+        await tts_engine.synthesize_to_file(
+            segment.text,
+            segment_path,
+            preset,
+            config,
+            tts_overrides=normalized_overrides,
+            non_verbal=segment.non_verbal,
+            emotion=segment.emotion,
+        )
+    except TypeError as exc:
+        # Keep backward compatibility with test doubles / older engines that
+        # have not added non_verbal/emotion kwargs yet.
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        await tts_engine.synthesize_to_file(
+            segment.text,
+            segment_path,
+            preset,
+            config,
+            tts_overrides=normalized_overrides,
+        )
     return _read_wav_info(segment_path)
 
 

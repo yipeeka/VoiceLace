@@ -55,6 +55,7 @@ class Settings:
     gemini_base_url: str = field(default_factory=lambda: os.getenv("BV_GEMINI_BASE_URL", "https://generativelanguage.googleapis.com"))
     gemini_model: str = field(default_factory=lambda: os.getenv("BV_GEMINI_MODEL", "gemini-2.5-flash"))
     default_tts_model_path: str = field(default_factory=lambda: os.getenv("BV_TTS_MODEL_PATH", "k2-fsa/OmniVoice"))
+    default_voxcpm_tts_model_path: str = field(default_factory=lambda: os.getenv("BV_VOXCPM_TTS_MODEL_PATH", "openbmb/VoxCPM2"))
     default_tts_device: str = field(default_factory=lambda: os.getenv("BV_TTS_DEVICE", "cuda:0"))
     default_asr_model_path: str = field(default_factory=lambda: os.getenv("BV_ASR_MODEL_PATH", "base"))
     default_asr_device: str = field(default_factory=lambda: os.getenv("BV_ASR_DEVICE", os.getenv("BV_TTS_DEVICE", "cuda:0")))

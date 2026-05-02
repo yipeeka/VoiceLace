@@ -42,6 +42,7 @@ class OrchestratorConfig:
     llm_repeat_penalty: float = settings.default_llm_repeat_penalty
     llm_max_tokens: int = settings.default_llm_max_tokens
     tts_model_path: str = settings.default_tts_model_path
+    voxcpm_tts_model_path: str = settings.default_voxcpm_tts_model_path
     tts_device: str = settings.default_tts_device
     asr_model_path: str = settings.default_asr_model_path
     asr_device: str = settings.default_asr_device
@@ -151,14 +152,34 @@ class ModelOrchestrator:
                 )
             await self._set_state(ModelState.LLM_READY, "llm")
 
-    async def ensure_tts_ready(self) -> None:
+    async def ensure_tts_ready(self, *, tts_backend: str = "omnivoice") -> None:
         async with self._lock:
             if self._llm.is_loaded and self._config.auto_serial:
                 await self._set_state(ModelState.UNLOADING_LLM, "llm")
                 await self._llm.unload_model()
+            backend = (tts_backend or "omnivoice").strip().lower()
+            if backend not in {"omnivoice", "voxcpm2", "mock"}:
+                backend = "omnivoice"
+            model_path = self._config.tts_model_path
+            if backend == "voxcpm2":
+                model_path = self._config.voxcpm_tts_model_path
+
+            need_reload = False
+            if getattr(self._tts, "is_loaded", False) and hasattr(self._tts, "needs_reload"):
+                need_reload = bool(
+                    self._tts.needs_reload(
+                        backend=backend,
+                        model_path=model_path,
+                        device=self._config.tts_device,
+                    )
+                )
+            if need_reload:
+                await self._set_state(ModelState.UNLOADING_TTS, "tts")
+                await self._tts.unload_model()
+
             if not self._tts.is_loaded:
                 await self._set_state(ModelState.LOADING_TTS, "tts")
-                await self._tts.load_model(self._config.tts_model_path, self._config.tts_device)
+                await self._tts.load_model(model_path, self._config.tts_device, backend=backend)
             await self._set_state(ModelState.TTS_READY, "tts")
 
     async def unload_llm(self) -> None:

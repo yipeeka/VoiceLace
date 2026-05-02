@@ -16,7 +16,13 @@ def segment_cache_key(
     preset_payload = {}
     if preset is not None:
         try:
-            preset_payload = preset.model_dump()
+            backend = (tts_backend or "omnivoice").strip().lower()
+            if backend == "voxcpm2" and hasattr(preset, "resolved_voxcpm2_profile"):
+                preset_payload = preset.resolved_voxcpm2_profile().model_dump(mode="json")
+            elif backend == "omnivoice" and hasattr(preset, "resolved_omnivoice_profile"):
+                preset_payload = preset.resolved_omnivoice_profile().model_dump(mode="json")
+            else:
+                preset_payload = preset.model_dump(mode="json")
         except Exception:
             preset_payload = {"id": getattr(preset, "id", "")}
     config_payload = {}

@@ -23,6 +23,7 @@ class RuntimeConfigTest(unittest.TestCase):
                 llm_n_ctx=4096,
                 llm_threads=4,
                 tts_model_path="omnivoice",
+                voxcpm_tts_model_path="openbmb/VoxCPM2",
                 asr_model_path="faster-whisper-large-v3",
                 asr_device="cuda:1",
             )
@@ -30,11 +31,13 @@ class RuntimeConfigTest(unittest.TestCase):
             raw = json.loads(path.read_text(encoding="utf-8"))
             self.assertFalse(raw["enable_llama_cpp_think_mode"])
             self.assertEqual(raw["llm_backend"], "gemini")
+            self.assertEqual(raw["voxcpm_tts_model_path"], "openbmb/VoxCPM2")
             loaded = load_runtime_config(path)
             self.assertFalse(loaded.enable_llama_cpp_think_mode)
             self.assertEqual(loaded.llm_backend, "gemini")
             self.assertEqual(loaded.asr_device, "cuda:1")
             self.assertEqual(loaded.llm_threads, 4)
+            self.assertEqual(loaded.voxcpm_tts_model_path, "openbmb/VoxCPM2")
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 

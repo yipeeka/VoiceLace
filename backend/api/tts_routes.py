@@ -98,14 +98,19 @@ async def get_segment_audio(task_id: str, segment_id: str, state=Depends(get_app
 @router.get("/projects/{project_id}/stale-report")
 async def get_project_stale_report(project_id: str, state=Depends(get_app_state)):
     project = load_project(state.settings.projects_dir, project_id)
+    synthesis_config = project.synthesis_config
+    tts_backend = synthesis_config.get_tts_backend() if synthesis_config else "omnivoice"
+    if tts_backend == "voxcpm2":
+        tts_model_path = getattr(state.orchestrator.config, "voxcpm_tts_model_path", "")
+    else:
+        tts_model_path = getattr(state.orchestrator.config, "tts_model_path", "")
     return build_stale_report(
         output_dir=state.settings.output_dir,
         project=project,
         presets=state.voice_manager.list_presets(),
-        config=project.synthesis_config,
-        tts_backend=getattr(state.tts_engine, "backend_name", "unknown"),
-        tts_model_path=getattr(state.tts_engine, "model_path", "")
-        or getattr(state.orchestrator.config, "tts_model_path", ""),
+        config=synthesis_config,
+        tts_backend=tts_backend,
+        tts_model_path=tts_model_path,
         normalize_segment_tts_overrides=normalize_segment_tts_overrides,
         segment_cache_key=segment_cache_key,
         hash_payload=hash_payload,

@@ -66,6 +66,10 @@ const emptyForm = {
   clone_denoise: true,
   clone_num_step: 32,
   clone_guidance_scale: 2.0,
+  backend_profiles: {
+    omnivoice: null,
+    voxcpm2: null,
+  },
 };
 
 function SortablePresetCard({

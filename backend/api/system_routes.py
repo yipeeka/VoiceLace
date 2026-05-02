@@ -124,11 +124,17 @@ async def unload_llm(state=Depends(get_app_state)):
 
 @router.post("/load-tts")
 async def load_tts(payload: LoadTtsRequest, state=Depends(get_app_state)):
+    target_backend = (payload.tts_backend or "omnivoice").strip().lower()
+    if target_backend not in {"omnivoice", "voxcpm2", "mock"}:
+        target_backend = "omnivoice"
     if payload.tts_model_path is not None:
-        state.orchestrator.config.tts_model_path = payload.tts_model_path
+        if target_backend == "voxcpm2":
+            state.orchestrator.config.voxcpm_tts_model_path = payload.tts_model_path
+        else:
+            state.orchestrator.config.tts_model_path = payload.tts_model_path
     if payload.tts_device is not None:
         state.orchestrator.config.tts_device = payload.tts_device
-    await state.orchestrator.ensure_tts_ready()
+    await state.orchestrator.ensure_tts_ready(tts_backend=target_backend)
     return {"status": "ok", "backend": state.tts_engine.backend_name, "error": state.tts_engine.last_error}
 
 
