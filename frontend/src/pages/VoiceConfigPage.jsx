@@ -134,6 +134,14 @@ function resolveVoxProfile(preset = {}) {
   };
 }
 
+function getProfileModeFromPreset(preset = {}, backend = "omnivoice") {
+  const normalized = (backend || "omnivoice").toLowerCase();
+  if (normalized === "voxcpm2") {
+    return preset?.backend_profiles?.voxcpm2?.voice_mode || preset?.voice_mode || "design";
+  }
+  return preset?.backend_profiles?.omnivoice?.voice_mode || preset?.voice_mode || "design";
+}
+
 const emptyForm = {
   name: "",
   voice_mode: "design",
@@ -233,7 +241,7 @@ export default function VoiceConfigPage() {
   const setProjectSaveAction = useUiStore((state) => state.setProjectSaveAction);
   const clearProjectSaveAction = useUiStore((state) => state.clearProjectSaveAction);
   const {
-    presets, assignments, previewAudioUrl,
+    presets, assignments, previewAudioUrl, previewMeta,
     isLoading, isSaving, isTranscribing, error,
     setAssignments, assignVoice, loadPresets,
     createPreset, updatePreset, deletePreset, reorderPresets, saveAssignments, previewVoice,
@@ -379,7 +387,7 @@ export default function VoiceConfigPage() {
     const payload = {
       ...form,
       name: form.name.trim(),
-      voice_mode: omnivoiceProfile.voice_mode,
+      voice_mode: form.voice_mode || omnivoiceProfile.voice_mode,
       speed: omnivoiceProfile.speed,
       gender: omnivoiceProfile.gender || "",
       age: omnivoiceProfile.age || "",
@@ -420,13 +428,86 @@ export default function VoiceConfigPage() {
 
   async function handlePreview() {
     if (!selectedPreset) return;
-    await previewVoice({ preset: selectedPreset, text: sampleText, ttsBackend: previewBackend });
+    await previewVoice({
+      preset: selectedPreset,
+      text: sampleText,
+      ttsBackend: previewBackend,
+      sourceMode: getProfileModeFromPreset(selectedPreset, previewBackend),
+    });
   }
 
   async function handlePreviewPreset(preset) {
     setSampleText("这是试听文本");
     setSelectedPresetId(preset.id);
-    await previewVoice({ preset, text: "这是试听文本", ttsBackend: previewBackend });
+    await previewVoice({
+      preset,
+      text: "这是试听文本",
+      ttsBackend: previewBackend,
+      sourceMode: getProfileModeFromPreset(preset, previewBackend),
+    });
+  }
+
+  async function handleSyncPreviewToOtherBackend() {
+    if (!previewAudioUrl || !selectedPreset) {
+      useUiStore.getState().pushToast({ title: "请先生成试听音频", tone: "error" });
+      return;
+    }
+    if (previewMeta?.backend && previewMeta.backend !== previewBackend) {
+      useUiStore.getState().pushToast({
+        title: "当前试听后端已切换，请先在当前 tab 重新生成试听后再同步",
+        tone: "error",
+      });
+      return;
+    }
+    const sourceBackend = (previewMeta?.backend || previewBackend || "omnivoice").toLowerCase();
+    const targetBackend = sourceBackend === "voxcpm2" ? "omnivoice" : "voxcpm2";
+    const sourceMode = previewMeta?.source_mode || getProfileModeFromPreset(selectedPreset, sourceBackend) || "design";
+    const referenceText = (previewMeta?.text || sampleText || "").trim();
+    try {
+      const response = await fetch(previewAudioUrl);
+      if (!response.ok) {
+        throw new Error(`读取试听音频失败: HTTP ${response.status}`);
+      }
+      const blob = await response.blob();
+      const file = new File([blob], `preview_sync_${sourceBackend}_${Date.now()}.wav`, {
+        type: "audio/wav",
+      });
+      const uploaded = await uploadReferenceAudio(file);
+      const refAudioPath = uploaded?.file_path || "";
+      if (!refAudioPath) {
+        throw new Error("上传试听音频后未返回有效路径");
+      }
+      setForm((prev) => {
+        const next = {
+          ...prev,
+          // Badge/标识按源音频模式展示，不因“同步使用了克隆方法”而强制变成 clone。
+          voice_mode: sourceMode,
+          backend_profiles: {
+            ...prev.backend_profiles,
+            [targetBackend]: {
+              ...(prev.backend_profiles?.[targetBackend] || {}),
+              // 同步过程使用 clone 语义将源音色迁移到目标后端。
+              voice_mode: "clone",
+              ref_audio_path: refAudioPath,
+              ref_text: referenceText,
+            },
+          },
+        };
+        if (targetBackend === "voxcpm2" && next.backend_profiles?.voxcpm2) {
+          next.backend_profiles.voxcpm2.use_hifi_clone = Boolean(next.backend_profiles.voxcpm2.use_hifi_clone);
+        }
+        return next;
+      });
+      useUiStore.getState().pushToast({
+        title: `已同步到 ${targetBackend === "voxcpm2" ? "VoxCPM2" : "OmniVoice"} profile`,
+        tone: "success",
+      });
+    } catch (error) {
+      useUiStore.getState().pushToast({
+        title: `同步失败：${error?.message || "未知错误"}`,
+        tone: "error",
+      });
+    }
   }
 
   async function handleRefAudioUpload(file, backend) {
@@ -963,6 +1044,13 @@ export default function VoiceConfigPage() {
             <div className="controlRow">
               <Button variant="primary" onClick={handlePreview} disabled={isSaving}>
                 {isSaving ? "合成中..." : "▶ 试听"}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={handleSyncPreviewToOtherBackend}
+                disabled={isSaving || !previewAudioUrl}
+              >
+                {previewBackend === "voxcpm2" ? "同步到 OmniVoice" : "同步到 VoxCPM2"}
               </Button>
             </div>
             {previewAudioUrl && <AudioPlayer audioUrl={previewAudioUrl} />}

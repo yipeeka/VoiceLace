@@ -30,6 +30,7 @@ export const useVoiceStore = create((set) => ({
   presets: [],
   assignments: {},
   previewAudioUrl: null,
+  previewMeta: null,
   uploadedRefAudioPath: "",
   transcribedRefText: "",
   isLoading: false,
@@ -137,22 +138,31 @@ export const useVoiceStore = create((set) => ({
       throw error;
     }
   },
-  previewVoice: async ({ preset, text, ttsBackend }) => {
+  previewVoice: async ({ preset, text, ttsBackend, sourceMode }) => {
     set({ isSaving: true, error: "" });
     try {
+      const backendName = (ttsBackend || "omnivoice").toLowerCase();
       const blob = await api.postBlob("/voices/preview", {
         preset,
         text,
-        tts_backend: ttsBackend || "omnivoice",
+        tts_backend: backendName,
       });
       const previousUrl = useVoiceStore.getState().previewAudioUrl;
       if (previousUrl) {
         URL.revokeObjectURL(previousUrl);
       }
       const url = URL.createObjectURL(blob);
-      set({ previewAudioUrl: url, isSaving: false });
+      set({
+        previewAudioUrl: url,
+        previewMeta: {
+          backend: backendName,
+          source_mode: sourceMode || "design",
+          text: text || "",
+        },
+        isSaving: false,
+      });
       useUiStore.getState().pushToast({
-        title: `试听音频已生成（${(ttsBackend || "omnivoice").toUpperCase()}）`,
+        title: `试听音频已生成（${backendName.toUpperCase()}）`,
         tone: "success",
       });
       return url;
