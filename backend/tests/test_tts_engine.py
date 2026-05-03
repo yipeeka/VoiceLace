@@ -1,16 +1,29 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 import unittest
 from pathlib import Path
 import uuid
 
 from backend.engine.tts_engine import TTSEngine
+from backend.models import VoicePreset
 
 
 class _StopIterationModel:
     def generate(self, **kwargs):
         raise StopIteration()
+
+
+class _CaptureModel:
+    def __init__(self) -> None:
+        self.kwargs = None
+
+    def generate(self, **kwargs):
+        import numpy as np
+
+        self.kwargs = kwargs
+        return np.array([0.1, -0.1, 0.05, -0.05], dtype=np.float32)
 
 
 class TTSEngineTest(unittest.TestCase):
@@ -54,6 +67,40 @@ class TTSEngineTest(unittest.TestCase):
         self.assertIsNone(engine._model)
         self.assertEqual(engine.backend_name, "unloaded")
         self.assertEqual(engine.last_error, "")
+
+    def test_voxcpm2_clone_control_instruction_prefixes_hifi_text(self) -> None:
+        engine = TTSEngine()
+        engine.backend_name = "voxcpm2"
+        engine.is_loaded = True
+        capture_model = _CaptureModel()
+        engine._model = capture_model
+        tmp_dir = Path.cwd() / "tmp_test_outputs" / f"voxcpm-control-{uuid.uuid4().hex[:8]}"
+        ref_path = tmp_dir / "ref.wav"
+        output_path = tmp_dir / "out.wav"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        ref_path.write_bytes(b"fake")
+        preset = VoicePreset(
+            name="clone-control",
+            backend_profiles={
+                "voxcpm2": {
+                    "voice_mode": "clone",
+                    "ref_audio_path": str(ref_path),
+                    "ref_text": "参考文本",
+                    "use_hifi_clone": True,
+                    "control_instruction": "更悲伤，语速稍慢",
+                }
+            },
+        )
+
+        try:
+            engine._synthesize_to_file_sync("您好", output_path, preset=preset)
+
+            self.assertEqual(capture_model.kwargs["text"], "(更悲伤，语速稍慢)您好")
+            self.assertEqual(capture_model.kwargs["reference_wav_path"], str(ref_path))
+            self.assertEqual(capture_model.kwargs["prompt_wav_path"], str(ref_path))
+            self.assertEqual(capture_model.kwargs["prompt_text"], "参考文本")
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

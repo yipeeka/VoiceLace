@@ -100,6 +100,15 @@ cd ..
   - 从某段开始连播
 - 完整音频与分段音频都支持波形显示（后端预计算 peaks）
 
+## TTS 资产与后端选择
+
+`合成导出` 页的 `OmniVoice` / `VoxCPM2` tab 决定本次 TTS 引擎。这个选择同时影响全量合成、局部片段重生成、缓存命中和 stale 判断。
+
+- 全量合成：按当前 `tts_backend` 重建整本音频、字幕和波形资产
+- 局部重生成：通过 `segment_ids` 指定目标片段，`rebuild_full=false` 时只更新这些片段，不会重建整本完整音频
+- 工程 ZIP：只打包当前项目的最新合成资产，不会同时保存 OmniVoice 与 VoxCPM2 两套完整音频
+- 版本切换：如果先后用不同引擎合成，后一次结果会覆盖项目当前音频资产记录，旧引擎结果不会作为独立副本长期保留
+
 ---
 
 ## 安装与配置（开发/部署）
@@ -203,6 +212,11 @@ Base URL: `http://localhost:8000/api/v1`
 - 声音试听：`POST /voices/preview`
 - 参考音频转写：`POST /voices/transcribe`
 - 项目事件：`GET /projects/{project_id}/events`
+
+说明：
+- `tts_backend` 由 `OmniVoice` / `VoxCPM2` tab 决定
+- 局部生成时可用 `segment_ids` + `rebuild_full=false` 只替换目标片段
+- 如果希望整本音频、字幕和 ZIP 都保持一致，建议使用同一个 `tts_backend` 重新做一次全量合成
 
 ### WebSocket
 

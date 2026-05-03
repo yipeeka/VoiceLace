@@ -173,4 +173,17 @@ export const useSettingsStore = create((set, get) => ({
       useUiStore.getState().pushToast({ title: formatError("卸载 TTS 失败", message), tone: "error" });
     }
   },
+
+  manualUnloadASR: async () => {
+    try {
+      await api.post("/system/unload-asr", {});
+      set({ settingsError: "" });
+      useUiStore.getState().pushToast({ title: "ASR 已卸载", tone: "success" });
+      await get().refreshSystemStatus();
+    } catch (error) {
+      const message = getErrorMessage(error, "卸载 ASR 失败");
+      set({ settingsError: message });
+      useUiStore.getState().pushToast({ title: formatError("卸载 ASR 失败", message), tone: "error" });
+    }
+  },
 }));

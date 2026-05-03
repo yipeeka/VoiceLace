@@ -306,8 +306,13 @@ class TTSEngine:
 
                 profile = preset.resolved_voxcpm2_profile() if preset else None
                 style_parts: list[str] = []
-                if profile and profile.design_instruction.strip():
-                    style_parts.append(profile.design_instruction.strip())
+                if profile:
+                    if profile.voice_mode == "clone":
+                        profile_instruction = (profile.control_instruction or "").strip()
+                    else:
+                        profile_instruction = (profile.design_instruction or "").strip()
+                    if profile_instruction:
+                        style_parts.append(profile_instruction)
                 if adapted.get("style_instruction"):
                     style_parts.append(str(adapted["style_instruction"]))
                 style_prompt = ", ".join(item for item in style_parts if item).strip()
@@ -325,9 +330,7 @@ class TTSEngine:
                     if profile.use_hifi_clone and profile.ref_text:
                         kwargs["prompt_wav_path"] = profile.ref_audio_path
                         kwargs["prompt_text"] = profile.ref_text
-                    elif style_prompt:
-                        model_text = f"({style_prompt}){model_text}"
-                elif style_prompt:
+                if style_prompt:
                     model_text = f"({style_prompt}){model_text}"
 
                 kwargs["text"] = model_text

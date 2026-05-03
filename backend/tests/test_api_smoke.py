@@ -58,6 +58,34 @@ class ApiSmokeTest(unittest.TestCase):
         self.assertIn("llama_cpp_available", body)
         self.assertIn("llama_cpp_module_path", body)
 
+    def test_unload_asr_endpoint_clears_asr_runtime_state(self) -> None:
+        asr = self.app_state.asr_engine
+        original_is_loaded = asr.is_loaded
+        original_backend_name = asr.backend_name
+        original_last_error = asr.last_error
+        original_backend = getattr(asr, "_backend", None)
+        original_model = getattr(asr, "_model", None)
+        asr.is_loaded = True
+        asr.backend_name = "faster-whisper"
+        asr.last_error = "previous error"
+        asr._backend = "faster-whisper"
+        asr._model = object()
+
+        try:
+            response = self.client.post("/api/v1/system/unload-asr")
+            self.assertEqual(response.status_code, 200)
+            self.assertFalse(asr.is_loaded)
+            self.assertEqual(asr.backend_name, "unloaded")
+            self.assertEqual(asr.last_error, "")
+            self.assertIsNone(asr._backend)
+            self.assertIsNone(asr._model)
+        finally:
+            asr.is_loaded = original_is_loaded
+            asr.backend_name = original_backend_name
+            asr.last_error = original_last_error
+            asr._backend = original_backend
+            asr._model = original_model
+
     def test_default_prompt(self) -> None:
         response = self.client.get("/api/v1/llm/prompts/default")
         self.assertEqual(response.status_code, 200)

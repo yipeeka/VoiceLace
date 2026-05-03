@@ -18,6 +18,7 @@ import { useProjectStore } from "../stores/useProjectStore";
 import { useScriptStore } from "../stores/useScriptStore";
 import { useUiStore } from "../stores/useUiStore";
 import { useVoiceStore } from "../stores/useVoiceStore";
+import { API_ORIGIN } from "../utils/api";
 import { buildProjectFilePayload, saveProjectFile } from "../utils/projectFile";
 
 const GENDER_OPTIONS = [
@@ -76,6 +77,7 @@ const DEFAULT_OMNIVOICE_PROFILE = {
 const DEFAULT_VOXCPM2_PROFILE = {
   voice_mode: "design",
   design_instruction: "",
+  control_instruction: "",
   ref_audio_path: "",
   ref_text: "",
   use_hifi_clone: false,
@@ -125,6 +127,7 @@ function resolveVoxProfile(preset = {}) {
     ...profile,
     voice_mode: profile.voice_mode || preset.voice_mode || "design",
     design_instruction: (profile.design_instruction ?? buildLegacyInstructionFromPreset(preset) ?? "").trim(),
+    control_instruction: (profile.control_instruction ?? profile.design_instruction ?? buildLegacyInstructionFromPreset(preset) ?? "").trim(),
     ref_audio_path: profile.ref_audio_path ?? preset.ref_audio_path ?? "",
     ref_text: profile.ref_text ?? preset.ref_text ?? "",
     use_hifi_clone: Boolean(profile.use_hifi_clone ?? false),
@@ -148,6 +151,18 @@ function getProfileModeFromPayload(payload = {}, backend = "omnivoice") {
     return payload?.backend_profiles?.voxcpm2?.voice_mode || payload?.voice_mode || "design";
   }
   return payload?.backend_profiles?.omnivoice?.voice_mode || payload?.voice_mode || "design";
+}
+
+function buildReferenceAudioUrl(path) {
+  const value = (path || "").trim();
+  if (!value) return "";
+  return `${API_ORIGIN}/api/v1/voices/reference-audio?path=${encodeURIComponent(value)}`;
+}
+
+function ReferenceAudioPlayer({ audioPath }) {
+  const audioUrl = buildReferenceAudioUrl(audioPath);
+  if (!audioUrl) return null;
+  return <AudioPlayer audioUrl={audioUrl} height={44} compact />;
 }
 
 const emptyForm = {
@@ -351,6 +366,20 @@ export default function VoiceConfigPage() {
     }));
   }
 
+  function setBackendVoiceMode(backend, value) {
+    setForm((prev) => ({
+      ...prev,
+      voice_mode: value,
+      backend_profiles: {
+        ...prev.backend_profiles,
+        [backend]: {
+          ...(prev.backend_profiles?.[backend] || {}),
+          voice_mode: value,
+        },
+      },
+    }));
+  }
+
   function buildPresetPayload() {
     const omnivoiceProfile = {
       ...DEFAULT_OMNIVOICE_PROFILE,
@@ -371,6 +400,7 @@ export default function VoiceConfigPage() {
       ...(form.backend_profiles?.voxcpm2 || {}),
       voice_mode: form.backend_profiles?.voxcpm2?.voice_mode || "design",
       design_instruction: (form.backend_profiles?.voxcpm2?.design_instruction || "").trim(),
+      control_instruction: (form.backend_profiles?.voxcpm2?.control_instruction || "").trim(),
       ref_audio_path: (form.backend_profiles?.voxcpm2?.ref_audio_path || "").trim(),
       ref_text: (form.backend_profiles?.voxcpm2?.ref_text || "").trim(),
       use_hifi_clone: Boolean(form.backend_profiles?.voxcpm2?.use_hifi_clone),
@@ -494,8 +524,8 @@ export default function VoiceConfigPage() {
       setForm((prev) => {
         const next = {
           ...prev,
-          // Badge/标识按源音频模式展示，不因“同步使用了克隆方法”而强制变成 clone。
-          voice_mode: sourceMode,
+          // 同步只迁移目标 backend 的克隆配置，不改变预设卡片标签。
+          voice_mode: prev.voice_mode || sourceMode,
           backend_profiles: {
             ...prev.backend_profiles,
             [targetBackend]: {
@@ -629,7 +659,7 @@ export default function VoiceConfigPage() {
             <TabsContent value="omnivoice" style={{ display: "flex", flexDirection: "column", gap: 12, paddingTop: 12 }}>
               <Tabs
                 value={form.backend_profiles?.omnivoice?.voice_mode || "design"}
-                onValueChange={(v) => setBackendField("omnivoice", "voice_mode", v)}
+                onValueChange={(v) => setBackendVoiceMode("omnivoice", v)}
               >
                 <TabsList>
                   <TabsTrigger value="design">声音设计</TabsTrigger>
@@ -735,6 +765,7 @@ export default function VoiceConfigPage() {
                       placeholder="可手工输入本地路径"
                     />
                   </div>
+                  <ReferenceAudioPlayer audioPath={form.backend_profiles?.omnivoice?.ref_audio_path} />
                   <div className="formGroup">
                     <label className="formLabel">参考文本（转写或手动输入）</label>
                     <textarea
@@ -799,7 +830,7 @@ export default function VoiceConfigPage() {
             <TabsContent value="voxcpm2" style={{ display: "flex", flexDirection: "column", gap: 12, paddingTop: 12 }}>
               <Tabs
                 value={form.backend_profiles?.voxcpm2?.voice_mode || "design"}
-                onValueChange={(v) => setBackendField("voxcpm2", "voice_mode", v)}
+                onValueChange={(v) => setBackendVoiceMode("voxcpm2", v)}
               >
                 <TabsList>
                   <TabsTrigger value="design">声音设计</TabsTrigger>
@@ -860,6 +891,15 @@ export default function VoiceConfigPage() {
                     label="上传参考音频"
                     sublabel="VoxCPM2 clone/hifi clone 使用"
                   />
+                  <div className="formGroup">
+                    <label className="formLabel">Control Instruction</label>
+                    <textarea
+                      className="textArea compactArea"
+                      value={form.backend_profiles?.voxcpm2?.control_instruction || ""}
+                      onChange={(e) => setBackendField("voxcpm2", "control_instruction", e.target.value)}
+                      placeholder="例如：更悲伤，语速稍慢，表达克制但带颤音"
+                    />
+                  </div>
                   {form.backend_profiles?.voxcpm2?.ref_audio_path ? (
                     <div className="controlRow">
                       <span className="muted" style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -879,6 +919,7 @@ export default function VoiceConfigPage() {
                       placeholder="可手工输入本地路径"
                     />
                   </div>
+                  <ReferenceAudioPlayer audioPath={form.backend_profiles?.voxcpm2?.ref_audio_path} />
                   <div className="formGroup">
                     <label className="formLabel">Prompt Text（Hi-Fi clone 可选）</label>
                     <textarea

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import wave
+import mimetypes
 from pathlib import Path
 import time
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 
 from backend.models import ReorderVoicePresetsRequest, TranscribeRequest, VoicePreset, VoicePreviewRequest
@@ -23,6 +24,14 @@ def _cleanup_expired_previews(output_dir: Path) -> None:
                 file.unlink(missing_ok=True)
         except Exception:
             continue
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
 
 
 @router.get("/presets")
@@ -97,6 +106,18 @@ async def upload_reference_audio(file: UploadFile = File(...), state=Depends(get
         except Exception:
             duration = 0
     return {"file_path": str(target), "duration": duration}
+
+
+@router.get("/reference-audio")
+async def get_reference_audio(path: str = Query(...), state=Depends(get_app_state)):
+    audio_path = Path(path).expanduser().resolve()
+    voices_root = state.settings.voices_dir.resolve()
+    if not _is_within(audio_path, voices_root):
+        raise HTTPException(status_code=403, detail="Reference audio path is outside voices directory")
+    if not audio_path.exists() or not audio_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Reference audio not found: {audio_path}")
+    media_type = mimetypes.guess_type(audio_path.name)[0] or "audio/wav"
+    return FileResponse(audio_path, media_type=media_type, filename=audio_path.name)
 
 
 @router.post("/transcribe")

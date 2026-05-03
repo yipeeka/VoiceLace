@@ -24,6 +24,7 @@ export default function SystemStatusCard({
   onRefresh,
   onUnloadLLM,
   onUnloadTTS,
+  onUnloadASR,
 }) {
   const gpu = systemStatus?.gpu;
   const llmStatus =
@@ -49,6 +50,7 @@ export default function SystemStatusCard({
   const asrBackend = systemStatus?.asr_backend ?? "unknown";
   const asrError = systemStatus?.asr_error ?? "";
   const asrDevice = systemStatus?.asr_device ?? "";
+  const canUnloadASR = asrLoaded || Boolean(asrError);
 
   return (
     <GlassCard>
@@ -239,6 +241,15 @@ export default function SystemStatusCard({
           onClick={onUnloadTTS}
         >
           卸载 TTS
+        </Button>
+        <Button
+          variant="danger"
+          size="sm"
+          icon={Trash2}
+          disabled={!canUnloadASR}
+          onClick={onUnloadASR}
+        >
+          卸载 ASR
         </Button>
       </div>
     </GlassCard>

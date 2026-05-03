@@ -144,6 +144,13 @@ async def unload_tts(state=Depends(get_app_state)):
     return {"status": "ok"}
 
 
+@router.post("/unload-asr")
+async def unload_asr(state=Depends(get_app_state)):
+    await state.asr_engine.unload_model()
+    state.asr_engine.last_error = ""
+    return {"status": "ok"}
+
+
 @router.post("/files/browse")
 async def browse_files(payload: FileBrowseRequest, state=Depends(get_app_state)):
     base = Path(payload.path).expanduser().resolve()

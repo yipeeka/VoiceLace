@@ -15,6 +15,7 @@ export default function SettingsPage() {
     refreshSystemStatus,
     manualUnloadLLM,
     manualUnloadTTS,
+    manualUnloadASR,
   } = useSettingsStore();
   const [form, setForm] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -85,6 +86,7 @@ export default function SettingsPage() {
         onRefresh={handleRefresh}
         onUnloadLLM={manualUnloadLLM}
         onUnloadTTS={manualUnloadTTS}
+        onUnloadASR={manualUnloadASR}
       />
 
       <OrchestratorConfigCard

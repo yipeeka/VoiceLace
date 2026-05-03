@@ -66,7 +66,7 @@ export default function SynthesisTimelineCard({
       {selectedSegmentIds.length ? (
         <div className="controlRow" style={{ marginBottom: 10 }}>
           <span className="muted">已选 {selectedSegmentIds.length} 段</span>
-          <Button variant="secondary" size="sm" onClick={handleRegenerateSelected} disabled={isRunning}>
+          <Button variant="secondary" size="sm" onClick={() => handleRegenerateSelected()} disabled={isRunning}>
             重新生成已选段落
           </Button>
           <Button variant="ghost" size="sm" onClick={() => setSelectedSegmentIds([])} disabled={isRunning}>
