@@ -287,14 +287,16 @@ class TTSEngine:
                     style_parts.append(str(adapted["style_instruction"]))
                 style_prompt = ", ".join(item for item in style_parts if item).strip()
 
-                if profile and profile.voice_mode == "clone" and profile.ref_audio_path:
-                    kwargs["reference_wav_path"] = profile.ref_audio_path
+                if profile:
                     if profile.cfg_value is not None:
                         kwargs["cfg_value"] = float(profile.cfg_value)
                     if profile.inference_timesteps is not None:
                         kwargs["inference_timesteps"] = int(profile.inference_timesteps)
                     if profile.denoise is not None:
                         kwargs["denoise"] = bool(profile.denoise)
+
+                if profile and profile.voice_mode == "clone" and profile.ref_audio_path:
+                    kwargs["reference_wav_path"] = profile.ref_audio_path
                     if profile.use_hifi_clone and profile.ref_text:
                         kwargs["prompt_wav_path"] = profile.ref_audio_path
                         kwargs["prompt_text"] = profile.ref_text

@@ -142,6 +142,14 @@ function getProfileModeFromPreset(preset = {}, backend = "omnivoice") {
   return preset?.backend_profiles?.omnivoice?.voice_mode || preset?.voice_mode || "design";
 }
 
+function getProfileModeFromPayload(payload = {}, backend = "omnivoice") {
+  const normalized = (backend || "omnivoice").toLowerCase();
+  if (normalized === "voxcpm2") {
+    return payload?.backend_profiles?.voxcpm2?.voice_mode || payload?.voice_mode || "design";
+  }
+  return payload?.backend_profiles?.omnivoice?.voice_mode || payload?.voice_mode || "design";
+}
+
 const emptyForm = {
   name: "",
   voice_mode: "design",
@@ -428,11 +436,15 @@ export default function VoiceConfigPage() {
 
   async function handlePreview() {
     if (!selectedPreset) return;
+    const previewPreset = {
+      ...buildPresetPayload(),
+      id: selectedPreset.id,
+    };
     await previewVoice({
-      preset: selectedPreset,
+      preset: previewPreset,
       text: sampleText,
       ttsBackend: previewBackend,
-      sourceMode: getProfileModeFromPreset(selectedPreset, previewBackend),
+      sourceMode: getProfileModeFromPayload(previewPreset, previewBackend),
     });
   }
 

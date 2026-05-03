@@ -116,7 +116,7 @@ export default function AudioPlayer({ audioUrl, peaks = null, peaksUrl = null, h
 
   useEffect(() => {
     setResolvedPeaks(peaks || null);
-  }, [peaks]);
+  }, [audioUrl, peaks]);
 
   useEffect(() => {
     const audio = audioRef.current;
