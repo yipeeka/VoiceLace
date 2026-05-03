@@ -32,6 +32,7 @@ export default function SystemStatusCard({
   const ttsStatus =
     systemStatus?.tts_status ??
     (systemStatus?.tts_loaded ? "ready" : systemStatus?.tts_error ? "error" : "idle");
+  const canUnloadTTS = ttsStatus === "ready" || ttsStatus === "error";
   const llmBackend = systemStatus?.llm_backend ?? "unknown";
   const llmError = systemStatus?.llm_error ?? "";
   const llmFallbackActive = Boolean(systemStatus?.llm_fallback_active);
@@ -234,7 +235,7 @@ export default function SystemStatusCard({
           variant="danger"
           size="sm"
           icon={Trash2}
-          disabled={ttsStatus !== "ready"}
+          disabled={!canUnloadTTS}
           onClick={onUnloadTTS}
         >
           卸载 TTS

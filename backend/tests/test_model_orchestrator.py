@@ -102,6 +102,18 @@ class ModelOrchestratorTest(unittest.IsolatedAsyncioTestCase):
         _args, kwargs = llm.loaded_args
         self.assertEqual(kwargs.get("clip_model_path"), "E:/models/test.mmproj")
 
+    async def test_unload_tts_runs_when_engine_only_has_error(self) -> None:
+        llm = _FakeLlmEngine()
+        tts = _FakeTtsEngine()
+        tts.is_loaded = False
+        tts.last_error = "load failed"
+
+        orch = ModelOrchestrator(llm, tts)
+        await orch.unload_tts()
+
+        self.assertTrue(tts.unload_called)
+        self.assertEqual(orch.state.value, "idle")
+
 
 if __name__ == "__main__":
     unittest.main()

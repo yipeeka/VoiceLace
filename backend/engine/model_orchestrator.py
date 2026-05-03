@@ -193,7 +193,7 @@ class ModelOrchestrator:
         async with self._lock:
             if self._tts.is_loaded:
                 await self._set_state(ModelState.UNLOADING_TTS, "tts")
-                await self._tts.unload_model()
+            await self._tts.unload_model()
             await self._set_state(ModelState.IDLE, "tts")
 
     async def get_status(self) -> dict:

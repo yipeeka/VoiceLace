@@ -249,7 +249,7 @@ export default function VoiceConfigPage() {
   const setProjectSaveAction = useUiStore((state) => state.setProjectSaveAction);
   const clearProjectSaveAction = useUiStore((state) => state.clearProjectSaveAction);
   const {
-    presets, assignments, previewAudioUrl, previewMeta,
+    presets, assignments, previewAudioUrl, previewAudioBlob, previewMeta,
     isLoading, isSaving, isTranscribing, error,
     setAssignments, assignVoice, loadPresets,
     createPreset, updatePreset, deletePreset, reorderPresets, saveAssignments, previewVoice,
@@ -460,7 +460,7 @@ export default function VoiceConfigPage() {
   }
 
   async function handleSyncPreviewToOtherBackend() {
-    if (!previewAudioUrl || !selectedPreset) {
+    if ((!previewAudioUrl && !previewAudioBlob) || !selectedPreset) {
       useUiStore.getState().pushToast({ title: "请先生成试听音频", tone: "error" });
       return;
     }
@@ -476,11 +476,13 @@ export default function VoiceConfigPage() {
     const sourceMode = previewMeta?.source_mode || getProfileModeFromPreset(selectedPreset, sourceBackend) || "design";
     const referenceText = (previewMeta?.text || sampleText || "").trim();
     try {
-      const response = await fetch(previewAudioUrl);
-      if (!response.ok) {
-        throw new Error(`读取试听音频失败: HTTP ${response.status}`);
-      }
-      const blob = await response.blob();
+      const blob = previewAudioBlob || (await (async () => {
+        const response = await fetch(previewAudioUrl);
+        if (!response.ok) {
+          throw new Error(`读取试听音频失败: HTTP ${response.status}`);
+        }
+        return response.blob();
+      })());
       const file = new File([blob], `preview_sync_${sourceBackend}_${Date.now()}.wav`, {
         type: "audio/wav",
       });
@@ -1061,12 +1063,12 @@ export default function VoiceConfigPage() {
               <Button
                 variant="secondary"
                 onClick={handleSyncPreviewToOtherBackend}
-                disabled={isSaving || !previewAudioUrl}
+                disabled={isSaving || (!previewAudioUrl && !previewAudioBlob)}
               >
                 {previewBackend === "voxcpm2" ? "同步到 OmniVoice" : "同步到 VoxCPM2"}
               </Button>
             </div>
-            {previewAudioUrl && <AudioPlayer audioUrl={previewAudioUrl} />}
+            {previewAudioUrl && <AudioPlayer audioUrl={previewAudioUrl} audioBlob={previewAudioBlob} />}
           </GlassCard>
         )}
 

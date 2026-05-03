@@ -30,6 +30,7 @@ export const useVoiceStore = create((set) => ({
   presets: [],
   assignments: {},
   previewAudioUrl: null,
+  previewAudioBlob: null,
   previewMeta: null,
   uploadedRefAudioPath: "",
   transcribedRefText: "",
@@ -154,6 +155,7 @@ export const useVoiceStore = create((set) => ({
       const url = URL.createObjectURL(blob);
       set({
         previewAudioUrl: url,
+        previewAudioBlob: blob,
         previewMeta: {
           backend: backendName,
           source_mode: sourceMode || "design",

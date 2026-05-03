@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import importlib.metadata
 import wave
 from pathlib import Path
@@ -89,12 +90,19 @@ class TTSEngine:
             try:
                 from voxcpm import VoxCPM
             except ImportError as exc:
-                self._fallback_or_raise(f"未安装 VoxCPM 相关依赖: {exc}")
+                self._fallback_or_raise(
+                    self._format_exception_message("未安装 VoxCPM 相关依赖", exc),
+                    allow_mock=False,
+                )
                 return
             try:
                 model_id_or_path = self.model_path or "openbmb/VoxCPM2"
                 last_type_error: TypeError | None = None
                 call_candidates = [
+                    {"load_denoiser": False, "optimize": False, "device": self.device},
+                    {"load_denoiser": False, "optimize": False},
+                    {"optimize": False, "device": self.device},
+                    {"optimize": False},
                     {"load_denoiser": False, "device": self.device},
                     {"load_denoiser": False},
                     {"device": self.device},
@@ -126,7 +134,10 @@ class TTSEngine:
                 self.backend_name = "voxcpm2"
                 self.last_error = ""
             except Exception as exc:
-                self._fallback_or_raise(f"加载 VoxCPM2 失败: {exc}")
+                self._fallback_or_raise(
+                    self._format_exception_message("加载 VoxCPM2 失败", exc),
+                    allow_mock=False,
+                )
             return
 
         try:
@@ -154,9 +165,23 @@ class TTSEngine:
             self._fallback_or_raise(f"加载 OmniVoice 失败: {exc}")
 
     async def unload_model(self) -> None:
+        model = self._model
         self.is_loaded = False
         self._model = None
         self._torch = None
+        self.backend_name = "unloaded"
+        self.last_error = ""
+        if model is not None:
+            del model
+        gc.collect()
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+        except Exception:
+            pass
 
     async def synthesize_to_file(
         self,
@@ -306,7 +331,10 @@ class TTSEngine:
                     model_text = f"({style_prompt}){model_text}"
 
                 kwargs["text"] = model_text
-                audio = self._model.generate(**kwargs)
+                try:
+                    audio = self._model.generate(**kwargs)
+                except StopIteration as exc:
+                    raise RuntimeError("VoxCPM.generate 未返回任何音频帧") from exc
                 waveform = self._to_pcm16_bytes(audio)
                 with wave.open(str(output_path), "wb") as wav_file:
                     wav_file.setnchannels(1)
@@ -315,7 +343,10 @@ class TTSEngine:
                     wav_file.writeframes(waveform)
                 return output_path
             except Exception as exc:
-                self._fallback_or_raise(f"VoxCPM2 运行失败: {exc}")
+                self._fallback_or_raise(
+                    self._format_exception_message("VoxCPM2 运行失败", exc),
+                    allow_mock=False,
+                )
 
         self._write_mock_silence(output_path)
         return output_path
@@ -357,9 +388,16 @@ class TTSEngine:
             import logging
             logging.getLogger(__name__).warning(f"SageAttention 安装失败: {exc}，使用默认 SDPA")
 
-    def _fallback_or_raise(self, message: str) -> None:
+    def _format_exception_message(self, prefix: str, exc: Exception) -> str:
+        detail = str(exc).strip()
+        exc_name = exc.__class__.__name__
+        if detail:
+            return f"{prefix}: {exc_name}: {detail}"
+        return f"{prefix}: {exc_name}"
+
+    def _fallback_or_raise(self, message: str, *, allow_mock: bool = True) -> None:
         self.last_error = message
-        if not settings.allow_mock_fallback:
+        if not settings.allow_mock_fallback or not allow_mock:
             raise RuntimeError(message)
         self.is_loaded = True
         self.backend_name = "mock"
@@ -502,7 +540,7 @@ class TTSEngine:
             arr = np.asarray(sample)
 
         if arr.size == 0:
-            raise RuntimeError("OmniVoice 返回空音频数据")
+            raise RuntimeError("TTS 模型返回空音频数据")
 
         while arr.ndim > 1 and arr.shape[0] == 1:
             arr = arr[0]

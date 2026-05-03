@@ -57,6 +57,11 @@ async function buildPeaksFromAudioUrl(audioUrl, bins = 320) {
   const response = await fetch(audioUrl);
   if (!response.ok) return null;
   const arrayBuffer = await response.arrayBuffer();
+  return buildPeaksFromArrayBuffer(arrayBuffer, bins);
+}
+
+async function buildPeaksFromArrayBuffer(arrayBuffer, bins = 320) {
+  if (!arrayBuffer) return null;
   const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
   if (!AudioContextCtor) return null;
   const audioContext = new AudioContextCtor();
@@ -105,7 +110,13 @@ async function buildPeaksFromAudioUrl(audioUrl, bins = 320) {
   }
 }
 
-export default function AudioPlayer({ audioUrl, peaks = null, peaksUrl = null, height = 60, compact = false }) {
+async function buildPeaksFromAudioBlob(audioBlob, bins = 320) {
+  if (!audioBlob) return null;
+  const arrayBuffer = await audioBlob.arrayBuffer();
+  return buildPeaksFromArrayBuffer(arrayBuffer, bins);
+}
+
+export default function AudioPlayer({ audioUrl, audioBlob = null, peaks = null, peaksUrl = null, height = 60, compact = false }) {
   const audioRef = useRef(null);
   const canvasRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -116,7 +127,7 @@ export default function AudioPlayer({ audioUrl, peaks = null, peaksUrl = null, h
 
   useEffect(() => {
     setResolvedPeaks(peaks || null);
-  }, [audioUrl, peaks]);
+  }, [audioUrl, audioBlob, peaks]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -206,7 +217,13 @@ export default function AudioPlayer({ audioUrl, peaks = null, peaksUrl = null, h
         return;
       }
       try {
-        const decoded = await buildPeaksFromAudioUrl(audioUrl);
+        let decoded = null;
+        if (audioBlob) {
+          decoded = await buildPeaksFromAudioBlob(audioBlob);
+        }
+        if (!decoded) {
+          decoded = await buildPeaksFromAudioUrl(audioUrl);
+        }
         if (!decoded || canceled) return;
         decodedPeaksCache.set(audioUrl, decoded);
         setResolvedPeaks(decoded);
@@ -218,7 +235,7 @@ export default function AudioPlayer({ audioUrl, peaks = null, peaksUrl = null, h
     return () => {
       canceled = true;
     };
-  }, [audioUrl, resolvedPeaks]);
+  }, [audioUrl, audioBlob, resolvedPeaks]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
