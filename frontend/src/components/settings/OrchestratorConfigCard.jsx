@@ -176,6 +176,92 @@ export default function OrchestratorConfigCard({ form, isSaving, onSetField, onS
             <input className="textInput" type="number" step="1" min="64" value={form.llm_max_tokens ?? 2048} onChange={(e) => onSetField("llm_max_tokens", e.target.value)} />
           </div>
 
+          <div className="formGroup">
+            <label className="formLabel">第二LLM模型路径（翻译润色）</label>
+            <input
+              className="textInput"
+              value={form.secondary_llm_model_path ?? ""}
+              onChange={(e) => onSetField("secondary_llm_model_path", e.target.value)}
+              placeholder="e.g. D:/models/qwen2.5-1.5b-q4.gguf"
+            />
+          </div>
+
+          <div className="formGroup">
+            <label className="formLabel">第二LLM CLIP模型路径（可选）</label>
+            <input
+              className="textInput"
+              value={form.secondary_llm_clip_model_path ?? ""}
+              onChange={(e) => onSetField("secondary_llm_clip_model_path", e.target.value)}
+              placeholder="e.g. D:/models/mmproj/secondary.mmproj"
+            />
+          </div>
+
+          <div className="editorGrid three">
+            <div className="formGroup">
+              <label className="formLabel">第二模型 temperature</label>
+              <input className="textInput" type="number" step="0.01" min="0" max="2" value={form.secondary_llm_temperature ?? 0.2} onChange={(e) => onSetField("secondary_llm_temperature", e.target.value)} />
+            </div>
+            <div className="formGroup">
+              <label className="formLabel">第二模型 top_p</label>
+              <input className="textInput" type="number" step="0.01" min="0" max="1" value={form.secondary_llm_top_p ?? 0.9} onChange={(e) => onSetField("secondary_llm_top_p", e.target.value)} />
+            </div>
+            <div className="formGroup">
+              <label className="formLabel">第二模型 top_k</label>
+              <input className="textInput" type="number" step="1" min="0" value={form.secondary_llm_top_k ?? 40} onChange={(e) => onSetField("secondary_llm_top_k", e.target.value)} />
+            </div>
+          </div>
+
+          <div className="editorGrid three">
+            <div className="formGroup">
+              <label className="formLabel">第二模型 min_p</label>
+              <input className="textInput" type="number" step="0.01" min="0" max="1" value={form.secondary_llm_min_p ?? 0} onChange={(e) => onSetField("secondary_llm_min_p", e.target.value)} />
+            </div>
+            <div className="formGroup">
+              <label className="formLabel">第二模型 presence_penalty</label>
+              <input className="textInput" type="number" step="0.01" min="-2" max="2" value={form.secondary_llm_presence_penalty ?? 0} onChange={(e) => onSetField("secondary_llm_presence_penalty", e.target.value)} />
+            </div>
+            <div className="formGroup">
+              <label className="formLabel">第二模型 repeat_penalty</label>
+              <input className="textInput" type="number" step="0.01" min="0" max="3" value={form.secondary_llm_repeat_penalty ?? 1} onChange={(e) => onSetField("secondary_llm_repeat_penalty", e.target.value)} />
+            </div>
+          </div>
+
+          <div className="editorGrid three">
+            <div className="formGroup">
+              <label className="formLabel">第二模型 ctx-size (n_ctx)</label>
+              <input className="textInput" type="number" step="1" min="256" value={form.secondary_llm_n_ctx ?? 4096} onChange={(e) => onSetField("secondary_llm_n_ctx", e.target.value)} />
+            </div>
+            <div className="formGroup">
+              <label className="formLabel">第二模型 n-layer (GPU)</label>
+              <input className="textInput" type="number" step="1" value={form.secondary_llm_n_gpu_layers ?? -1} onChange={(e) => onSetField("secondary_llm_n_gpu_layers", e.target.value)} />
+            </div>
+            <div className="formGroup">
+              <label className="formLabel">第二模型 thread</label>
+              <input className="textInput" type="number" step="1" min="0" value={form.secondary_llm_threads ?? 0} onChange={(e) => onSetField("secondary_llm_threads", e.target.value)} />
+            </div>
+          </div>
+
+          <div className="formGroup">
+            <label className="formLabel">第二模型 max out token</label>
+            <input className="textInput" type="number" step="1" min="64" value={form.secondary_llm_max_tokens ?? 1024} onChange={(e) => onSetField("secondary_llm_max_tokens", e.target.value)} />
+          </div>
+
+          <label
+            className="controlRow"
+            style={{ cursor: "pointer", padding: "10px 12px", background: "var(--bg-elevated)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-default)" }}
+          >
+            <input
+              type="checkbox"
+              checked={Boolean(form.secondary_enable_llama_cpp_think_mode ?? false)}
+              onChange={(e) => onSetField("secondary_enable_llama_cpp_think_mode", e.target.checked)}
+              style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
+            />
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontSize: 13.5, color: "var(--text-primary)", fontWeight: 500 }}>第二模型启用 Think 模式</span>
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>仅影响翻译润色使用的第二模型</span>
+            </div>
+          </label>
+
           <label
             className="controlRow"
             style={{ cursor: "pointer", padding: "10px 12px", background: "var(--bg-elevated)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-default)" }}

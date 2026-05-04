@@ -22,6 +22,9 @@ class RuntimeConfigTest(unittest.TestCase):
                 llm_api_model="gemini-2.5-flash",
                 llm_n_ctx=4096,
                 llm_threads=4,
+                secondary_llm_model_path="E:/models/qwen2.5-1.5b.gguf",
+                secondary_llm_n_ctx=3072,
+                secondary_llm_max_tokens=900,
                 tts_model_path="omnivoice",
                 voxcpm_tts_model_path="openbmb/VoxCPM2",
                 asr_model_path="faster-whisper-large-v3",
@@ -32,12 +35,15 @@ class RuntimeConfigTest(unittest.TestCase):
             self.assertFalse(raw["enable_llama_cpp_think_mode"])
             self.assertEqual(raw["llm_backend"], "gemini")
             self.assertEqual(raw["voxcpm_tts_model_path"], "openbmb/VoxCPM2")
+            self.assertEqual(raw["secondary_llm_model_path"], "E:/models/qwen2.5-1.5b.gguf")
             loaded = load_runtime_config(path)
             self.assertFalse(loaded.enable_llama_cpp_think_mode)
             self.assertEqual(loaded.llm_backend, "gemini")
             self.assertEqual(loaded.asr_device, "cuda:1")
             self.assertEqual(loaded.llm_threads, 4)
             self.assertEqual(loaded.voxcpm_tts_model_path, "openbmb/VoxCPM2")
+            self.assertEqual(loaded.secondary_llm_n_ctx, 3072)
+            self.assertEqual(loaded.secondary_llm_max_tokens, 900)
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 

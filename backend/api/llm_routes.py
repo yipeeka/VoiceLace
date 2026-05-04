@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from backend.engine.prompts import DEFAULT_PARSE_PROMPT
-from backend.models import LlmParseRequest
+from backend.models import LlmParseRequest, TranslatePolishRequest, TranslationEngineLoadRequest
 from backend.persistence import append_project_event, load_project, save_project
 from backend.state import get_app_state
 
 router = APIRouter()
+ALLOWED_TRANSLATION_SOURCES = {"primary_local", "secondary_local", "openai", "gemini"}
 
 
 async def _emit(state, task: dict, task_id: str, message: dict) -> None:
@@ -33,6 +35,213 @@ async def _emit(state, task: dict, task_id: str, message: dict) -> None:
 @router.get("/prompts/default")
 async def get_default_prompt():
     return {"prompt": DEFAULT_PARSE_PROMPT}
+
+
+def _build_translation_config(state, source: str) -> dict[str, Any]:
+    cfg = state.orchestrator.config
+    if source == "primary_local":
+        return {
+            "backend": "llama_cpp",
+            "model_path": cfg.llm_model_path,
+            "clip_model_path": cfg.llm_clip_model_path,
+            "n_ctx": int(cfg.llm_n_ctx),
+            "n_gpu_layers": int(cfg.llm_n_gpu_layers),
+            "n_threads": int(cfg.llm_threads),
+            "enable_think_mode": bool(cfg.enable_llama_cpp_think_mode),
+            "api_model": cfg.llm_api_model,
+            "options": {
+                "temperature": float(cfg.llm_temperature),
+                "top_p": float(cfg.llm_top_p),
+                "top_k": int(cfg.llm_top_k),
+                "min_p": float(cfg.llm_min_p),
+                "presence_penalty": float(cfg.llm_presence_penalty),
+                "repeat_penalty": float(cfg.llm_repeat_penalty),
+                "max_tokens": int(cfg.llm_max_tokens),
+                "api_model": cfg.llm_api_model,
+            },
+        }
+    if source == "secondary_local":
+        return {
+            "backend": "llama_cpp",
+            "model_path": cfg.secondary_llm_model_path,
+            "clip_model_path": cfg.secondary_llm_clip_model_path,
+            "n_ctx": int(cfg.secondary_llm_n_ctx),
+            "n_gpu_layers": int(cfg.secondary_llm_n_gpu_layers),
+            "n_threads": int(cfg.secondary_llm_threads),
+            "enable_think_mode": bool(cfg.secondary_enable_llama_cpp_think_mode),
+            "api_model": cfg.llm_api_model,
+            "options": {
+                "temperature": float(cfg.secondary_llm_temperature),
+                "top_p": float(cfg.secondary_llm_top_p),
+                "top_k": int(cfg.secondary_llm_top_k),
+                "min_p": float(cfg.secondary_llm_min_p),
+                "presence_penalty": float(cfg.secondary_llm_presence_penalty),
+                "repeat_penalty": float(cfg.secondary_llm_repeat_penalty),
+                "max_tokens": int(cfg.secondary_llm_max_tokens),
+                "api_model": cfg.llm_api_model,
+            },
+        }
+    if source == "openai":
+        return {
+            "backend": "openai",
+            "model_path": cfg.llm_model_path,
+            "clip_model_path": cfg.llm_clip_model_path,
+            "n_ctx": int(cfg.llm_n_ctx),
+            "n_gpu_layers": int(cfg.llm_n_gpu_layers),
+            "n_threads": int(cfg.llm_threads),
+            "enable_think_mode": False,
+            "api_model": cfg.llm_api_model,
+            "options": {
+                "temperature": float(cfg.llm_temperature),
+                "top_p": float(cfg.llm_top_p),
+                "top_k": int(cfg.llm_top_k),
+                "min_p": float(cfg.llm_min_p),
+                "presence_penalty": float(cfg.llm_presence_penalty),
+                "repeat_penalty": float(cfg.llm_repeat_penalty),
+                "max_tokens": int(cfg.llm_max_tokens),
+                "api_model": cfg.llm_api_model,
+            },
+        }
+    if source == "gemini":
+        return {
+            "backend": "gemini",
+            "model_path": cfg.llm_model_path,
+            "clip_model_path": cfg.llm_clip_model_path,
+            "n_ctx": int(cfg.llm_n_ctx),
+            "n_gpu_layers": int(cfg.llm_n_gpu_layers),
+            "n_threads": int(cfg.llm_threads),
+            "enable_think_mode": False,
+            "api_model": cfg.llm_api_model,
+            "options": {
+                "temperature": float(cfg.llm_temperature),
+                "top_p": float(cfg.llm_top_p),
+                "top_k": int(cfg.llm_top_k),
+                "min_p": float(cfg.llm_min_p),
+                "presence_penalty": float(cfg.llm_presence_penalty),
+                "repeat_penalty": float(cfg.llm_repeat_penalty),
+                "max_tokens": int(cfg.llm_max_tokens),
+                "api_model": cfg.llm_api_model,
+            },
+        }
+    raise HTTPException(status_code=400, detail=f"Unsupported translation source: {source}")
+
+
+async def _load_translation_engine(state, source: str) -> dict[str, Any]:
+    source = (source or "").strip().lower()
+    if source not in ALLOWED_TRANSLATION_SOURCES:
+        raise HTTPException(status_code=400, detail=f"Unsupported translation source: {source}")
+
+    config = _build_translation_config(state, source)
+    engine = state.translation_llm_engine
+    if engine.is_loaded:
+        await engine.unload_model()
+
+    engine.enable_llama_cpp_think_mode = bool(config["enable_think_mode"])
+    try:
+        await engine.load_model(
+            model_path=config["model_path"],
+            clip_model_path=config["clip_model_path"],
+            n_ctx=config["n_ctx"],
+            n_gpu_layers=config["n_gpu_layers"],
+            backend=config["backend"],
+            n_threads=config["n_threads"],
+        )
+    except Exception as exc:
+        state.translation_engine_source = ""
+        state.translation_engine_error = str(exc)
+        raise HTTPException(status_code=503, detail=f"Translation engine unavailable: {exc}") from exc
+
+    state.translation_engine_source = source
+    state.translation_engine_error = ""
+    return {
+        "status": "ok",
+        "source": source,
+        "backend": engine.backend_name,
+        "model_name": engine.model_name,
+        "error": engine.last_error,
+    }
+
+
+@router.get("/translation-engine/status")
+async def get_translation_engine_status(state=Depends(get_app_state)):
+    engine = state.translation_llm_engine
+    return {
+        "loaded": bool(engine.is_loaded),
+        "source": state.translation_engine_source or "",
+        "backend": engine.backend_name,
+        "model_name": engine.model_name,
+        "error": state.translation_engine_error or engine.last_error or "",
+    }
+
+
+@router.post("/translation-engine/load")
+async def load_translation_engine(payload: TranslationEngineLoadRequest, state=Depends(get_app_state)):
+    return await _load_translation_engine(state, payload.source)
+
+
+@router.post("/translation-engine/unload")
+async def unload_translation_engine(state=Depends(get_app_state)):
+    engine = state.translation_llm_engine
+    if engine.is_loaded:
+        await engine.unload_model()
+    state.translation_engine_source = ""
+    state.translation_engine_error = ""
+    return {"status": "ok"}
+
+
+def _build_translate_prompt(*, mode: str, target_language: str) -> str:
+    if mode == "translate_polish":
+        lang = (target_language or "").strip() or "中文"
+        return (
+            "你是专业翻译与编辑助手。请将用户文本翻译为目标语言并润色，要求："
+            "1) 忠实保留事实与语义；2) 输出自然流畅、可直接使用；"
+            "3) 不增加原文没有的信息；4) 仅输出最终文本。"
+            f"\n目标语言：{lang}"
+        )
+    return (
+        "你是专业文本编辑助手。请在保持原语言和原意不变的前提下润色用户文本，要求："
+        "1) 修正病句和语法；2) 提升表达清晰度和自然度；"
+        "3) 不新增事实；4) 仅输出润色后的最终文本。"
+    )
+
+
+@router.post("/translate-polish")
+async def translate_polish(payload: TranslatePolishRequest, state=Depends(get_app_state)):
+    source = (payload.source or "").strip().lower()
+    if source not in ALLOWED_TRANSLATION_SOURCES:
+        raise HTTPException(status_code=400, detail=f"Unsupported translation source: {payload.source}")
+    text = (payload.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+    if payload.mode == "translate_polish" and not (payload.target_language or "").strip():
+        raise HTTPException(status_code=400, detail="target_language is required for translate_polish mode")
+
+    if not state.translation_llm_engine.is_loaded or state.translation_engine_source != source:
+        raise HTTPException(
+            status_code=400,
+            detail="Translation engine source mismatch or not loaded. Please load translation engine first.",
+        )
+
+    config = _build_translation_config(state, source)
+    prompt = _build_translate_prompt(mode=payload.mode, target_language=payload.target_language)
+    try:
+        output = await state.translation_llm_engine.generate_text(
+            text=text,
+            system_prompt=prompt,
+            llm_options=config["options"],
+        )
+    except Exception as exc:
+        state.translation_engine_error = str(exc)
+        raise HTTPException(status_code=503, detail=f"Translation unavailable: {exc}") from exc
+
+    state.translation_engine_error = ""
+    return {
+        "text": output,
+        "source": source,
+        "mode": payload.mode,
+        "target_language": payload.target_language,
+        "backend": state.translation_llm_engine.backend_name,
+    }
 
 
 async def _run_parse_task(task_id: str, payload: LlmParseRequest, state) -> None:

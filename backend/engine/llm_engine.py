@@ -356,6 +356,53 @@ class LLMEngine:
     async def parse_text(self, text: str, prompt: str | None = None) -> Script:
         return await self.parse_text_stream(text, prompt, on_chunk=None, llm_options=None)
 
+    async def generate_text(
+        self,
+        *,
+        text: str,
+        system_prompt: str,
+        llm_options: dict[str, Any] | None = None,
+    ) -> str:
+        if not self.is_loaded:
+            raise RuntimeError("LLM 引擎未加载。")
+        opts = llm_options or {}
+        prompt = (system_prompt or "").strip()
+        content = (text or "").strip()
+        if not content:
+            raise RuntimeError("输入文本为空。")
+
+        if self.backend_name == "openai":
+            result = await run_openai_text(
+                openai_client=self._openai_client,
+                text=content,
+                prompt=prompt,
+                llm_options=opts,
+                extraction_prompt="",
+            )
+            return (result or "").strip()
+
+        if self.backend_name == "gemini":
+            result = await run_gemini_text(
+                text=content,
+                prompt=prompt,
+                llm_options=opts,
+                extraction_prompt="",
+            )
+            return (result or "").strip()
+
+        if self.backend_name == "llama-cpp-python":
+            result = await self._generate_text_with_llama(
+                text=content,
+                system_prompt=prompt,
+                llm_options=opts,
+            )
+            return (result or "").strip()
+
+        if self.backend_name == "mock":
+            return content
+
+        raise RuntimeError(f"不支持的 LLM 后端：{self.backend_name}")
+
     async def parse_text_stream(
         self,
         text: str,
@@ -372,6 +419,46 @@ class LLMEngine:
             llm_options=llm_options,
             parse_mode=parse_mode,
         )
+
+    async def _generate_text_with_llama(
+        self,
+        *,
+        text: str,
+        system_prompt: str,
+        llm_options: dict[str, Any],
+    ) -> str:
+        if self._llm is None:
+            raise RuntimeError("llama 模型未初始化")
+
+        kwargs = self._build_llama_chat_kwargs(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text},
+            ],
+            max_tokens=int(llm_options.get("max_tokens", settings.default_llm_max_tokens)),
+            temperature=float(llm_options.get("temperature", settings.default_llm_temperature)),
+            top_p=float(llm_options.get("top_p", settings.default_llm_top_p)),
+            top_k=int(llm_options.get("top_k", settings.default_llm_top_k)),
+            min_p=float(llm_options.get("min_p", settings.default_llm_min_p)),
+            presence_penalty=float(llm_options.get("presence_penalty", settings.default_llm_presence_penalty)),
+            repeat_penalty=float(llm_options.get("repeat_penalty", settings.default_llm_repeat_penalty)),
+        )
+
+        def _call() -> str:
+            chunks: list[str] = []
+            stream = self._llm.create_chat_completion(**kwargs)
+            for event in stream:
+                choice = event["choices"][0]
+                delta = choice.get("delta", {})
+                piece = delta.get("content") or ""
+                if piece:
+                    chunks.append(piece)
+            return "".join(chunks).strip()
+
+        result = await asyncio.to_thread(_call)
+        if not result:
+            raise RuntimeError("本地模型返回内容为空。")
+        return result
 
     async def parse_text_chunked_stream(
         self,

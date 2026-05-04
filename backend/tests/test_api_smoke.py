@@ -104,6 +104,89 @@ class ApiSmokeTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_translation_engine_status_endpoint_shape(self) -> None:
+        response = self.client.get("/api/v1/llm/translation-engine/status")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertIn("loaded", body)
+        self.assertIn("source", body)
+        self.assertIn("backend", body)
+        self.assertIn("model_name", body)
+        self.assertIn("error", body)
+
+    def test_translation_engine_load_translate_unload_flow(self) -> None:
+        state = self.app_state
+        engine = state.translation_llm_engine
+        original_load_model = engine.load_model
+        original_unload_model = engine.unload_model
+        original_generate_text = engine.generate_text
+        original_source = state.translation_engine_source
+        original_error = state.translation_engine_error
+        original_is_loaded = engine.is_loaded
+        original_backend_name = engine.backend_name
+        original_model_name = engine.model_name
+        try:
+            async def fake_load_model(*args, **kwargs):
+                engine.is_loaded = True
+                engine.backend_name = "mock"
+                engine.model_name = "translation-mock"
+                engine.last_error = ""
+
+            async def fake_unload_model():
+                engine.is_loaded = False
+                engine.backend_name = "unloaded"
+                engine.model_name = ""
+
+            async def fake_generate_text(*, text: str, system_prompt: str, llm_options: dict | None = None):
+                self.assertTrue(text)
+                self.assertTrue(system_prompt)
+                return "翻译润色后的文本"
+
+            engine.load_model = fake_load_model
+            engine.unload_model = fake_unload_model
+            engine.generate_text = fake_generate_text
+
+            load_resp = self.client.post("/api/v1/llm/translation-engine/load", json={"source": "secondary_local"})
+            self.assertEqual(load_resp.status_code, 200)
+            self.assertEqual(load_resp.json()["source"], "secondary_local")
+
+            trans_resp = self.client.post(
+                "/api/v1/llm/translate-polish",
+                json={
+                    "text": "hello world",
+                    "mode": "translate_polish",
+                    "target_language": "中文",
+                    "source": "secondary_local",
+                },
+            )
+            self.assertEqual(trans_resp.status_code, 200)
+            body = trans_resp.json()
+            self.assertEqual(body["text"], "翻译润色后的文本")
+            self.assertEqual(body["source"], "secondary_local")
+
+            mismatch_resp = self.client.post(
+                "/api/v1/llm/translate-polish",
+                json={
+                    "text": "hello world",
+                    "mode": "polish_only",
+                    "target_language": "中文",
+                    "source": "primary_local",
+                },
+            )
+            self.assertEqual(mismatch_resp.status_code, 400)
+
+            unload_resp = self.client.post("/api/v1/llm/translation-engine/unload")
+            self.assertEqual(unload_resp.status_code, 200)
+        finally:
+            engine.load_model = original_load_model
+            engine.unload_model = original_unload_model
+            engine.generate_text = original_generate_text
+            state.translation_engine_source = original_source
+            state.translation_engine_error = original_error
+            engine.is_loaded = original_is_loaded
+            engine.backend_name = original_backend_name
+            engine.model_name = original_model_name
+
     def test_unload_asr_endpoint_clears_asr_runtime_state(self) -> None:
         asr = self.app_state.asr_engine
         original_is_loaded = asr.is_loaded

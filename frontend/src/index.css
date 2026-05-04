@@ -379,6 +379,10 @@ pre, code {
   align-items: start;
 }
 
+.speechTranslationCard {
+  grid-column: 2;
+}
+
 .pageGrid.sidebarLayout {
   display: grid;
   grid-template-columns: 320px 1fr;
@@ -387,6 +391,14 @@ pre, code {
 }
 
 @media (max-width: 1080px) {
+  .pageGrid.twoCols {
+    grid-template-columns: 1fr;
+  }
+
+  .speechTranslationCard {
+    grid-column: 1 / -1;
+  }
+
   .pageGrid.sidebarLayout {
     grid-template-columns: 1fr;
   }

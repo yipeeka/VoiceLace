@@ -48,6 +48,21 @@ class Settings:
     default_enable_llama_cpp_think_mode: bool = field(
         default_factory=lambda: os.getenv("BV_ENABLE_LLAMA_CPP_THINK_MODE", "true").lower() == "true"
     )
+    default_secondary_llm_model_path: str = field(default_factory=lambda: os.getenv("BV_SECONDARY_LLM_MODEL_PATH", ""))
+    default_secondary_llm_clip_model_path: str = field(default_factory=lambda: os.getenv("BV_SECONDARY_LLM_CLIP_MODEL_PATH", ""))
+    default_secondary_llm_n_ctx: int = field(default_factory=lambda: int(os.getenv("BV_SECONDARY_LLM_N_CTX", "4096")))
+    default_secondary_llm_n_gpu_layers: int = field(default_factory=lambda: int(os.getenv("BV_SECONDARY_LLM_N_GPU_LAYERS", "-1")))
+    default_secondary_llm_threads: int = field(default_factory=lambda: int(os.getenv("BV_SECONDARY_LLM_THREADS", "0")))
+    default_secondary_llm_temperature: float = field(default_factory=lambda: float(os.getenv("BV_SECONDARY_LLM_TEMPERATURE", "0.2")))
+    default_secondary_llm_top_p: float = field(default_factory=lambda: float(os.getenv("BV_SECONDARY_LLM_TOP_P", "0.9")))
+    default_secondary_llm_top_k: int = field(default_factory=lambda: int(os.getenv("BV_SECONDARY_LLM_TOP_K", "40")))
+    default_secondary_llm_min_p: float = field(default_factory=lambda: float(os.getenv("BV_SECONDARY_LLM_MIN_P", "0.0")))
+    default_secondary_llm_presence_penalty: float = field(default_factory=lambda: float(os.getenv("BV_SECONDARY_LLM_PRESENCE_PENALTY", "0.0")))
+    default_secondary_llm_repeat_penalty: float = field(default_factory=lambda: float(os.getenv("BV_SECONDARY_LLM_REPEAT_PENALTY", "1.0")))
+    default_secondary_llm_max_tokens: int = field(default_factory=lambda: int(os.getenv("BV_SECONDARY_LLM_MAX_TOKENS", "1024")))
+    default_secondary_enable_llama_cpp_think_mode: bool = field(
+        default_factory=lambda: os.getenv("BV_SECONDARY_ENABLE_LLAMA_CPP_THINK_MODE", "false").lower() == "true"
+    )
     openai_api_key: str = field(default_factory=lambda: os.getenv("BV_OPENAI_API_KEY", ""))
     openai_base_url: str = field(default_factory=lambda: os.getenv("BV_OPENAI_BASE_URL", ""))
     openai_model: str = field(default_factory=lambda: os.getenv("BV_OPENAI_MODEL", "gpt-4.1-mini"))

@@ -1,4 +1,4 @@
-import { Mic, Square, Upload, WandSparkles } from "lucide-react";
+import { Languages, Mic, Square, Upload, WandSparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import GlassCard from "../components/shared/GlassCard";
@@ -16,6 +16,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
   const abortRef = useRef(null);
+  const translateAbortRef = useRef(null);
   const speakerLabels = useSpeechRecognitionStore((state) => state.speakerLabels);
   const setSpeakerLabels = useSpeechRecognitionStore((state) => state.setSpeakerLabels);
   const transcript = useSpeechRecognitionStore((state) => state.transcript);
@@ -30,23 +31,81 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const setBackendUsed = useSpeechRecognitionStore((state) => state.setBackendUsed);
   const modelFiles = useSpeechRecognitionStore((state) => state.modelFiles);
   const setModelFiles = useSpeechRecognitionStore((state) => state.setModelFiles);
+  const translationSource = useSpeechRecognitionStore((state) => state.translationSource);
+  const setTranslationSource = useSpeechRecognitionStore((state) => state.setTranslationSource);
+  const translationMode = useSpeechRecognitionStore((state) => state.translationMode);
+  const setTranslationMode = useSpeechRecognitionStore((state) => state.setTranslationMode);
+  const translationTargetLanguage = useSpeechRecognitionStore((state) => state.translationTargetLanguage);
+  const setTranslationTargetLanguage = useSpeechRecognitionStore((state) => state.setTranslationTargetLanguage);
+  const translationResult = useSpeechRecognitionStore((state) => state.translationResult);
+  const setTranslationResult = useSpeechRecognitionStore((state) => state.setTranslationResult);
+  const translationError = useSpeechRecognitionStore((state) => state.translationError);
+  const setTranslationError = useSpeechRecognitionStore((state) => state.setTranslationError);
+  const translationEngineStatus = useSpeechRecognitionStore((state) => state.translationEngineStatus);
+  const setTranslationEngineStatus = useSpeechRecognitionStore((state) => state.setTranslationEngineStatus);
+  const clearTranslationResult = useSpeechRecognitionStore((state) => state.clearTranslationResult);
   const clearResult = useSpeechRecognitionStore((state) => state.clearResult);
   const sourceText = useScriptStore((state) => state.sourceText);
   const setSourceText = useScriptStore((state) => state.setSourceText);
+  const [isLoadingTranslationEngine, setIsLoadingTranslationEngine] = useState(false);
+  const [isTranslating, setIsTranslating] = useState(false);
+  const isTranslationEngineLoaded = Boolean(translationEngineStatus?.loaded);
 
   const canInsert = useMemo(() => Boolean((speakerLabels ? transcript : plainText).trim()), [plainText, speakerLabels, transcript]);
+  const canInsertTranslation = useMemo(() => Boolean((translationResult || "").trim()), [translationResult]);
+
+  async function readErrorMessage(response, fallback) {
+    const raw = await response.text();
+    if (!raw) return fallback;
+    try {
+      const parsed = JSON.parse(raw);
+      return String(parsed?.detail || parsed?.message || raw);
+    } catch {
+      return raw;
+    }
+  }
+
+  async function refreshTranslationStatus() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/llm/translation-engine/status`);
+      if (!response.ok) {
+        const message = await readErrorMessage(response, `HTTP ${response.status}`);
+        throw new Error(message);
+      }
+      const payload = await response.json();
+      setTranslationEngineStatus(payload);
+    } catch (err) {
+      setTranslationEngineStatus({
+        loaded: false,
+        source: "",
+        backend: "unavailable",
+        model_name: "",
+        error: err?.message || "获取翻译引擎状态失败",
+      });
+    }
+  }
 
   useEffect(() => {
+    refreshTranslationStatus();
     return () => {
       if (abortRef.current) {
         abortRef.current.abort();
         abortRef.current = null;
       }
+      if (translateAbortRef.current) {
+        translateAbortRef.current.abort();
+        translateAbortRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
       if (pendingAudio?.url) {
         URL.revokeObjectURL(pendingAudio.url);
       }
     };
-  }, [pendingAudio]);
+  }, [pendingAudio?.url]);
 
   async function transcribeBlob(blob, fileName = "recording.webm") {
     setIsTranscribing(true);
@@ -65,8 +124,8 @@ export default function SpeechRecognitionPage({ onNavigate }) {
         signal: controller.signal,
       });
       if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `HTTP ${response.status}`);
+        const message = await readErrorMessage(response, `HTTP ${response.status}`);
+        throw new Error(message);
       }
       const payload = await response.json();
       const nextPlainText = String(payload?.text || "").trim();
@@ -185,6 +244,117 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     }
   }
 
+  async function handleLoadTranslationEngine() {
+    setIsLoadingTranslationEngine(true);
+    setTranslationError("");
+    try {
+      const response = await fetch(`${API_BASE_URL}/llm/translation-engine/load`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: translationSource }),
+      });
+      if (!response.ok) {
+        const message = await readErrorMessage(response, `HTTP ${response.status}`);
+        throw new Error(message);
+      }
+      const payload = await response.json();
+      setTranslationEngineStatus({
+        loaded: true,
+        source: payload?.source || translationSource,
+        backend: payload?.backend || "unknown",
+        model_name: payload?.model_name || "",
+        error: payload?.error || "",
+      });
+      useUiStore.getState().pushToast({ title: "翻译引擎已加载", tone: "success" });
+    } catch (err) {
+      const message = err?.message || "加载翻译引擎失败";
+      setTranslationError(message);
+      useUiStore.getState().pushToast({ title: `加载失败：${message}`, tone: "error" });
+      await refreshTranslationStatus();
+    } finally {
+      setIsLoadingTranslationEngine(false);
+    }
+  }
+
+  async function handleUnloadTranslationEngine() {
+    setIsLoadingTranslationEngine(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/llm/translation-engine/unload`, { method: "POST" });
+      if (!response.ok) {
+        const message = await readErrorMessage(response, `HTTP ${response.status}`);
+        throw new Error(message);
+      }
+      setTranslationEngineStatus({
+        loaded: false,
+        source: "",
+        backend: "unloaded",
+        model_name: "",
+        error: "",
+      });
+      useUiStore.getState().pushToast({ title: "翻译引擎已卸载", tone: "success" });
+    } catch (err) {
+      const message = err?.message || "卸载翻译引擎失败";
+      setTranslationError(message);
+      useUiStore.getState().pushToast({ title: `卸载失败：${message}`, tone: "error" });
+      await refreshTranslationStatus();
+    } finally {
+      setIsLoadingTranslationEngine(false);
+    }
+  }
+
+  async function handleTranslatePolish() {
+    if (!isTranslationEngineLoaded) {
+      setTranslationError("请先加载翻译引擎。");
+      return;
+    }
+    const input = (speakerLabels ? transcript : plainText).trim();
+    if (!input) {
+      setTranslationError("请先完成语音识别，或在识别预览中输入文本。");
+      return;
+    }
+    setIsTranslating(true);
+    setTranslationError("");
+    const controller = new AbortController();
+    translateAbortRef.current = controller;
+    try {
+      const response = await fetch(`${API_BASE_URL}/llm/translate-polish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          text: input,
+          mode: translationMode,
+          target_language: translationTargetLanguage,
+          source: translationSource,
+        }),
+      });
+      if (!response.ok) {
+        const message = await readErrorMessage(response, `HTTP ${response.status}`);
+        throw new Error(message);
+      }
+      const payload = await response.json();
+      setTranslationResult(String(payload?.text || "").trim());
+      await refreshTranslationStatus();
+      useUiStore.getState().pushToast({ title: "翻译润色完成", tone: "success" });
+    } catch (err) {
+      if (err?.name === "AbortError") {
+        setTranslationError("已终止翻译润色。");
+        return;
+      }
+      const message = err?.message || "翻译润色失败";
+      setTranslationError(message);
+      useUiStore.getState().pushToast({ title: `翻译润色失败：${message}`, tone: "error" });
+    } finally {
+      translateAbortRef.current = null;
+      setIsTranslating(false);
+    }
+  }
+
+  function handleAbortTranslate() {
+    if (!isTranslating || !translateAbortRef.current) return;
+    translateAbortRef.current.abort();
+  }
+
   function handleAppendToText() {
     const toInsert = (speakerLabels ? transcript : plainText).trim();
     if (!toInsert) {
@@ -207,6 +377,22 @@ export default function SpeechRecognitionPage({ onNavigate }) {
 
   function handleClearResult() {
     clearResult();
+  }
+
+  function handleAppendTranslationToText() {
+    const toInsert = (translationResult || "").trim();
+    if (!toInsert) return;
+    setSourceText(appendSpeechText(sourceText, toInsert));
+    useUiStore.getState().pushToast({ title: "翻译润色结果已追加到文本输入", tone: "success" });
+    onNavigate?.("text");
+  }
+
+  function handleReplaceTranslationToText() {
+    const toInsert = (translationResult || "").trim();
+    if (!toInsert) return;
+    setSourceText(replaceSpeechText(toInsert));
+    useUiStore.getState().pushToast({ title: "翻译润色结果已替换文本输入", tone: "success" });
+    onNavigate?.("text");
   }
 
   return (
@@ -293,6 +479,87 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           </Button>
           <Button variant="ghost" onClick={handleClearResult} disabled={!transcript && !plainText}>
             清空结果
+          </Button>
+        </div>
+      </GlassCard>
+
+      <GlassCard className="speechTranslationCard">
+        <h2 className="cardTitle">
+          <Languages size={16} />
+          翻译润色
+        </h2>
+        <p className="cardSubtitle">从识别预览读取文本，按选定来源执行“仅润色”或“翻译+润色”。</p>
+
+        <div className="editorGrid three">
+          <div className="formGroup">
+            <label className="formLabel">来源</label>
+            <select className="textInput" value={translationSource} onChange={(e) => setTranslationSource(e.target.value)} disabled={isLoadingTranslationEngine || isTranslating}>
+              <option value="primary_local">模型1（主模型）</option>
+              <option value="secondary_local">模型2（小模型）</option>
+              <option value="openai">OpenAI API</option>
+              <option value="gemini">Gemini API</option>
+            </select>
+          </div>
+          <div className="formGroup">
+            <label className="formLabel">模式</label>
+            <select className="textInput" value={translationMode} onChange={(e) => setTranslationMode(e.target.value)} disabled={isLoadingTranslationEngine || isTranslating}>
+              <option value="polish_only">仅润色</option>
+              <option value="translate_polish">翻译+润色</option>
+            </select>
+          </div>
+          <div className="formGroup">
+            <label className="formLabel">目标语言</label>
+            <select className="textInput" value={translationTargetLanguage} onChange={(e) => setTranslationTargetLanguage(e.target.value)} disabled={translationMode !== "translate_polish" || isLoadingTranslationEngine || isTranslating}>
+              <option value="中文">中文</option>
+              <option value="英文">英文</option>
+              <option value="日文">日文</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="controlRow">
+          <Button variant="secondary" onClick={handleLoadTranslationEngine} disabled={isLoadingTranslationEngine || isTranslating}>
+            加载翻译引擎
+          </Button>
+          <Button variant="secondary" onClick={handleUnloadTranslationEngine} disabled={isLoadingTranslationEngine || isTranslating}>
+            卸载翻译引擎
+          </Button>
+          <Button
+            variant="primary"
+            onClick={handleTranslatePolish}
+            disabled={isLoadingTranslationEngine || isTranslating || !isTranslationEngineLoaded}
+          >
+            翻译润色
+          </Button>
+          <Button variant="danger" onClick={handleAbortTranslate} disabled={!isTranslating}>
+            终止翻译
+          </Button>
+        </div>
+
+        <div className="muted">
+          引擎状态：{translationEngineStatus?.loaded ? "已加载" : "未加载"} · 来源：{translationEngineStatus?.source || "未选择"} · 后端：{translationEngineStatus?.backend || "unknown"}
+        </div>
+        {translationEngineStatus?.model_name ? <div className="muted">模型：{translationEngineStatus.model_name}</div> : null}
+        {translationEngineStatus?.error ? <div className="errorText">{translationEngineStatus.error}</div> : null}
+        {translationError ? <div className="errorText">{translationError}</div> : null}
+
+        <textarea
+          className="textArea"
+          style={{ minHeight: 220 }}
+          value={translationResult}
+          onChange={(event) => setTranslationResult(event.target.value)}
+          placeholder="翻译润色结果将显示在这里。"
+        />
+
+        <div className="controlRow">
+          <Button variant="primary" onClick={handleAppendTranslationToText} disabled={!canInsertTranslation}>
+            追加到文本输入
+          </Button>
+          <Button variant="secondary" onClick={handleReplaceTranslationToText} disabled={!canInsertTranslation}>
+            替换文本输入
+          </Button>
+          <Button variant="ghost" onClick={clearTranslationResult} disabled={!translationResult}>
+            清空翻译结果
           </Button>
         </div>
       </GlassCard>

@@ -15,6 +15,7 @@ from backend.runtime_config import load_runtime_config
 class AppState:
     settings: Any = field(default_factory=lambda: app_settings)
     llm_engine: LLMEngine = field(default_factory=LLMEngine)
+    translation_llm_engine: LLMEngine = field(default_factory=LLMEngine)
     tts_engine: TTSEngine = field(default_factory=TTSEngine)
     asr_engine: ASREngine = field(default_factory=ASREngine)
     llm_tasks: dict = field(default_factory=dict)
@@ -24,6 +25,8 @@ class AppState:
     orchestrator: ModelOrchestrator = field(init=False)
     voice_manager: VoiceManager = field(init=False)
     realtime: RealtimeHub = field(init=False)
+    translation_engine_source: str = ""
+    translation_engine_error: str = ""
 
     def __post_init__(self) -> None:
         self.settings.ensure_directories()

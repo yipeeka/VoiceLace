@@ -86,6 +86,10 @@ async def update_orchestrator_config(payload: OrchestratorConfigPayload, state=D
         or old_pyannote_device != config.pyannote_device
     ):
         await state.asr_engine.unload_model()
+    if state.translation_llm_engine.is_loaded:
+        await state.translation_llm_engine.unload_model()
+        state.translation_engine_source = ""
+        state.translation_engine_error = ""
     return saved
 
 
@@ -112,6 +116,10 @@ async def reset_orchestrator_config(state=Depends(get_app_state)):
         or old_pyannote_device != config.pyannote_device
     ):
         await state.asr_engine.unload_model()
+    if state.translation_llm_engine.is_loaded:
+        await state.translation_llm_engine.unload_model()
+        state.translation_engine_source = ""
+        state.translation_engine_error = ""
     return saved
 
 
