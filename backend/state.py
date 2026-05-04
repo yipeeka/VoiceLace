@@ -34,6 +34,9 @@ class AppState:
         self.orchestrator.set_config(loaded_config)
         self.asr_engine.model_path = loaded_config.asr_model_path
         self.asr_engine.device = loaded_config.asr_device
+        self.asr_engine.pyannote_model_id = loaded_config.pyannote_model_id
+        self.asr_engine.pyannote_auth_token = loaded_config.pyannote_auth_token
+        self.asr_engine.pyannote_device = loaded_config.pyannote_device
         self.voice_manager = VoiceManager(self.settings.voices_dir)
 
         async def _broadcast_system_event(event: dict) -> None:

@@ -53,6 +53,28 @@ class RuntimeConfigTest(unittest.TestCase):
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
+    def test_load_runtime_config_ignores_removed_fields(self) -> None:
+        tmp_dir = settings.data_dir / "tmp-tests" / f"runtime-config-compat-{uuid.uuid4().hex[:8]}"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            path = tmp_dir / "config.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "llm_backend": "openai",
+                        "qwen3_asr_gguf_model_dir": "E:/legacy/qwen3",
+                        "asr_device": "cuda:0",
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            loaded = load_runtime_config(path)
+            self.assertEqual(loaded.llm_backend, "openai")
+            self.assertEqual(loaded.asr_device, "cuda:0")
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

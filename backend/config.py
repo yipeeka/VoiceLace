@@ -59,6 +59,18 @@ class Settings:
     default_tts_device: str = field(default_factory=lambda: os.getenv("BV_TTS_DEVICE", "cuda:0"))
     default_asr_model_path: str = field(default_factory=lambda: os.getenv("BV_ASR_MODEL_PATH", "base"))
     default_asr_device: str = field(default_factory=lambda: os.getenv("BV_ASR_DEVICE", os.getenv("BV_TTS_DEVICE", "cuda:0")))
+    default_pyannote_model_id: str = field(
+        default_factory=lambda: os.getenv("BV_PYANNOTE_MODEL_ID", "pyannote/speaker-diarization-community-1")
+    )
+    default_pyannote_auth_token: str = field(
+        default_factory=lambda: os.getenv(
+            "BV_PYANNOTE_AUTH_TOKEN",
+            os.getenv("HF_TOKEN", os.getenv("HUGGINGFACE_TOKEN", "")),
+        )
+    )
+    default_pyannote_device: str = field(
+        default_factory=lambda: os.getenv("BV_PYANNOTE_DEVICE", os.getenv("BV_ASR_DEVICE", "cuda:0"))
+    )
     default_auto_serial: bool = field(default_factory=lambda: os.getenv("BV_AUTO_SERIAL", "true").lower() == "true")
     default_auto_unload_llm_after_parse: bool = field(
         default_factory=lambda: os.getenv("BV_AUTO_UNLOAD_LLM_AFTER_PARSE", "true").lower() == "true"

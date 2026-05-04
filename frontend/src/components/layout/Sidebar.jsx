@@ -9,16 +9,18 @@ import {
   Settings,
   SlidersHorizontal,
   Sparkles,
+  Users,
   Volume2,
 } from "lucide-react";
 import { Tooltip } from "../ui/Tooltip";
 import { useUiStore } from "../../stores/useUiStore";
 
 const NAV_ITEMS = [
-  { id: "text",    label: "文本输入",  icon: BookOpen,          step: 1 },
-  { id: "script",  label: "剧本编辑",  icon: SlidersHorizontal, step: 2 },
-  { id: "voice",   label: "声音配置",  icon: Mic,               step: 3 },
-  { id: "synth",   label: "合成导出",  icon: Volume2,           step: 4 },
+  { id: "speech",  label: "语音识别",  icon: Mic,               step: 1 },
+  { id: "text",    label: "文本输入",  icon: BookOpen,          step: 2 },
+  { id: "script",  label: "剧本编辑",  icon: SlidersHorizontal, step: 3 },
+  { id: "voice",   label: "声音配置",  icon: Users,             step: 4 },
+  { id: "synth",   label: "合成导出",  icon: Volume2,           step: 5 },
 ];
 
 export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCollapse, completedPages = [] }) {

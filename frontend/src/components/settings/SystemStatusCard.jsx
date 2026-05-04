@@ -50,6 +50,10 @@ export default function SystemStatusCard({
   const asrBackend = systemStatus?.asr_backend ?? "unknown";
   const asrError = systemStatus?.asr_error ?? "";
   const asrDevice = systemStatus?.asr_device ?? "";
+  const pyannoteModelId = systemStatus?.pyannote_model_id ?? "";
+  const pyannoteLoaded = Boolean(systemStatus?.pyannote_loaded);
+  const pyannoteAvailable = Boolean(systemStatus?.pyannote_available);
+  const pyannoteError = systemStatus?.pyannote_error ?? "";
   const canUnloadASR = asrLoaded || Boolean(asrError);
 
   return (
@@ -158,6 +162,32 @@ export default function SystemStatusCard({
           <span>ASR 设备</span>
           <strong>{asrDevice || "未设置"}</strong>
         </div>
+        <div className="statRow">
+          <span>pyannote 可用</span>
+          <strong style={{ color: pyannoteAvailable ? "var(--success)" : "var(--warning)" }}>
+            {pyannoteAvailable ? "yes" : "no"}
+          </strong>
+        </div>
+        <div className="statRow">
+          <span>pyannote 已加载</span>
+          <strong style={{ color: pyannoteLoaded ? "var(--success)" : "var(--text-secondary)" }}>
+            {pyannoteLoaded ? "yes" : "no"}
+          </strong>
+        </div>
+        <div className="statRow">
+          <span>pyannote 模型</span>
+          <strong title={pyannoteModelId} style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {pyannoteModelId || "未设置"}
+          </strong>
+        </div>
+        {pyannoteError ? (
+          <div className="statRow">
+            <span>pyannote 错误</span>
+            <strong style={{ color: "var(--danger)", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {pyannoteError}
+            </strong>
+          </div>
+        ) : null}
         {asrError ? (
           <div className="statRow">
             <span>ASR 错误</span>

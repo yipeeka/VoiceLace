@@ -16,7 +16,9 @@ def load_runtime_config(config_path: Path) -> OrchestratorConfig:
         if not isinstance(payload, dict):
             return OrchestratorConfig()
         defaults = asdict(OrchestratorConfig())
-        merged: dict[str, Any] = {**defaults, **payload}
+        known_keys = set(defaults.keys())
+        filtered_payload = {k: v for k, v in payload.items() if k in known_keys}
+        merged: dict[str, Any] = {**defaults, **filtered_payload}
         return OrchestratorConfig(**merged)
     except Exception:
         return OrchestratorConfig()
@@ -38,7 +40,9 @@ def load_runtime_default_config(config_path: Path) -> OrchestratorConfig | None:
         if not isinstance(payload, dict):
             return None
         defaults = asdict(OrchestratorConfig())
-        merged: dict[str, Any] = {**defaults, **payload}
+        known_keys = set(defaults.keys())
+        filtered_payload = {k: v for k, v in payload.items() if k in known_keys}
+        merged: dict[str, Any] = {**defaults, **filtered_payload}
         return OrchestratorConfig(**merged)
     except Exception:
         return None

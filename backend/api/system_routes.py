@@ -50,6 +50,11 @@ async def get_status(state=Depends(get_app_state)):
     status["asr_error"] = getattr(state.asr_engine, "last_error", "")
     status["asr_device"] = getattr(state.asr_engine, "device", "")
     status["asr_model_path"] = getattr(state.asr_engine, "model_path", "")
+    pyannote_status = state.asr_engine.get_pyannote_status()
+    status["pyannote_model_id"] = pyannote_status.get("pyannote_model_id", "")
+    status["pyannote_loaded"] = bool(pyannote_status.get("pyannote_loaded", False))
+    status["pyannote_error"] = pyannote_status.get("pyannote_error", "")
+    status["pyannote_available"] = bool(pyannote_status.get("pyannote_available", False))
     return status
 
 
@@ -62,12 +67,24 @@ async def get_gpu_info(state=Depends(get_app_state)):
 async def update_orchestrator_config(payload: OrchestratorConfigPayload, state=Depends(get_app_state)):
     old_model_path = getattr(state.asr_engine, "model_path", "")
     old_device = getattr(state.asr_engine, "device", "")
+    old_pyannote_model_id = getattr(state.asr_engine, "pyannote_model_id", "")
+    old_pyannote_auth_token = getattr(state.asr_engine, "pyannote_auth_token", "")
+    old_pyannote_device = getattr(state.asr_engine, "pyannote_device", "")
     config = OrchestratorConfig(**payload.model_dump())
     saved = await state.orchestrator.update_config(config)
     save_runtime_config(state.settings.runtime_config_path, config)
     state.asr_engine.model_path = config.asr_model_path
     state.asr_engine.device = config.asr_device
-    if state.asr_engine.is_loaded and (old_model_path != config.asr_model_path or old_device != config.asr_device):
+    state.asr_engine.pyannote_model_id = config.pyannote_model_id
+    state.asr_engine.pyannote_auth_token = config.pyannote_auth_token
+    state.asr_engine.pyannote_device = config.pyannote_device
+    if state.asr_engine.is_loaded and (
+        old_model_path != config.asr_model_path
+        or old_device != config.asr_device
+        or old_pyannote_model_id != config.pyannote_model_id
+        or old_pyannote_auth_token != config.pyannote_auth_token
+        or old_pyannote_device != config.pyannote_device
+    ):
         await state.asr_engine.unload_model()
     return saved
 
@@ -76,12 +93,24 @@ async def update_orchestrator_config(payload: OrchestratorConfigPayload, state=D
 async def reset_orchestrator_config(state=Depends(get_app_state)):
     old_model_path = getattr(state.asr_engine, "model_path", "")
     old_device = getattr(state.asr_engine, "device", "")
+    old_pyannote_model_id = getattr(state.asr_engine, "pyannote_model_id", "")
+    old_pyannote_auth_token = getattr(state.asr_engine, "pyannote_auth_token", "")
+    old_pyannote_device = getattr(state.asr_engine, "pyannote_device", "")
     config = load_runtime_default_config(state.settings.runtime_defaults_config_path) or OrchestratorConfig()
     saved = await state.orchestrator.update_config(config)
     save_runtime_config(state.settings.runtime_config_path, config)
     state.asr_engine.model_path = config.asr_model_path
     state.asr_engine.device = config.asr_device
-    if state.asr_engine.is_loaded and (old_model_path != config.asr_model_path or old_device != config.asr_device):
+    state.asr_engine.pyannote_model_id = config.pyannote_model_id
+    state.asr_engine.pyannote_auth_token = config.pyannote_auth_token
+    state.asr_engine.pyannote_device = config.pyannote_device
+    if state.asr_engine.is_loaded and (
+        old_model_path != config.asr_model_path
+        or old_device != config.asr_device
+        or old_pyannote_model_id != config.pyannote_model_id
+        or old_pyannote_auth_token != config.pyannote_auth_token
+        or old_pyannote_device != config.pyannote_device
+    ):
         await state.asr_engine.unload_model()
     return saved
 

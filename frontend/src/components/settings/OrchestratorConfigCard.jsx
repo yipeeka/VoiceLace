@@ -95,6 +95,37 @@ export default function OrchestratorConfigCard({ form, isSaving, onSetField, onS
             />
           </div>
 
+          <div className="formGroup">
+            <label className="formLabel">pyannote 模型 ID</label>
+            <input
+              className="textInput"
+              value={form.pyannote_model_id ?? "pyannote/speaker-diarization-community-1"}
+              onChange={(e) => onSetField("pyannote_model_id", e.target.value)}
+              placeholder="如 pyannote/speaker-diarization-community-1"
+            />
+          </div>
+
+          <div className="formGroup">
+            <label className="formLabel">pyannote 认证 Token</label>
+            <input
+              className="textInput"
+              type="password"
+              value={form.pyannote_auth_token ?? ""}
+              onChange={(e) => onSetField("pyannote_auth_token", e.target.value)}
+              placeholder="Hugging Face token"
+            />
+          </div>
+
+          <div className="formGroup">
+            <label className="formLabel">pyannote 设备</label>
+            <input
+              className="textInput"
+              value={form.pyannote_device ?? "cuda:0"}
+              onChange={(e) => onSetField("pyannote_device", e.target.value)}
+              placeholder="如 cuda:0 或 cpu"
+            />
+          </div>
+
           <div className="editorGrid three">
             <div className="formGroup">
               <label className="formLabel">temperature</label>

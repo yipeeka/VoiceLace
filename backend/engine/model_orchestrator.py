@@ -46,6 +46,9 @@ class OrchestratorConfig:
     tts_device: str = settings.default_tts_device
     asr_model_path: str = settings.default_asr_model_path
     asr_device: str = settings.default_asr_device
+    pyannote_model_id: str = settings.default_pyannote_model_id
+    pyannote_auth_token: str = settings.default_pyannote_auth_token
+    pyannote_device: str = settings.default_pyannote_device
 
 
 @dataclass(slots=True)

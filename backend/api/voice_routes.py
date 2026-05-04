@@ -126,8 +126,8 @@ async def transcribe_audio(payload: TranscribeRequest, state=Depends(get_app_sta
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Audio file not found: {path}")
     try:
-        text = await state.asr_engine.transcribe(str(path))
-        return {"text": text, "backend": state.asr_engine.backend_name}
+        result = await state.asr_engine.transcribe(str(path), backend="whisper", speaker_labels=False)
+        return {"text": result.get("text", ""), "backend": result.get("backend", state.asr_engine.backend_name)}
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:

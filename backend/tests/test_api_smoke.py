@@ -57,6 +57,52 @@ class ApiSmokeTest(unittest.TestCase):
         self.assertIn("python_executable", body)
         self.assertIn("llama_cpp_available", body)
         self.assertIn("llama_cpp_module_path", body)
+        self.assertIn("pyannote_model_id", body)
+        self.assertIn("pyannote_loaded", body)
+        self.assertIn("pyannote_error", body)
+        self.assertIn("pyannote_available", body)
+
+    def test_asr_transcribe_file_endpoint_shape(self) -> None:
+        asr = self.app_state.asr_engine
+        original_transcribe = asr.transcribe
+
+        async def fake_transcribe(audio_path: str, *, backend: str = "whisper", speaker_labels: bool = False):
+            self.assertTrue(Path(audio_path).exists())
+            return {
+                "text": "测试文本",
+                "labeled_text": "说话人1：测试文本",
+                "backend": backend,
+                "speaker_labels": speaker_labels,
+                "model_files": {
+                    "main_model_path": "",
+                },
+                "alignments": [],
+                "warnings": [],
+            }
+
+        asr.transcribe = fake_transcribe
+        try:
+            response = self.client.post(
+                "/api/v1/asr/transcribe-file",
+                data={"backend": "whisper", "speaker_labels": "true"},
+                files={"file": ("sample.wav", b"RIFFdemo", "audio/wav")},
+            )
+            self.assertEqual(response.status_code, 200)
+            body = response.json()
+            self.assertEqual(body["text"], "测试文本")
+            self.assertEqual(body["labeled_text"], "说话人1：测试文本")
+            self.assertEqual(body["backend"], "whisper")
+            self.assertTrue(body["speaker_labels"])
+        finally:
+            asr.transcribe = original_transcribe
+
+    def test_asr_transcribe_file_rejects_qwen_backend(self) -> None:
+        response = self.client.post(
+            "/api/v1/asr/transcribe-file",
+            data={"backend": "qwen3_asr", "speaker_labels": "false"},
+            files={"file": ("sample.wav", b"RIFFdemo", "audio/wav")},
+        )
+        self.assertEqual(response.status_code, 400)
 
     def test_unload_asr_endpoint_clears_asr_runtime_state(self) -> None:
         asr = self.app_state.asr_engine

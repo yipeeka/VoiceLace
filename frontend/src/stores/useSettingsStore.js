@@ -33,6 +33,9 @@ function normalizeOrchestratorConfig(raw) {
     tts_device: raw.tts_device ?? "cuda:0",
     asr_model_path: raw.asr_model_path ?? "base",
     asr_device: raw.asr_device ?? "cuda:0",
+    pyannote_model_id: raw.pyannote_model_id ?? "pyannote/speaker-diarization-community-1",
+    pyannote_auth_token: raw.pyannote_auth_token ?? "",
+    pyannote_device: raw.pyannote_device ?? "cuda:0",
     default_system_prompt: raw.default_system_prompt ?? "",
   };
 }
@@ -63,6 +66,9 @@ function toOrchestratorPayload(config) {
     tts_device: config.tts_device ?? "cuda:0",
     asr_model_path: config.asr_model_path ?? "base",
     asr_device: config.asr_device ?? "cuda:0",
+    pyannote_model_id: config.pyannote_model_id ?? "pyannote/speaker-diarization-community-1",
+    pyannote_auth_token: config.pyannote_auth_token ?? "",
+    pyannote_device: config.pyannote_device ?? "cuda:0",
   };
 }
 
