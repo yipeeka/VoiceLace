@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   ChevronRight,
   FolderOpen,
+  ShieldCheck,
   Mic,
   Save,
   Settings,
@@ -18,9 +19,10 @@ import { useUiStore } from "../../stores/useUiStore";
 const NAV_ITEMS = [
   { id: "speech",  label: "语音识别",  icon: Mic,               step: 1 },
   { id: "text",    label: "文本输入",  icon: BookOpen,          step: 2 },
-  { id: "script",  label: "剧本编辑",  icon: SlidersHorizontal, step: 3 },
-  { id: "voice",   label: "声音配置",  icon: Users,             step: 4 },
-  { id: "synth",   label: "合成导出",  icon: Volume2,           step: 5 },
+  { id: "qc",      label: "解析质检",  icon: ShieldCheck,       step: 3 },
+  { id: "script",  label: "剧本编辑",  icon: SlidersHorizontal, step: 4 },
+  { id: "voice",   label: "声音配置",  icon: Users,             step: 5 },
+  { id: "synth",   label: "合成导出",  icon: Volume2,           step: 6 },
 ];
 
 export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCollapse, completedPages = [] }) {

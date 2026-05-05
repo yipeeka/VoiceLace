@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import EmptyState from "../components/shared/EmptyState";
 import FileDropZone from "../components/shared/FileDropZone";
 import GlassCard from "../components/shared/GlassCard";
+import ProjectHistoryCard from "../components/text/ProjectHistoryCard";
 import ProjectToolbarCard from "../components/text/ProjectToolbarCard";
 import Button from "../components/ui/Button";
 import Select from "../components/ui/Select";
@@ -57,6 +58,9 @@ export default function TextInputPage({ onNavigate }) {
     importProjectFile,
     importWarnings,
     bindCurrentProjectFile,
+    projectHistory,
+    loadProjectHistory,
+    restoreProjectSnapshot,
   } =
     useProjectStore();
   const {
@@ -83,6 +87,7 @@ export default function TextInputPage({ onNavigate }) {
   } = useScriptStore();
   const setProjectSaveAction = useUiStore((state) => state.setProjectSaveAction);
   const clearProjectSaveAction = useUiStore((state) => state.clearProjectSaveAction);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
 
   // Auto-scroll stream output
   useEffect(() => {
@@ -94,6 +99,27 @@ export default function TextInputPage({ onNavigate }) {
   useEffect(() => {
     setRenameProjectName(currentProject?.name || "");
   }, [currentProject?.id, currentProject?.name]);
+
+  useEffect(() => {
+    let canceled = false;
+    async function loadHistoryRows() {
+      if (!currentProject?.id) {
+        return;
+      }
+      setIsHistoryLoading(true);
+      try {
+        await loadProjectHistory(currentProject.id, 120);
+      } finally {
+        if (!canceled) {
+          setIsHistoryLoading(false);
+        }
+      }
+    }
+    loadHistoryRows().catch(() => undefined);
+    return () => {
+      canceled = true;
+    };
+  }, [currentProject?.id, loadProjectHistory]);
 
   const selectProjectAndHydrate = useCallback(async (projectId, options = {}) => {
     if (!projectId) {
@@ -373,6 +399,34 @@ export default function TextInputPage({ onNavigate }) {
       });
     }
   }, [projectName, currentProject, script, sourceText, currentProjectFileHandle, bindCurrentProjectFile]);
+
+  async function handleRefreshHistory() {
+    if (!currentProject?.id) return;
+    setIsHistoryLoading(true);
+    try {
+      await loadProjectHistory(currentProject.id, 120);
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  }
+
+  async function handleRollbackSnapshot(snapshotId) {
+    if (!currentProject?.id || !snapshotId) return;
+    const ok = window.confirm("回滚会覆盖当前项目内容，是否继续？");
+    if (!ok) return;
+    try {
+      await restoreProjectSnapshot(currentProject.id, snapshotId);
+      const refreshed = await refreshCurrentProject(currentProject.id);
+      setScript(refreshed.script);
+      setSourceText(refreshed.script?.source_text || "");
+      await loadProjectHistory(currentProject.id, 120);
+    } catch (error) {
+      useUiStore.getState().pushToast({
+        title: `回滚失败：${error?.message || "未知错误"}`,
+        tone: "error",
+      });
+    }
+  }
 
   useEffect(() => {
     setProjectSaveAction(handleSaveProjectFile);
@@ -658,6 +712,14 @@ export default function TextInputPage({ onNavigate }) {
           />
         )}
       </GlassCard>
+
+      <ProjectHistoryCard
+        projectName={currentProject?.name || ""}
+        historyItems={projectHistory}
+        isLoading={isHistoryLoading}
+        onRefresh={handleRefreshHistory}
+        onRollback={handleRollbackSnapshot}
+      />
     </div>
   );
 }

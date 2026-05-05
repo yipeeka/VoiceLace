@@ -415,6 +415,117 @@ export const useScriptStore = create((set, get) => ({
       throw error;
     }
   },
+  renameCharacter: async ({ projectId, fromName, toName }) => {
+    set({ isSaving: true, error: "" });
+    try {
+      const result = await api.post(`/projects/${projectId}/script/rename-character`, {
+        from_name: fromName,
+        to_name: toName,
+      });
+      const script = result?.script || await api.get(`/projects/${projectId}/script`);
+      set({ script, sourceText: script.source_text || "", isSaving: false });
+      useUiStore.getState().pushToast({ title: "角色改名完成", tone: "success" });
+      return script;
+    } catch (error) {
+      const message = getErrorMessage(error, "角色改名失败");
+      set({ isSaving: false, error: message });
+      useUiStore.getState().pushToast({ title: formatError("角色改名失败", message), tone: "error" });
+      throw error;
+    }
+  },
+  mergeCharacter: async ({ projectId, sourceName, targetName }) => {
+    set({ isSaving: true, error: "" });
+    try {
+      const result = await api.post(`/projects/${projectId}/script/merge-character`, {
+        source_name: sourceName,
+        target_name: targetName,
+      });
+      const script = result?.script || await api.get(`/projects/${projectId}/script`);
+      set({ script, sourceText: script.source_text || "", isSaving: false });
+      useUiStore.getState().pushToast({ title: "角色合并完成", tone: "success" });
+      return script;
+    } catch (error) {
+      const message = getErrorMessage(error, "角色合并失败");
+      set({ isSaving: false, error: message });
+      useUiStore.getState().pushToast({ title: formatError("角色合并失败", message), tone: "error" });
+      throw error;
+    }
+  },
+  batchUpdateSegments: async ({ projectId, segmentIds, emotion, type }) => {
+    set({ isSaving: true, error: "" });
+    try {
+      const result = await api.post(`/projects/${projectId}/script/batch-update`, {
+        segment_ids: segmentIds || [],
+        emotion: emotion ?? null,
+        type: type ?? null,
+      });
+      const script = result?.script || await api.get(`/projects/${projectId}/script`);
+      set({ script, sourceText: script.source_text || "", isSaving: false });
+      useUiStore.getState().pushToast({ title: "批量修改完成", tone: "success" });
+      return script;
+    } catch (error) {
+      const message = getErrorMessage(error, "批量修改失败");
+      set({ isSaving: false, error: message });
+      useUiStore.getState().pushToast({ title: formatError("批量修改失败", message), tone: "error" });
+      throw error;
+    }
+  },
+  searchReplaceSegments: async ({ projectId, find, replace, caseSensitive, segmentIds }) => {
+    set({ isSaving: true, error: "" });
+    try {
+      const result = await api.post(`/projects/${projectId}/script/search-replace`, {
+        find,
+        replace: replace ?? "",
+        case_sensitive: Boolean(caseSensitive),
+        segment_ids: segmentIds || [],
+      });
+      const script = result?.script || await api.get(`/projects/${projectId}/script`);
+      set({ script, sourceText: script.source_text || "", isSaving: false });
+      useUiStore.getState().pushToast({ title: "搜索替换完成", tone: "success" });
+      return script;
+    } catch (error) {
+      const message = getErrorMessage(error, "搜索替换失败");
+      set({ isSaving: false, error: message });
+      useUiStore.getState().pushToast({ title: formatError("搜索替换失败", message), tone: "error" });
+      throw error;
+    }
+  },
+  splitSegment: async ({ projectId, segmentId, cursor }) => {
+    set({ isSaving: true, error: "" });
+    try {
+      const result = await api.post(`/projects/${projectId}/script/split-segment`, {
+        segment_id: segmentId,
+        cursor,
+      });
+      const script = result?.script || await api.get(`/projects/${projectId}/script`);
+      set({ script, sourceText: script.source_text || "", isSaving: false });
+      useUiStore.getState().pushToast({ title: "片段拆分完成", tone: "success" });
+      return script;
+    } catch (error) {
+      const message = getErrorMessage(error, "片段拆分失败");
+      set({ isSaving: false, error: message });
+      useUiStore.getState().pushToast({ title: formatError("片段拆分失败", message), tone: "error" });
+      throw error;
+    }
+  },
+  mergeSegments: async ({ projectId, firstSegmentId, secondSegmentId }) => {
+    set({ isSaving: true, error: "" });
+    try {
+      const result = await api.post(`/projects/${projectId}/script/merge-segments`, {
+        first_segment_id: firstSegmentId,
+        second_segment_id: secondSegmentId,
+      });
+      const script = result?.script || await api.get(`/projects/${projectId}/script`);
+      set({ script, sourceText: script.source_text || "", isSaving: false });
+      useUiStore.getState().pushToast({ title: "片段合并完成", tone: "success" });
+      return script;
+    } catch (error) {
+      const message = getErrorMessage(error, "片段合并失败");
+      set({ isSaving: false, error: message });
+      useUiStore.getState().pushToast({ title: formatError("片段合并失败", message), tone: "error" });
+      throw error;
+    }
+  },
 }));
 
 function normalizeParseStats(stats) {

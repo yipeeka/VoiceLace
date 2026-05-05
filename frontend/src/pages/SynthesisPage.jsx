@@ -3,6 +3,7 @@ import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, us
 import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 
 import ScriptSidebarColumn from "../components/script/ScriptSidebarColumn";
+import ScriptDiffPreviewDialog from "../components/script/ScriptDiffPreviewDialog";
 import Button from "../components/ui/Button";
 import SynthesisConfigCard from "../components/synthesis/SynthesisConfigCard";
 import SynthesisTaskStatusCard from "../components/synthesis/SynthesisTaskStatusCard";
@@ -21,6 +22,7 @@ import {
   buildCharacterStats,
   buildSpeakerOptions,
   filterSegmentsBySpeaker,
+  filterSegmentsByWorkflowStatus,
   getInsertAnchorLabel,
   pruneSelectedSegmentIds,
 } from "../utils/scriptSidebar";
@@ -30,6 +32,7 @@ import {
   buildStaleTargetIds,
   getSegmentStaleLabel,
   resolveSegmentDisplayStatus,
+  resolveWorkflowStatus,
 } from "../utils/stale";
 
 function formatTimeMs(ms) {
@@ -58,9 +61,11 @@ export default function SynthesisPage() {
   const [newSegment, setNewSegment] = useState(() => createSegmentDraft(0));
   const [insertAfterSegmentId, setInsertAfterSegmentId] = useState(null);
   const [activeSpeakerFilter, setActiveSpeakerFilter] = useState("all");
+  const [activeStatusFilter, setActiveStatusFilter] = useState("all");
   const [recentlyUpdatedSegmentId, setRecentlyUpdatedSegmentId] = useState(null);
   const [resolvedSegmentDurations, setResolvedSegmentDurations] = useState({});
   const [fullAudioCurrentTime, setFullAudioCurrentTime] = useState(0);
+  const [diffPreviewOpen, setDiffPreviewOpen] = useState(false);
   const updatedRowTimerRef = useRef(null);
   const { saveScript, isSaving: isScriptSaving, error: scriptError } = useScriptStore();
   const pushToast = useUiStore.getState().pushToast;
@@ -107,6 +112,7 @@ export default function SynthesisPage() {
       setSegmentDraft(null);
       setInsertAfterSegmentId(null);
       setActiveSpeakerFilter("all");
+      setActiveStatusFilter("all");
       setRecentlyUpdatedSegmentId(null);
       setResolvedSegmentDurations({});
       setFullAudioCurrentTime(0);
@@ -293,6 +299,7 @@ export default function SynthesisPage() {
         emotion: segment.emotion || "neutral",
         status: baseStatus,
         display_status: displayStatus,
+        workflow_status: resolveWorkflowStatus(displayStatus),
         draft_status: unsavedSegmentIds.has(segment.id) ? "unsaved" : "",
         duration_ms: taskSegment?.duration_ms ?? asset?.duration_ms ?? 0,
         audio_url: asset
@@ -304,10 +311,21 @@ export default function SynthesisPage() {
     });
   }, [currentProject, draftScript?.segments, segmentResults, staleBySegmentId, unsavedSegmentIds]);
 
-  const visibleSegments = useMemo(
-    () => filterSegmentsBySpeaker(segments, activeSpeakerFilter),
-    [segments, activeSpeakerFilter]
-  );
+  const visibleSegments = useMemo(() => {
+    const speakerFiltered = filterSegmentsBySpeaker(segments, activeSpeakerFilter);
+    return filterSegmentsByWorkflowStatus(speakerFiltered, activeStatusFilter);
+  }, [segments, activeSpeakerFilter, activeStatusFilter]);
+
+  const statusCounts = useMemo(() => {
+    const summary = { all: segments.length, stale: 0, missing: 0, done: 0 };
+    segments.forEach((segment) => {
+      const status = segment.workflow_status || "other";
+      if (status in summary) {
+        summary[status] += 1;
+      }
+    });
+    return summary;
+  }, [segments]);
   const visibleSegmentIds = useMemo(
     () => visibleSegments.map((segment) => segment.segment_id),
     [visibleSegments]
@@ -669,13 +687,18 @@ export default function SynthesisPage() {
           onAddSegment={handleAddSegment}
           addButtonLabel="+ 添加片段"
           actionContent={
-            <Button
-              variant="primary"
-              disabled={!currentProject?.id || isScriptSaving || !hasUnsavedChanges}
-              onClick={handleSaveScript}
-            >
-              {isScriptSaving ? "保存中..." : hasUnsavedChanges ? "保存剧本" : "已保存"}
-            </Button>
+            <>
+              <Button
+                variant="primary"
+                disabled={!currentProject?.id || isScriptSaving || !hasUnsavedChanges}
+                onClick={handleSaveScript}
+              >
+                {isScriptSaving ? "保存中..." : hasUnsavedChanges ? "保存剧本" : "已保存"}
+              </Button>
+              <Button variant="secondary" onClick={() => setDiffPreviewOpen(true)} disabled={!hasUnsavedChanges}>
+                查看差异
+              </Button>
+            </>
           }
         />
 
@@ -687,6 +710,9 @@ export default function SynthesisPage() {
           segments={visibleSegments}
           totalVisibleSegments={visibleSegments.length}
           activeSpeakerFilter={activeSpeakerFilter}
+          activeStatusFilter={activeStatusFilter}
+          statusCounts={statusCounts}
+          onStatusFilterChange={setActiveStatusFilter}
           shouldShowSegmentTimeline={shouldShowSegmentTimeline}
           selectedSegmentIds={selectedSegmentIds}
           setSelectedSegmentIds={setSelectedSegmentIds}
@@ -717,6 +743,7 @@ export default function SynthesisPage() {
           pushToast={pushToast}
         />
       </div>
+      <ScriptDiffPreviewDialog open={diffPreviewOpen} onOpenChange={setDiffPreviewOpen} diff={scriptDiff} />
     </div>
   );
 }

@@ -9,6 +9,7 @@ import ScriptEditorPage from "./pages/ScriptEditorPage";
 import SettingsPage from "./pages/SettingsPage";
 import SpeechRecognitionPage from "./pages/SpeechRecognitionPage";
 import SynthesisPage from "./pages/SynthesisPage";
+import ParseQcPage from "./pages/ParseQcPage";
 import TextInputPage from "./pages/TextInputPage";
 import VoiceConfigPage from "./pages/VoiceConfigPage";
 import { useProjectStore } from "./stores/useProjectStore";
@@ -17,6 +18,7 @@ import { useScriptStore } from "./stores/useScriptStore";
 const PAGE_COMPONENTS = {
   speech:   SpeechRecognitionPage,
   text:     TextInputPage,
+  qc:       ParseQcPage,
   script:   ScriptEditorPage,
   voice:    VoiceConfigPage,
   synth:    SynthesisPage,
@@ -59,9 +61,10 @@ export default function App() {
       if (e.ctrlKey || e.metaKey) {
         if (e.key === "1") { e.preventDefault(); setActivePage("speech"); }
         if (e.key === "2") { e.preventDefault(); setActivePage("text"); }
-        if (e.key === "3") { e.preventDefault(); setActivePage("script"); }
-        if (e.key === "4") { e.preventDefault(); setActivePage("voice"); }
-        if (e.key === "5") { e.preventDefault(); setActivePage("synth"); }
+        if (e.key === "3") { e.preventDefault(); setActivePage("qc"); }
+        if (e.key === "4") { e.preventDefault(); setActivePage("script"); }
+        if (e.key === "5") { e.preventDefault(); setActivePage("voice"); }
+        if (e.key === "6") { e.preventDefault(); setActivePage("synth"); }
         if (e.key === "b") { e.preventDefault(); setSidebarCollapsed((c) => !c); }
       }
     }
@@ -77,6 +80,7 @@ export default function App() {
   const completedPages = [];
   if (sourceText?.trim()) completedPages.push("speech");
   if (currentProject?.id) completedPages.push("text");
+  if (script?.segments?.length > 0) completedPages.push("qc");
   if (script?.segments?.length > 0) completedPages.push("script");
   if (currentProject?.voice_assignments && Object.keys(currentProject.voice_assignments).length > 0) {
     completedPages.push("voice");

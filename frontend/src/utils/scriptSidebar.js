@@ -29,6 +29,13 @@ export function filterSegmentsBySpeaker(segments = [], activeSpeakerFilter = "al
   return (segments || []).filter((segment) => (segment?.speaker || "narrator") === activeSpeakerFilter);
 }
 
+export function filterSegmentsByWorkflowStatus(segments = [], activeStatusFilter = "all") {
+  if (!activeStatusFilter || activeStatusFilter === "all") {
+    return segments;
+  }
+  return (segments || []).filter((segment) => (segment?.workflow_status || "other") === activeStatusFilter);
+}
+
 export function pruneSelectedSegmentIds(selectedIds = [], visibleSegments = []) {
   const visibleIds = new Set((visibleSegments || []).map((segment) => segment.segment_id || segment.id).filter(Boolean));
   return (selectedIds || []).filter((id) => visibleIds.has(id));

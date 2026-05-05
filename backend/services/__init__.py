@@ -7,6 +7,7 @@ from .project_file_service import (
 from .project_file_open_service import import_project_file_bytes
 from .project_archive_import_service import import_project_archive_bytes
 from .project_cleanup_service import delete_project_with_outputs
+from .project_history_service import get_project_history
 from .project_core_service import (
     create_project as create_project_record,
     get_project as get_project_record,
@@ -14,7 +15,14 @@ from .project_core_service import (
     list_projects as list_project_summaries,
     update_project as update_project_record,
 )
+from .project_snapshot_service import (
+    create_project_snapshot,
+    get_project_snapshot,
+    list_project_snapshots,
+    restore_project_snapshot,
+)
 from .project_import_service import find_project_file_match, reset_imported_audio_assets
+from .project_parse_qc_service import build_project_parse_qc_report
 from .project_maintenance_service import deduplicate_project_file_projects, merge_project_file_shadows
 from .project_script_crud_service import (
     add_segment as add_project_segment,
@@ -24,6 +32,14 @@ from .project_script_crud_service import (
     update_script as update_project_script,
     update_segment as update_project_segment,
     update_voice_assignments as update_project_voice_assignments,
+)
+from .project_script_batch_service import (
+    batch_update_segments as batch_update_project_segments,
+    merge_adjacent_segments as merge_adjacent_project_segments,
+    merge_character as merge_project_character,
+    rename_character as rename_project_character,
+    search_replace_segments as search_replace_project_segments,
+    split_segment as split_project_segment,
 )
 from .project_script_service import segment_content_payload, sync_script_metadata
 from .tts_path_service import (
@@ -69,11 +85,16 @@ __all__ = [
     "parse_project_file_payload",
     "import_project_archive_bytes",
     "delete_project_with_outputs",
+    "get_project_history",
     "create_project_record",
     "get_project_event_rows",
     "get_project_record",
     "list_project_summaries",
     "update_project_record",
+    "create_project_snapshot",
+    "get_project_snapshot",
+    "list_project_snapshots",
+    "restore_project_snapshot",
     "add_project_segment",
     "delete_project_segment",
     "get_project_script",
@@ -82,6 +103,13 @@ __all__ = [
     "update_project_segment",
     "update_project_voice_assignments",
     "find_project_file_match",
+    "build_project_parse_qc_report",
+    "batch_update_project_segments",
+    "merge_adjacent_project_segments",
+    "merge_project_character",
+    "rename_project_character",
+    "search_replace_project_segments",
+    "split_project_segment",
     "deduplicate_project_file_projects",
     "merge_project_file_shadows",
     "reset_imported_audio_assets",

@@ -7,32 +7,50 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from backend.models import (
+    BatchUpdateSegmentsRequest,
     CreateProjectRequest,
+    MergeCharacterRequest,
+    MergeSegmentsRequest,
     Project,
+    RenameCharacterRequest,
     ReorderSegmentsRequest,
+    SearchReplaceSegmentsRequest,
     Script,
     Segment,
+    SplitSegmentRequest,
     VoiceAssignmentsPayload,
 )
+from backend.persistence import append_project_event
 from backend.services import (
     add_project_segment,
+    batch_update_project_segments,
+    build_project_parse_qc_report,
     build_project_file_payload,
     create_project_record,
     delete_project_segment,
     delete_project_with_outputs,
     deduplicate_project_file_projects,
     get_project_event_rows,
+    get_project_history,
     get_project_record,
     get_project_script,
     import_project_archive_bytes,
     import_project_file_bytes,
     list_project_summaries,
+    list_project_snapshots,
+    merge_adjacent_project_segments,
+    merge_project_character,
     merge_project_file_shadows as merge_project_file_shadows_service,
+    rename_project_character,
     reorder_project_script,
     update_project_script,
     update_project_record,
     update_project_segment,
     update_project_voice_assignments,
+    search_replace_project_segments,
+    split_project_segment,
+    get_project_snapshot,
+    restore_project_snapshot,
 )
 from backend.state import get_app_state
 
@@ -202,6 +220,36 @@ async def reorder_script(project_id: str, payload: ReorderSegmentsRequest, state
     return reorder_project_script(project_id, payload, projects_dir=state.settings.projects_dir)
 
 
+@router.post("/{project_id}/script/rename-character")
+async def rename_character(project_id: str, payload: RenameCharacterRequest, state=Depends(get_app_state)):
+    return rename_project_character(project_id, payload, projects_dir=state.settings.projects_dir)
+
+
+@router.post("/{project_id}/script/merge-character")
+async def merge_character(project_id: str, payload: MergeCharacterRequest, state=Depends(get_app_state)):
+    return merge_project_character(project_id, payload, projects_dir=state.settings.projects_dir)
+
+
+@router.post("/{project_id}/script/batch-update")
+async def batch_update_segments(project_id: str, payload: BatchUpdateSegmentsRequest, state=Depends(get_app_state)):
+    return batch_update_project_segments(project_id, payload, projects_dir=state.settings.projects_dir)
+
+
+@router.post("/{project_id}/script/search-replace")
+async def search_replace_segments(project_id: str, payload: SearchReplaceSegmentsRequest, state=Depends(get_app_state)):
+    return search_replace_project_segments(project_id, payload, projects_dir=state.settings.projects_dir)
+
+
+@router.post("/{project_id}/script/split-segment")
+async def split_segment(project_id: str, payload: SplitSegmentRequest, state=Depends(get_app_state)):
+    return split_project_segment(project_id, payload, projects_dir=state.settings.projects_dir)
+
+
+@router.post("/{project_id}/script/merge-segments")
+async def merge_segments(project_id: str, payload: MergeSegmentsRequest, state=Depends(get_app_state)):
+    return merge_adjacent_project_segments(project_id, payload, projects_dir=state.settings.projects_dir)
+
+
 @router.put("/{project_id}/voice-assignments")
 async def update_voice_assignments(project_id: str, payload: VoiceAssignmentsPayload, state=Depends(get_app_state)):
     return update_project_voice_assignments(
@@ -218,3 +266,51 @@ async def get_project_events(project_id: str, limit: int = 500, state=Depends(ge
         projects_dir=state.settings.projects_dir,
         limit=limit,
     )
+
+
+@router.get("/{project_id}/snapshots")
+async def get_project_snapshots(project_id: str, limit: int = 50, state=Depends(get_app_state)):
+    _ = get_project_record(project_id, projects_dir=state.settings.projects_dir)
+    return list_project_snapshots(state.settings.projects_dir, project_id, limit=limit)
+
+
+@router.get("/{project_id}/snapshots/{snapshot_id}")
+async def get_snapshot_detail(project_id: str, snapshot_id: str, state=Depends(get_app_state)):
+    _ = get_project_record(project_id, projects_dir=state.settings.projects_dir)
+    return get_project_snapshot(state.settings.projects_dir, project_id, snapshot_id)
+
+
+@router.post("/{project_id}/snapshots/{snapshot_id}/restore")
+async def restore_snapshot(project_id: str, snapshot_id: str, state=Depends(get_app_state)):
+    project, backup = restore_project_snapshot(state.settings.projects_dir, project_id, snapshot_id)
+    append_project_event(
+        state.settings.projects_dir,
+        project_id,
+        {
+            "source": "project",
+            "status": project.status,
+            "event": {
+                "type": "snapshot_restored",
+                "message": f"已回滚到快照 {snapshot_id}",
+                "snapshot_id": snapshot_id,
+                "backup_snapshot_id": backup["id"],
+            },
+        },
+    )
+    logger.info("Project snapshot restored project_id=%s snapshot_id=%s backup_snapshot_id=%s", project_id, snapshot_id, backup["id"])
+    return {
+        "project_id": project_id,
+        "snapshot_id": snapshot_id,
+        "backup_snapshot": backup,
+        "project": project,
+    }
+
+
+@router.get("/{project_id}/history")
+async def get_history(project_id: str, limit: int = 200, state=Depends(get_app_state)):
+    return get_project_history(project_id, projects_dir=state.settings.projects_dir, limit=limit)
+
+
+@router.get("/{project_id}/parse-qc")
+async def get_parse_quality_report(project_id: str, state=Depends(get_app_state)):
+    return build_project_parse_qc_report(project_id, projects_dir=state.settings.projects_dir)

@@ -6,6 +6,7 @@ import { EMOTION_OPTIONS, TYPE_OPTIONS } from "../../constants/scriptOptions";
 export default function SegmentEditorFields({
   draft,
   onFieldChange,
+  onTextCursorChange = null,
   includeAdvanced = true,
   textMinHeight = 64,
   speakerOptions = [],
@@ -70,6 +71,9 @@ export default function SegmentEditorFields({
         className="textArea compactArea"
         value={draft?.text || ""}
         onChange={(e) => onFieldChange("text", e.target.value)}
+        onClick={(e) => onTextCursorChange?.(e.target.selectionStart ?? 0)}
+        onKeyUp={(e) => onTextCursorChange?.(e.target.selectionStart ?? 0)}
+        onSelect={(e) => onTextCursorChange?.(e.target.selectionStart ?? 0)}
         style={{ minHeight: textMinHeight }}
       />
       {includeAdvanced ? (

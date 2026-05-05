@@ -44,6 +44,14 @@ export function resolveSegmentDisplayStatus(baseStatus, staleStatus) {
   return baseStatus;
 }
 
+export function resolveWorkflowStatus(displayStatus) {
+  const value = (displayStatus || "").toLowerCase();
+  if (value === "missing") return "missing";
+  if (value === "stale") return "stale";
+  if (value === "done") return "done";
+  return "other";
+}
+
 export function getSegmentStaleLabel(item) {
   if (!item) {
     return "";

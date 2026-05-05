@@ -20,6 +20,9 @@ export const useProjectStore = create((set, get) => ({
   currentProject: null,
   projects: [],
   projectEvents: [],
+  projectHistory: [],
+  projectSnapshots: [],
+  parseQcReport: null,
   importWarnings: [],
   lastOpenedProjectId: safeReadLastOpenedProjectId(),
   projectSources: safeReadProjectSources(),
@@ -118,6 +121,7 @@ export const useProjectStore = create((set, get) => ({
       return {
         currentProject: project,
         importWarnings: [],
+        parseQcReport: null,
         projects,
         lastOpenedProjectId: project.id,
         projectSources: nextSources,
@@ -198,6 +202,7 @@ export const useProjectStore = create((set, get) => ({
       return {
         currentProject: project,
         importWarnings: [],
+        parseQcReport: null,
         projects,
         lastOpenedProjectId: project.id,
         projectSources: nextSources,
@@ -237,6 +242,46 @@ export const useProjectStore = create((set, get) => ({
     set({ projectEvents: events });
     return events;
   },
+  loadProjectSnapshots: async (projectId, limit = 50) => {
+    const snapshots = await api.get(`/projects/${projectId}/snapshots?limit=${limit}`);
+    set({ projectSnapshots: snapshots });
+    return snapshots;
+  },
+  loadProjectHistory: async (projectId, limit = 200) => {
+    const history = await api.get(`/projects/${projectId}/history?limit=${limit}`);
+    set({ projectHistory: history });
+    return history;
+  },
+  loadProjectParseQc: async (projectId) => {
+    const report = await api.get(`/projects/${projectId}/parse-qc`);
+    set({ parseQcReport: report });
+    return report;
+  },
+  restoreProjectSnapshot: async (projectId, snapshotId) => {
+    const result = await api.post(`/projects/${projectId}/snapshots/${snapshotId}/restore`, {});
+    const project = result?.project || await api.get(`/projects/${projectId}`);
+    set((state) => {
+      const summary = toProjectSummary(project);
+      const projects = sortProjectSummaries(upsertProjectSummary(state.projects, summary), project.id);
+      const source = deriveProjectSourceFromProject(project);
+      const nextSources = source
+        ? { ...(state.projectSources || {}), [project.id]: source }
+        : state.projectSources;
+      if (source) {
+        safeWriteProjectSources(nextSources);
+      }
+      const isCurrent = state.currentProject?.id === project.id;
+      const bindingState = isCurrent ? getCurrentBindingState(state, project) : {};
+      return {
+        currentProject: isCurrent ? project : state.currentProject,
+        projects,
+        projectSources: nextSources,
+        ...bindingState,
+      };
+    });
+    useUiStore.getState().pushToast({ title: "项目已回滚到历史快照", tone: "success" });
+    return result;
+  },
   deleteProject: async (projectId, options = {}) => {
     await api.delete(`/projects/${projectId}`);
     set((state) => {
@@ -263,6 +308,9 @@ export const useProjectStore = create((set, get) => ({
         lastOpenedProjectId: nextLastOpened,
         importWarnings: currentProject ? state.importWarnings : [],
         projectEvents: currentProject ? state.projectEvents : [],
+        projectHistory: currentProject ? state.projectHistory : [],
+        projectSnapshots: currentProject ? state.projectSnapshots : [],
+        parseQcReport: currentProject ? state.parseQcReport : null,
         ...bindingState,
       };
     });
@@ -287,6 +335,7 @@ export const useProjectStore = create((set, get) => ({
       return {
         currentProject: project,
         importWarnings: Array.isArray(result.warnings) ? result.warnings : [],
+        parseQcReport: null,
         projects,
         lastOpenedProjectId: project.id,
         projectSources: nextSources,
@@ -329,6 +378,7 @@ export const useProjectStore = create((set, get) => ({
       return {
         currentProject: project,
         importWarnings: Array.isArray(result.warnings) ? result.warnings : [],
+        parseQcReport: null,
         projects,
         lastOpenedProjectId: project.id,
         projectSources: nextSources,

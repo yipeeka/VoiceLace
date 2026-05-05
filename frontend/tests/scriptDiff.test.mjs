@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { computeScriptDiff, normalizeDraftScript } from "../src/utils/scriptDiff.js";
+import { buildScriptDiffSummary, computeScriptDiff, normalizeDraftScript } from "../src/utils/scriptDiff.js";
 
 function makeScript(segments) {
   return normalizeDraftScript({
@@ -73,4 +73,14 @@ test("computeScriptDiff returns no changes for normalized equivalent scripts", (
   assert.equal(diff.hasChanges, false);
   assert.equal(diff.reordered, false);
   assert.deepEqual(diff.modifiedSegmentIds, []);
+});
+
+test("buildScriptDiffSummary returns compact counts", () => {
+  const saved = makeScript([{ id: "a", speaker: "narrator", text: "A", type: "narration" }]);
+  const draft = makeScript([{ id: "a", speaker: "narrator", text: "A2", type: "narration" }]);
+  const summary = buildScriptDiffSummary(computeScriptDiff(saved, draft));
+  assert.equal(summary.hasChanges, true);
+  assert.equal(summary.modified, 1);
+  assert.equal(summary.added, 0);
+  assert.equal(summary.removed, 0);
 });

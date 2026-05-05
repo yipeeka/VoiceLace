@@ -6,6 +6,7 @@ import {
   buildStaleTargetIds,
   getSegmentStaleLabel,
   resolveSegmentDisplayStatus,
+  resolveWorkflowStatus,
 } from "../src/utils/stale.js";
 
 test("buildStaleTargetIds merges and deduplicates stale/missing ids", () => {
@@ -25,6 +26,13 @@ test("resolveSegmentDisplayStatus prefers stale and missing status", () => {
   assert.equal(resolveSegmentDisplayStatus("done", "stale"), "stale");
   assert.equal(resolveSegmentDisplayStatus("done", "missing"), "missing");
   assert.equal(resolveSegmentDisplayStatus("running", "ready"), "running");
+});
+
+test("resolveWorkflowStatus maps display statuses to filter buckets", () => {
+  assert.equal(resolveWorkflowStatus("stale"), "stale");
+  assert.equal(resolveWorkflowStatus("missing"), "missing");
+  assert.equal(resolveWorkflowStatus("done"), "done");
+  assert.equal(resolveWorkflowStatus("running"), "other");
 });
 
 test("buildRecommendedRegenerateIds prefers edited/missing segments", () => {

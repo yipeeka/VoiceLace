@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from backend.engine.tts_engine import TTSEngine
 from backend.models import SegmentAsset, SynthesizeRequest
 from backend.persistence import load_project, save_project
+from .project_snapshot_service import create_project_snapshot
 
 from .tts_finalize_service import finalize_rebuild_full, resolve_partial_final_format, update_project_audio_assets_after_synthesis
 from .tts_path_service import (
@@ -26,6 +27,7 @@ from .tts_task_service import hash_payload, public_task, segment_cache_key
 async def run_synthesis_task(*, task_id: str, payload: SynthesizeRequest, state, logger) -> None:
     task = state.tts_tasks[task_id]
     project = load_project(state.settings.projects_dir, payload.project_id)
+    create_project_snapshot(state.settings.projects_dir, project, reason="before_synthesis_run")
     presets_by_id = {preset.id: preset for preset in state.voice_manager.list_presets()}
     config = payload.config or project.synthesis_config
     project.synthesis_config = config

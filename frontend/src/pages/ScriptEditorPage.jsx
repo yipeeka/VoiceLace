@@ -1,12 +1,14 @@
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Pencil, Plus, Save, Trash2 } from "lucide-react";
+import { Combine, GripVertical, Pencil, Plus, Redo2, Save, Scissors, Settings2, Trash2, Undo2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import CharacterBadge, { getCharColor } from "../components/shared/CharacterBadge";
 import EmptyState from "../components/shared/EmptyState";
 import GlassCard from "../components/shared/GlassCard";
+import ScriptBatchToolsDrawer from "../components/script/ScriptBatchToolsDrawer";
+import ScriptDiffPreviewDialog from "../components/script/ScriptDiffPreviewDialog";
 import SegmentEditorFields from "../components/script/SegmentEditorFields";
 import ScriptSidebarColumn from "../components/script/ScriptSidebarColumn";
 import Button from "../components/ui/Button";
@@ -25,6 +27,7 @@ function SortableSegmentCard({
   isEditing,
   isInsertAnchor,
   draft,
+  isFocused,
   speakerOptions,
   canEdit,
   canReorder,
@@ -32,7 +35,10 @@ function SortableSegmentCard({
   onBeginEdit,
   onUpdateDraft,
   onApplyDraft,
+  onSplitAtCursor,
   onCancelEdit,
+  onMergeWithNext,
+  canMergeWithNext,
   onSetInsertAnchor,
   onDelete,
 }) {
@@ -50,7 +56,14 @@ function SortableSegmentCard({
   const charColor = getCharColor(segment.speaker);
 
   return (
-    <div ref={setNodeRef} style={style} className={`segmentCard ${isEditing ? "editing" : ""} ${isInsertAnchor ? "insertAnchor" : ""}`}>
+    <div
+      ref={setNodeRef}
+      style={{
+        ...style,
+        ...(isFocused ? { boxShadow: "0 0 0 1px var(--accent-primary) inset" } : {}),
+      }}
+      className={`segmentCard ${isEditing ? "editing" : ""} ${isInsertAnchor ? "insertAnchor" : ""}`}
+    >
       {/* Drag handle */}
       {canEdit && !isEditing && (
         <div
@@ -75,6 +88,7 @@ function SortableSegmentCard({
               includeAdvanced
               speakerOptions={speakerOptions}
               onFieldChange={(field, value) => onUpdateDraft(segment.id, field, value)}
+              onTextCursorChange={(cursor) => onUpdateDraft(segment.id, "__cursor", cursor)}
               textMinHeight={56}
             />
             <div className="controlRow">
@@ -88,6 +102,15 @@ function SortableSegmentCard({
               </Button>
               <Button variant="ghost" size="sm" onClick={() => onCancelEdit(segment.id)}>
                 取消
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onSplitAtCursor(segment.id)}
+                title="按当前光标位置拆分"
+              >
+                <Scissors size={13} />
+                拆分
               </Button>
             </div>
           </>
@@ -135,6 +158,14 @@ function SortableSegmentCard({
           >
             <Plus size={13} />
           </button>
+          <button
+            className="btn btn-ghost btn-sm btn-icon"
+            disabled={!canEdit || isSaving || !canMergeWithNext}
+            onClick={() => onMergeWithNext(segment.id)}
+            title={canMergeWithNext ? "与下一段合并" : "没有下一段可合并"}
+          >
+            <Combine size={13} />
+          </button>
         </div>
       )}
     </div>
@@ -143,17 +174,35 @@ function SortableSegmentCard({
 
 export default function ScriptEditorPage() {
   const { currentProject, currentProjectFileHandle, bindCurrentProjectFile, refreshCurrentProject } = useProjectStore();
-  const { script, replaceScript, saveScript, isSaving, error } = useScriptStore();
+  const {
+    script,
+    replaceScript,
+    saveScript,
+    renameCharacter,
+    mergeCharacter,
+    batchUpdateSegments,
+    searchReplaceSegments,
+    splitSegment,
+    mergeSegments,
+    isSaving,
+    error,
+  } = useScriptStore();
   const fileInputRef = useRef(null);
   const lastProjectIdRef = useRef(null);
 
   const [savedScript, setSavedScript] = useState(() => normalizeDraftScript(script));
   const [draftScript, setDraftScript] = useState(() => normalizeDraftScript(script));
+  const [undoStack, setUndoStack] = useState([]);
+  const [redoStack, setRedoStack] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [segmentDraft, setSegmentDraft] = useState(null);
+  const [cursorBySegmentId, setCursorBySegmentId] = useState({});
+  const [focusSegmentId, setFocusSegmentId] = useState("");
   const [newSegment, setNewSegment] = useState(() => createSegmentDraft(0));
   const [insertAfterSegmentId, setInsertAfterSegmentId] = useState(null);
   const [activeSpeakerFilter, setActiveSpeakerFilter] = useState("all");
+  const [diffPreviewOpen, setDiffPreviewOpen] = useState(false);
+  const [batchToolsOpen, setBatchToolsOpen] = useState(false);
   const setProjectSaveAction = useUiStore((state) => state.setProjectSaveAction);
   const clearProjectSaveAction = useUiStore((state) => state.clearProjectSaveAction);
 
@@ -172,14 +221,33 @@ export default function ScriptEditorPage() {
   }, [draftScript?.segments, editingId, segmentDraft]);
   const hasUnsavedChanges = scriptDiff.hasChanges || editingDraftDirty;
 
+  const resetHistory = useCallback((nextDraft) => {
+    setUndoStack([]);
+    setRedoStack([]);
+    setDraftScript(nextDraft);
+  }, []);
+
+  const applyDraftMutation = useCallback((updater) => {
+    setDraftScript((current) => {
+      const next = typeof updater === "function" ? updater(current) : updater;
+      if (!next || JSON.stringify(next) === JSON.stringify(current)) {
+        return current;
+      }
+      setUndoStack((stack) => [...stack, current]);
+      setRedoStack([]);
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     const projectId = currentProject?.id || null;
     const normalized = normalizeDraftScript(script);
     if (lastProjectIdRef.current !== projectId) {
       setSavedScript(normalized);
-      setDraftScript(normalized);
+      resetHistory(normalized);
       setEditingId(null);
       setSegmentDraft(null);
+      setCursorBySegmentId({});
       setInsertAfterSegmentId(null);
       setActiveSpeakerFilter("all");
       setNewSegment(createSegmentDraft(normalized.segments.length));
@@ -188,10 +256,17 @@ export default function ScriptEditorPage() {
     }
     if (!computeScriptDiff(savedScript, draftScript).hasChanges) {
       setSavedScript(normalized);
-      setDraftScript(normalized);
+      resetHistory(normalized);
       setNewSegment((current) => ({ ...current, index: normalized.segments.length }));
     }
-  }, [currentProject?.id, script]);
+  }, [currentProject?.id, script, resetHistory]);
+
+  useEffect(() => {
+    const marker = window.sessionStorage.getItem("beautyvoice.qc.focus_segment_id") || "";
+    if (!marker) return;
+    window.sessionStorage.removeItem("beautyvoice.qc.focus_segment_id");
+    setFocusSegmentId(marker);
+  }, [currentProject?.id]);
 
   // Character stats
   const characters = useMemo(() => buildCharacterStats(segments), [segments]);
@@ -229,7 +304,7 @@ export default function ScriptEditorPage() {
     const { active, over } = event;
     if (isFilterActive) return;
     if (!over || active.id === over.id) return;
-    setDraftScript((current) => {
+    applyDraftMutation((current) => {
       const list = current.segments ?? [];
       const oldIdx = list.findIndex((item) => item.id === active.id);
       const newIdx = list.findIndex((item) => item.id === over.id);
@@ -252,6 +327,10 @@ export default function ScriptEditorPage() {
   }
 
   function updateDraft(id, field, value) {
+    if (field === "__cursor") {
+      setCursorBySegmentId((state) => ({ ...state, [id]: Number(value || 0) }));
+      return;
+    }
     setSegmentDraft((current) => {
       if (!current || current.id !== id) {
         return current;
@@ -272,7 +351,7 @@ export default function ScriptEditorPage() {
       return;
     }
     const updated = normalized.value;
-    setDraftScript((current) => ({
+    applyDraftMutation((current) => ({
       ...current,
       segments: (current.segments || []).map((segment, index) =>
         segment.id === id ? { ...updated, index } : { ...segment, index }
@@ -300,7 +379,7 @@ export default function ScriptEditorPage() {
       id: normalized.value.id || crypto.randomUUID(),
       index: 0,
     };
-    setDraftScript((current) => ({
+    applyDraftMutation((current) => ({
       ...current,
       segments: (() => {
         const list = [...(current.segments || [])];
@@ -321,7 +400,7 @@ export default function ScriptEditorPage() {
   }
 
   function handleDelete(id) {
-    setDraftScript((current) => ({
+    applyDraftMutation((current) => ({
       ...current,
       segments: (current.segments || [])
         .filter((segment) => segment.id !== id)
@@ -377,9 +456,10 @@ export default function ScriptEditorPage() {
     await refreshCurrentProject(currentProject.id);
     const normalized = normalizeDraftScript(updated);
     setSavedScript(normalized);
-    setDraftScript(normalized);
+    resetHistory(normalized);
     setEditingId(null);
     setSegmentDraft(null);
+    setCursorBySegmentId({});
   }
 
   function handleExportJson() {
@@ -444,13 +524,187 @@ export default function ScriptEditorPage() {
       await refreshCurrentProject(currentProject.id);
       const normalized = normalizeDraftScript(updated);
       setSavedScript(normalized);
-      setDraftScript(normalized);
+      resetHistory(normalized);
       setEditingId(null);
       setSegmentDraft(null);
+      setCursorBySegmentId({});
       setNewSegment(createSegmentDraft(normalized.segments.length));
     } catch (err) {
       useUiStore.getState().pushToast({ title: formatError("导入失败", err), tone: "error" });
     }
+  }
+
+  function handleUndo() {
+    setUndoStack((past) => {
+      if (!past.length) return past;
+      const previous = past[past.length - 1];
+      setRedoStack((future) => [draftScript, ...future]);
+      setDraftScript(previous);
+      return past.slice(0, -1);
+    });
+  }
+
+  function handleRedo() {
+    setRedoStack((future) => {
+      if (!future.length) return future;
+      const next = future[0];
+      setUndoStack((past) => [...past, draftScript]);
+      setDraftScript(next);
+      return future.slice(1);
+    });
+  }
+
+  useEffect(() => {
+    function onKeyDown(event) {
+      const isPrimary = event.ctrlKey || event.metaKey;
+      if (!isPrimary) return;
+      if (event.key.toLowerCase() === "z" && !event.shiftKey) {
+        event.preventDefault();
+        handleUndo();
+        return;
+      }
+      if (event.key.toLowerCase() === "y" || (event.key.toLowerCase() === "z" && event.shiftKey)) {
+        event.preventDefault();
+        handleRedo();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [draftScript, undoStack.length, redoStack.length]);
+
+  async function handleGlobalRenameCharacter({ fromName, toName }) {
+    if (!currentProject?.id) return;
+    if (hasUnsavedChanges) {
+      useUiStore.getState().pushToast({ title: "请先保存当前草稿后再执行全局操作", tone: "warning" });
+      return;
+    }
+    if (!fromName || !toName) return;
+    const updated = await renameCharacter({ projectId: currentProject.id, fromName, toName });
+    const normalized = normalizeDraftScript(updated);
+    setSavedScript(normalized);
+    resetHistory(normalized);
+    setEditingId(null);
+    setSegmentDraft(null);
+    await refreshCurrentProject(currentProject.id);
+    setBatchToolsOpen(false);
+  }
+
+  async function handleGlobalMergeCharacter({ sourceName, targetName }) {
+    if (!currentProject?.id) return;
+    if (hasUnsavedChanges) {
+      useUiStore.getState().pushToast({ title: "请先保存当前草稿后再执行全局操作", tone: "warning" });
+      return;
+    }
+    if (!sourceName || !targetName) return;
+    const updated = await mergeCharacter({ projectId: currentProject.id, sourceName, targetName });
+    const normalized = normalizeDraftScript(updated);
+    setSavedScript(normalized);
+    resetHistory(normalized);
+    setEditingId(null);
+    setSegmentDraft(null);
+    await refreshCurrentProject(currentProject.id);
+    setBatchToolsOpen(false);
+  }
+
+  async function handleBatchUpdate({ segmentIds = [], emotion = null, type = null } = {}) {
+    if (!currentProject?.id) return;
+    if (hasUnsavedChanges) {
+      useUiStore.getState().pushToast({ title: "请先保存当前草稿后再执行批量操作", tone: "warning" });
+      return;
+    }
+    const targetIds = Array.isArray(segmentIds) && segmentIds.length
+      ? segmentIds
+      : visibleSegments.map((segment) => segment.id);
+    if (!targetIds.length) {
+      useUiStore.getState().pushToast({ title: "当前筛选结果没有可批量修改的片段", tone: "warning" });
+      return;
+    }
+    if (!emotion && !type) return;
+    const updated = await batchUpdateSegments({
+      projectId: currentProject.id,
+      segmentIds: targetIds,
+      emotion,
+      type,
+    });
+    const normalized = normalizeDraftScript(updated);
+    setSavedScript(normalized);
+    resetHistory(normalized);
+    await refreshCurrentProject(currentProject.id);
+    setBatchToolsOpen(false);
+  }
+
+  async function handleSearchReplace({ find, replace, caseSensitive }) {
+    if (!currentProject?.id) return;
+    if (hasUnsavedChanges) {
+      useUiStore.getState().pushToast({ title: "请先保存当前草稿后再执行搜索替换", tone: "warning" });
+      return;
+    }
+    if (!find) return;
+    const segmentIds = visibleSegments.map((segment) => segment.id);
+    const updated = await searchReplaceSegments({
+      projectId: currentProject.id,
+      find,
+      replace,
+      caseSensitive,
+      segmentIds,
+    });
+    const normalized = normalizeDraftScript(updated);
+    setSavedScript(normalized);
+    resetHistory(normalized);
+    await refreshCurrentProject(currentProject.id);
+    setBatchToolsOpen(false);
+  }
+
+  async function handleSplitAtCursor(segmentId) {
+    if (!currentProject?.id) return;
+    if (hasUnsavedChanges) {
+      useUiStore.getState().pushToast({ title: "请先保存当前草稿后再执行拆分", tone: "warning" });
+      return;
+    }
+    const cursor = Number(cursorBySegmentId[segmentId] ?? -1);
+    if (cursor < 0) {
+      useUiStore.getState().pushToast({ title: "请先在片段文本中点击定位光标", tone: "warning" });
+      return;
+    }
+    const updated = await splitSegment({
+      projectId: currentProject.id,
+      segmentId,
+      cursor,
+    });
+    const normalized = normalizeDraftScript(updated);
+    setSavedScript(normalized);
+    resetHistory(normalized);
+    setEditingId(null);
+    setSegmentDraft(null);
+    await refreshCurrentProject(currentProject.id);
+  }
+
+  function findNextSegmentId(segmentId) {
+    const list = draftScript?.segments || [];
+    const index = list.findIndex((segment) => segment.id === segmentId);
+    if (index < 0 || index >= list.length - 1) return "";
+    return list[index + 1]?.id || "";
+  }
+
+  async function handleMergeWithNext(segmentId) {
+    if (!currentProject?.id) return;
+    if (hasUnsavedChanges) {
+      useUiStore.getState().pushToast({ title: "请先保存当前草稿后再执行合并", tone: "warning" });
+      return;
+    }
+    const nextSegmentId = findNextSegmentId(segmentId);
+    if (!nextSegmentId) return;
+    const updated = await mergeSegments({
+      projectId: currentProject.id,
+      firstSegmentId: segmentId,
+      secondSegmentId: nextSegmentId,
+    });
+    const normalized = normalizeDraftScript(updated);
+    setSavedScript(normalized);
+    resetHistory(normalized);
+    setEditingId(null);
+    setSegmentDraft(null);
+    await refreshCurrentProject(currentProject.id);
   }
 
   return (
@@ -473,9 +727,26 @@ export default function ScriptEditorPage() {
         onAddSegment={handleAddSegment}
         actionContent={
           <>
+            <div className="controlRow" style={{ gap: 8, flexWrap: "wrap" }}>
+              <Button variant="ghost" onClick={handleUndo} disabled={!undoStack.length}>
+                <Undo2 size={14} />
+                撤销
+              </Button>
+              <Button variant="ghost" onClick={handleRedo} disabled={!redoStack.length}>
+                <Redo2 size={14} />
+                重做
+              </Button>
+            </div>
             <Button variant="primary" onClick={handleSaveScript} disabled={!canEdit || isSaving || !hasUnsavedChanges}>
               <Save size={14} />
               {isSaving ? "保存中..." : hasUnsavedChanges ? "保存剧本" : "已保存"}
+            </Button>
+            <Button variant="secondary" onClick={() => setDiffPreviewOpen(true)} disabled={!hasUnsavedChanges}>
+              查看差异
+            </Button>
+            <Button variant="secondary" onClick={() => setBatchToolsOpen(true)} disabled={!canEdit || isSaving}>
+              <Settings2 size={14} />
+              批量工具
             </Button>
             <Button variant="secondary" onClick={handleExportJson} disabled={!script?.segments?.length}>
               导出 JSON
@@ -509,6 +780,7 @@ export default function ScriptEditorPage() {
                   <SortableSegmentCard
                     key={segment.id}
                     segment={segment}
+                    isFocused={focusSegmentId === segment.id}
                     isEditing={editingId === segment.id}
                     isInsertAnchor={insertAfterSegmentId === segment.id}
                     draft={segmentDraft?.id === segment.id ? segmentDraft : null}
@@ -519,7 +791,10 @@ export default function ScriptEditorPage() {
                     onBeginEdit={beginEdit}
                     onUpdateDraft={updateDraft}
                     onApplyDraft={applyDraft}
+                    onSplitAtCursor={handleSplitAtCursor}
                     onCancelEdit={cancelEdit}
+                    onMergeWithNext={handleMergeWithNext}
+                    canMergeWithNext={Boolean(findNextSegmentId(segment.id))}
                     onSetInsertAnchor={setInsertAfterSegmentId}
                     onDelete={handleDelete}
                   />
@@ -539,6 +814,20 @@ export default function ScriptEditorPage() {
           />
         )}
       </GlassCard>
+      <ScriptBatchToolsDrawer
+        open={batchToolsOpen}
+        onOpenChange={setBatchToolsOpen}
+        characters={characters}
+        visibleSegments={visibleSegments}
+        activeSpeakerFilter={activeSpeakerFilter}
+        canExecute={canEdit && !hasUnsavedChanges}
+        isSaving={isSaving}
+        onRenameCharacter={handleGlobalRenameCharacter}
+        onMergeCharacter={handleGlobalMergeCharacter}
+        onBatchUpdate={handleBatchUpdate}
+        onSearchReplace={handleSearchReplace}
+      />
+      <ScriptDiffPreviewDialog open={diffPreviewOpen} onOpenChange={setDiffPreviewOpen} diff={scriptDiff} />
     </div>
   );
 }

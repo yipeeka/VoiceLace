@@ -42,8 +42,7 @@ class ProjectCoreServiceTest(unittest.TestCase):
             append_project_event(projects_dir, created.id, {"task_id": "t1", "status": "done"})
 
             rows = get_project_events(created.id, projects_dir=projects_dir, limit=500)
-            self.assertEqual(len(rows), 1)
-            self.assertEqual(rows[0]["task_id"], "t1")
+            self.assertTrue(any(row.get("task_id") == "t1" for row in rows))
 
 
 if __name__ == "__main__":

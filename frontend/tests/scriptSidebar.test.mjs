@@ -5,6 +5,7 @@ import {
   buildCharacterStats,
   buildSpeakerOptions,
   filterSegmentsBySpeaker,
+  filterSegmentsByWorkflowStatus,
   getInsertAnchorLabel,
   pruneSelectedSegmentIds,
 } from "../src/utils/scriptSidebar.js";
@@ -49,6 +50,17 @@ test("filterSegmentsBySpeaker narrows down by speaker", () => {
   assert.deepEqual(filterSegmentsBySpeaker(segments, "老周"), [
     { segment_id: "2", speaker: "老周" },
     { segment_id: "3", speaker: "老周" },
+  ]);
+});
+
+test("filterSegmentsByWorkflowStatus narrows down by mapped workflow status", () => {
+  const segments = [
+    { segment_id: "1", workflow_status: "done" },
+    { segment_id: "2", workflow_status: "stale" },
+    { segment_id: "3", workflow_status: "missing" },
+  ];
+  assert.deepEqual(filterSegmentsByWorkflowStatus(segments, "stale"), [
+    { segment_id: "2", workflow_status: "stale" },
   ]);
 });
 

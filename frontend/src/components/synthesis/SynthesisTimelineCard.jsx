@@ -14,6 +14,9 @@ export default function SynthesisTimelineCard({
   segments,
   totalVisibleSegments,
   activeSpeakerFilter,
+  activeStatusFilter,
+  statusCounts,
+  onStatusFilterChange,
   shouldShowSegmentTimeline,
   selectedSegmentIds,
   setSelectedSegmentIds,
@@ -63,6 +66,37 @@ export default function SynthesisTimelineCard({
           ) : null}
         </div>
       ) : null}
+      <div className="controlRow" style={{ marginBottom: 10, gap: 8, flexWrap: "wrap" }}>
+        <span className="muted">状态筛选</span>
+        <Button
+          variant={activeStatusFilter === "all" ? "primary" : "ghost"}
+          size="sm"
+          onClick={() => onStatusFilterChange("all")}
+        >
+          全部 {statusCounts?.all ?? 0}
+        </Button>
+        <Button
+          variant={activeStatusFilter === "stale" ? "primary" : "ghost"}
+          size="sm"
+          onClick={() => onStatusFilterChange("stale")}
+        >
+          待修音 {statusCounts?.stale ?? 0}
+        </Button>
+        <Button
+          variant={activeStatusFilter === "done" ? "primary" : "ghost"}
+          size="sm"
+          onClick={() => onStatusFilterChange("done")}
+        >
+          已合成 {statusCounts?.done ?? 0}
+        </Button>
+        <Button
+          variant={activeStatusFilter === "missing" ? "primary" : "ghost"}
+          size="sm"
+          onClick={() => onStatusFilterChange("missing")}
+        >
+          缺音频 {statusCounts?.missing ?? 0}
+        </Button>
+      </div>
       {selectedSegmentIds.length ? (
         <div className="controlRow" style={{ marginBottom: 10 }}>
           <span className="muted">已选 {selectedSegmentIds.length} 段</span>

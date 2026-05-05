@@ -680,7 +680,7 @@ pre, code {
   box-shadow: var(--shadow-lg);
   overflow: hidden;
   animation: scaleIn var(--duration-normal) var(--ease-out) both;
-  z-index: 100;
+  z-index: 260;
 }
 
 .selectItem {
@@ -851,6 +851,43 @@ select.textInput option {
   color: var(--text-secondary);
   margin-bottom: 20px;
   line-height: 1.6;
+}
+
+.batchToolsDrawer {
+  left: auto;
+  right: 0;
+  top: 0;
+  transform: none;
+  width: min(92vw, 680px);
+  height: 100vh;
+  max-height: 100vh;
+  border-radius: 0;
+  border-left: 1px solid var(--border-default);
+  border-right: none;
+  border-top: none;
+  border-bottom: none;
+  animation: fadeIn var(--duration-normal) var(--ease-out) both;
+}
+
+.batchTabsList {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.batchTabsList .tabsTrigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+@media (max-width: 980px) {
+  .batchTabsList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -1323,6 +1360,12 @@ select.textInput option {
   transition: opacity var(--duration-fast) ease;
 }
 .downloadLink:hover { opacity: 0.8; }
+
+.scriptDiffDialog {
+  max-width: min(860px, calc(100vw - 48px));
+  max-height: min(80vh, 760px);
+  overflow: auto;
+}
 
 .sectionHeader {
   display: flex;
