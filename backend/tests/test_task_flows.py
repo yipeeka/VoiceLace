@@ -241,6 +241,18 @@ class TaskFlowTest(unittest.TestCase):
             self.assertEqual(subtitle_resp.status_code, 200)
             self.assertIn("text/plain", subtitle_resp.headers.get("content-type", ""))
 
+            extended_script_resp = self.client.get(
+                f"/api/v1/tts/export/extended?project_id={project_id}&kind=script&format=json"
+            )
+            self.assertEqual(extended_script_resp.status_code, 200)
+            self.assertIn("application/json", extended_script_resp.headers.get("content-type", ""))
+
+            extended_csv_resp = self.client.get(
+                f"/api/v1/tts/export/extended?project_id={project_id}&kind=timestamp_manifest&format=csv"
+            )
+            self.assertEqual(extended_csv_resp.status_code, 200)
+            self.assertIn("text/csv", extended_csv_resp.headers.get("content-type", ""))
+
             archive_resp = self.client.get(f"/api/v1/tts/export/{project_id}/archive")
             self.assertEqual(archive_resp.status_code, 200)
             self.assertIn("application/zip", archive_resp.headers.get("content-type", ""))

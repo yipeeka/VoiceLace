@@ -7,8 +7,8 @@ import CharacterBadge from "../shared/CharacterBadge";
 import AudioPlayer from "../shared/AudioPlayer";
 import Button from "../ui/Button";
 
-const STATUS_ICON = { done: "✅", running: "⏳", pending: "⬜", error: "❌", skipped: "⏭", stale: "🟨", missing: "⚠" };
-const STATUS_ROW_CLS = { done: "done", running: "running", pending: "pending", error: "error", stale: "stale", missing: "missing" };
+const STATUS_ICON = { done: "✅", running: "⏳", pending: "⬜", error: "❌", skipped: "⏭", stale: "🟨", missing: "⚠", failed: "❌" };
+const STATUS_ROW_CLS = { done: "done", running: "running", pending: "pending", error: "error", stale: "stale", missing: "missing", failed: "error" };
 
 export default function SegmentTimelineRow({
   API_ORIGIN,
@@ -44,7 +44,7 @@ export default function SegmentTimelineRow({
   });
   const segStatus = seg.display_status ?? seg.status ?? "pending";
   const staleTone = staleItem?.status === "ready" ? "success" : "warning";
-  const canPlaySegment = Boolean(seg.audio_url) && segStatus !== "missing";
+  const canPlaySegment = Boolean(seg.audio_url) && segStatus !== "missing" && segStatus !== "failed";
 
   return (
     <div
@@ -104,19 +104,27 @@ export default function SegmentTimelineRow({
           />
         </div>
       ) : (
-        <p
-          className="synthProgressBar"
-          style={{
-            fontSize: 12.5,
-            color: "var(--text-secondary)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            maxWidth: 260,
-          }}
-        >
-          {seg.text}
-        </p>
+        <div style={{ minWidth: 220, maxWidth: 300 }}>
+          <p
+            className="synthProgressBar"
+            style={{
+              fontSize: 12.5,
+              color: "var(--text-secondary)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              maxWidth: 260,
+              marginBottom: seg.error ? 4 : 0,
+            }}
+          >
+            {seg.text}
+          </p>
+          {seg.error ? (
+            <div style={{ fontSize: 11, color: "var(--danger)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {seg.error}
+            </div>
+          ) : null}
+        </div>
       )}
 
       {canPlaySegment && (

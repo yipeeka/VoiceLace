@@ -46,10 +46,13 @@ function formatTimeMs(ms) {
 export default function SynthesisPage() {
   const { currentProject, refreshCurrentProject, importArchive, importWarnings } = useProjectStore();
   const {
-    taskId, status, connectionStatus, modelStatus, lastSyncError, progress, segmentResults, fullAudioUrl, rawAudioUrl, processedAudioUrl,
+    taskId, status, connectionStatus, modelStatus, lastSyncError, progress, queuePosition, failedCount, retryCount,
+    effectiveSegmentConcurrency, queueSnapshot,
+    segmentResults, fullAudioUrl, rawAudioUrl, processedAudioUrl,
     chapterExports, audioVariant, isRunning, error,
     subtitleSrtUrl, subtitleLrcUrl,
-    startSynthesis, startPartialSynthesis, startPostprocess, cancelSynthesis, reset, setAudioVariant,
+    startSynthesis, startPartialSynthesis, startPostprocess, startRetryFailed, startResumeSynthesis, fetchQueueSnapshot,
+    cancelSynthesis, reset, setAudioVariant,
   } = useSynthesisStore();
   const archiveInputRef = useRef(null);
   const lastProjectIdRef = useRef(null);
@@ -69,6 +72,7 @@ export default function SynthesisPage() {
   const [diffPreviewOpen, setDiffPreviewOpen] = useState(false);
   const [isUploadingPostAsset, setIsUploadingPostAsset] = useState(false);
   const [expandedSynthesisPanel, setExpandedSynthesisPanel] = useState("synthesis");
+  const [systemRuntimeStatus, setSystemRuntimeStatus] = useState(null);
   const updatedRowTimerRef = useRef(null);
   const { saveScript, isSaving: isScriptSaving, error: scriptError } = useScriptStore();
   const pushToast = useUiStore.getState().pushToast;
@@ -115,6 +119,9 @@ export default function SynthesisPage() {
       ducking_enabled: false,
       ducking_db: 8,
     },
+    tts_auto_retry: true,
+    tts_retry_attempts: 2,
+    tts_segment_concurrency: 1,
   });
 
   const setConfig = (updater) =>
@@ -192,6 +199,33 @@ export default function SynthesisPage() {
   }, [currentProject?.id, currentProject?.updated_at, status]);
 
   useEffect(() => {
+    let stopped = false;
+    let timer = null;
+    async function pullRuntimeStatus() {
+      try {
+        const [sys, queue] = await Promise.all([api.get("/system/status"), fetchQueueSnapshot()]);
+        if (!stopped) {
+          setSystemRuntimeStatus(sys || null);
+        }
+        if (!stopped) {
+          timer = setTimeout(pullRuntimeStatus, 5000);
+        }
+      } catch {
+        if (!stopped) {
+          timer = setTimeout(pullRuntimeStatus, 7000);
+        }
+      }
+    }
+    pullRuntimeStatus();
+    return () => {
+      stopped = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }, [fetchQueueSnapshot]);
+
+  useEffect(() => {
     if (!currentProject?.id) {
       return;
     }
@@ -247,6 +281,17 @@ export default function SynthesisPage() {
   const staleTargetIds = useMemo(() => {
     return buildStaleTargetIds(staleReport);
   }, [staleReport]);
+
+  const failedAssetBySegmentId = useMemo(() => {
+    const map = {};
+    const failedItems = currentProject?.audio_assets?.failed_segments || [];
+    failedItems.forEach((item) => {
+      if (item?.segment_id) {
+        map[item.segment_id] = item;
+      }
+    });
+    return map;
+  }, [currentProject?.audio_assets?.failed_segments]);
 
   const recommendedRegenerateIds = useMemo(() => {
     return buildRecommendedRegenerateIds(staleReport);
@@ -330,8 +375,9 @@ export default function SynthesisPage() {
     return projectSegments.map((segment, index) => {
       const taskSegment = taskBySegmentId[segment.id];
       const asset = currentProject?.audio_assets?.segments?.[segment.id];
+      const failedAsset = failedAssetBySegmentId[segment.id];
       const staleStatus = staleBySegmentId[segment.id];
-      const baseStatus = taskSegment?.status || (asset ? "done" : "pending");
+      const baseStatus = taskSegment?.status || (failedAsset ? "failed" : asset ? "done" : "pending");
       const displayStatus = resolveSegmentDisplayStatus(baseStatus, staleStatus);
       const segmentAudioBaseUrl = `/api/v1/tts/projects/${projectId}/segments/${segment.id}/audio`;
       const segmentAudioVersion =
@@ -355,9 +401,11 @@ export default function SynthesisPage() {
           : (taskSegment?.audio_url ? `${taskSegment.audio_url}${taskSegment.audio_url.includes("?") ? "&" : "?"}v=${segmentAudioVersion}` : null),
         peaks: taskSegment?.peaks || null,
         peaks_url: `/api/v1/tts/projects/${projectId}/segments/${segment.id}/peaks`,
+        error: failedAsset?.error || taskSegment?.error || "",
+        attempts: Number(failedAsset?.attempts || taskSegment?.attempts || 0),
       };
     });
-  }, [currentProject, draftScript?.segments, segmentResults, staleBySegmentId, unsavedSegmentIds]);
+  }, [currentProject, draftScript?.segments, failedAssetBySegmentId, segmentResults, staleBySegmentId, unsavedSegmentIds]);
 
   const visibleSegments = useMemo(() => {
     const speakerFiltered = filterSegmentsBySpeaker(segments, activeSpeakerFilter);
@@ -365,7 +413,7 @@ export default function SynthesisPage() {
   }, [segments, activeSpeakerFilter, activeStatusFilter]);
 
   const statusCounts = useMemo(() => {
-    const summary = { all: segments.length, stale: 0, missing: 0, done: 0 };
+    const summary = { all: segments.length, stale: 0, missing: 0, done: 0, failed: 0 };
     segments.forEach((segment) => {
       const status = segment.workflow_status || "other";
       if (status in summary) {
@@ -638,7 +686,38 @@ export default function SynthesisPage() {
     if (guardUnsavedChanges("开始合成")) {
       return;
     }
+    if (systemRuntimeStatus?.llm_loaded) {
+      pushToast({ title: "检测到 LLM 已加载，合成前会自动释放以降低显存占用。", tone: "warning" });
+    }
     await startSynthesisTask();
+  }
+
+  async function handleRetryFailed() {
+    if (guardUnsavedChanges("重试失败段")) {
+      return;
+    }
+    if (!currentProject?.id || isRunning) {
+      return;
+    }
+    await startRetryFailed({
+      projectId: currentProject.id,
+      config: buildRuntimeConfig(config),
+    });
+    await refreshCurrentProject(currentProject.id);
+  }
+
+  async function handleResumeSynthesisRun() {
+    if (guardUnsavedChanges("继续合成")) {
+      return;
+    }
+    if (!currentProject?.id || isRunning) {
+      return;
+    }
+    await startResumeSynthesis({
+      projectId: currentProject.id,
+      config: buildRuntimeConfig(config),
+    });
+    await refreshCurrentProject(currentProject.id);
   }
 
   function buildRuntimeConfig(baseConfig) {
@@ -653,6 +732,9 @@ export default function SynthesisPage() {
       fade_in_ms: Number(baseConfig.fade_in_ms),
       fade_out_ms: Number(baseConfig.fade_out_ms),
       mp3_bitrate_kbps: Number(baseConfig.mp3_bitrate_kbps),
+      tts_auto_retry: Boolean(baseConfig.tts_auto_retry ?? true),
+      tts_retry_attempts: Number(baseConfig.tts_retry_attempts ?? 2),
+      tts_segment_concurrency: Number(baseConfig.tts_segment_concurrency ?? 1),
       bgm_track: {
         ...(baseConfig.bgm_track || {}),
         gain_db: Number(baseConfig.bgm_track?.gain_db || 0),
@@ -783,6 +865,12 @@ export default function SynthesisPage() {
           status={status}
           connectionStatus={connectionStatus}
           progress={progress}
+          queuePosition={queuePosition}
+          failedCount={failedCount}
+          retryCount={retryCount}
+          effectiveSegmentConcurrency={effectiveSegmentConcurrency}
+          queueSnapshot={queueSnapshot}
+          runtimeStatus={systemRuntimeStatus}
           totalSegments={totalSegments}
           taskId={taskId}
           lastSyncError={lastSyncError}
@@ -800,6 +888,9 @@ export default function SynthesisPage() {
           importWarnings={importWarnings}
           archiveInputRef={archiveInputRef}
           onImportArchive={handleImportArchive}
+          onRetryFailed={handleRetryFailed}
+          onResume={handleResumeSynthesisRun}
+          onCancelTask={handleCancelSynthesis}
         />
       </div>
 

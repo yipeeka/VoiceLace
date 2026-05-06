@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import asyncio
 from typing import Any
 
 from starlette.requests import HTTPConnection
@@ -24,6 +25,10 @@ class AppState:
     llm_task_handles: dict[str, Any] = field(default_factory=dict)
     tts_task_handles: dict[str, Any] = field(default_factory=dict)
     asr_task_handles: dict[str, Any] = field(default_factory=dict)
+    tts_queue: list[str] = field(default_factory=list)
+    tts_queue_worker: Any = None
+    tts_queue_running_task_id: str | None = None
+    tts_queue_lock: Any = field(init=False)
     orchestrator: ModelOrchestrator = field(init=False)
     voice_manager: VoiceManager = field(init=False)
     realtime: RealtimeHub = field(init=False)
@@ -43,6 +48,7 @@ class AppState:
         self.asr_engine.pyannote_auth_token = loaded_config.pyannote_auth_token
         self.asr_engine.pyannote_device = loaded_config.pyannote_device
         self.voice_manager = VoiceManager(self.settings.voices_dir)
+        self.tts_queue_lock = asyncio.Lock()
 
         async def _broadcast_system_event(event: dict) -> None:
             await self.realtime.publish("system", "events", event)

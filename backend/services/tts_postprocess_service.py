@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import shutil
@@ -20,6 +21,7 @@ from .tts_path_service import (
     to_output_relpath,
 )
 from .tts_runtime_service import emit_task_event
+from .tts_task_service import public_task
 
 
 def _build_segment_inputs(*, project, output_dir: Path) -> list[dict]:
@@ -552,6 +554,7 @@ async def run_postprocess_task(*, task_id: str, payload: PostprocessRequest, sta
             for item in chapter_exports
         ]
         task["progress"] = {"current": len(stages), "total": len(stages)}
+        task["finished_at"] = datetime.now(timezone.utc).isoformat()
         await emit_task_event(state=state, task=task, task_id=task_id, message={"type": "progress", "current": len(stages), "total": len(stages)})
         await emit_task_event(
             state=state,
@@ -559,28 +562,12 @@ async def run_postprocess_task(*, task_id: str, payload: PostprocessRequest, sta
             task_id=task_id,
             message={
                 "type": "complete",
-                "data": {
-                    "task_id": task_id,
-                    "kind": "postprocess",
-                    "status": "done",
-                    "segments": {},
-                    "project_id": project.id,
-                    "progress": task["progress"],
-                    "export_url": task["export_url"],
-                    "processed_export_url": task["processed_export_url"],
-                    "chapter_exports": task["chapter_exports"],
-                    "subtitle_srt_url": "",
-                    "subtitle_lrc_url": "",
-                    "scope": "postprocess",
-                    "target_segment_ids": [],
-                    "generated_count": 0,
-                    "reused_count": 0,
-                    "error": "",
-                },
+                "data": public_task(task),
             },
         )
     except asyncio.CancelledError:
         task["status"] = "canceled"
+        task["finished_at"] = datetime.now(timezone.utc).isoformat()
         await emit_task_event(
             state=state,
             task=task,
@@ -592,6 +579,7 @@ async def run_postprocess_task(*, task_id: str, payload: PostprocessRequest, sta
         logger.exception("postprocess task failed task_id=%s", task_id)
         task["status"] = "error"
         task["error"] = str(exc)
+        task["finished_at"] = datetime.now(timezone.utc).isoformat()
         await emit_task_event(
             state=state,
             task=task,

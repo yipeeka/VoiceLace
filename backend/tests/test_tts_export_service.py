@@ -79,12 +79,17 @@ class TtsExportServiceTest(unittest.TestCase):
                 self.assertIn("voices/presets.json", names)
                 self.assertIn("voices/ref/ref.wav", names)
                 self.assertIn("manifest.json", names)
+                self.assertIn("exports/script.json", names)
+                self.assertIn("exports/script.csv", names)
+                self.assertIn("exports/timestamp_manifest.json", names)
+                self.assertIn("exports/premiere_markers.csv", names)
 
                 manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
                 self.assertEqual(manifest["latest_tts_task_id"], "task-new")
                 self.assertEqual(manifest["segment_count"], 1)
                 self.assertEqual(manifest["preset_count"], 1)
                 self.assertTrue(manifest["has_reference_audio"])
+                self.assertIn("extended_export_files", manifest)
 
 
 if __name__ == "__main__":

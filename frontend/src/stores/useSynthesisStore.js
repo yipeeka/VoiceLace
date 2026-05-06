@@ -14,6 +14,8 @@ const buildSegmentResult = (msg) => ({
   status: msg.status,
   duration_ms: msg.duration_ms,
   audio_url: msg.audio_url,
+  error: msg.error || "",
+  attempts: Number(msg.attempts || 0),
   peaks: msg.peaks || null,
 });
 
@@ -47,6 +49,10 @@ const runSynthesisFlow = async ({
     lastSyncError: "",
     error: "",
     progress: { current: 0, total: 0 },
+    queuePosition: 0,
+    failedCount: 0,
+    retryCount: 0,
+    effectiveSegmentConcurrency: 1,
   };
   if (resetAudioUrls) {
     startupState.fullAudioUrl = null;
@@ -65,6 +71,7 @@ const runSynthesisFlow = async ({
 
     const completeWithResult = (result) => {
       const resolvedKind = result.kind || taskKind || "synthesis";
+      const resolvedStatus = result.status || "done";
       const exportPath =
         result.processed_export_url ||
         result.export_url ||
@@ -73,10 +80,14 @@ const runSynthesisFlow = async ({
       set((state) => ({
         isRunning: false,
         taskKind: resolvedKind,
-        status: "done",
+        status: resolvedStatus,
         modelStatus: "",
         lastSyncError: "",
         progress: result.progress || { current: 0, total: 0 },
+        queuePosition: Number(result.queue_position || 0),
+        failedCount: Number(result.failed_count || 0),
+        retryCount: Number(result.retry_count || 0),
+        effectiveSegmentConcurrency: Number(result.effective_segment_concurrency || 1),
         segmentResults: mergeSegmentResults
           ? {
               ...state.segmentResults,
@@ -92,7 +103,10 @@ const runSynthesisFlow = async ({
         subtitleSrtUrl: result.subtitle_srt_url ? `${API_ORIGIN}${result.subtitle_srt_url}` : null,
         subtitleLrcUrl: result.subtitle_lrc_url ? `${API_ORIGIN}${result.subtitle_lrc_url}` : null,
       }));
-      useUiStore.getState().pushToast({ title: completeToastTitle(result), tone: "success" });
+      useUiStore.getState().pushToast({
+        title: completeToastTitle(result),
+        tone: resolvedStatus === "partial_failed" ? "warning" : "success",
+      });
       return result;
     };
 
@@ -134,7 +148,7 @@ const runSynthesisFlow = async ({
       syncTaskState: async ({ done, fail }) => {
         try {
           const state = await api.get(`${statusEndpoint}/${taskId}`);
-          if (state?.status === "done") {
+          if (state?.status === "done" || state?.status === "partial_failed") {
             done(completeWithResult(state));
             return true;
           }
@@ -157,6 +171,10 @@ const runSynthesisFlow = async ({
             modelStatus: "任务状态同步中",
             lastSyncError: "",
             progress: state?.progress || { current: 0, total: 0 },
+            queuePosition: Number(state?.queue_position || 0),
+            failedCount: Number(state?.failed_count || 0),
+            retryCount: Number(state?.retry_count || 0),
+            effectiveSegmentConcurrency: Number(state?.effective_segment_concurrency || 1),
           });
           return false;
         } catch (error) {
@@ -182,7 +200,8 @@ const runSynthesisFlow = async ({
             }
             set({
               status: msg.status,
-              modelStatus: `任务状态：${msg.status}`,
+              modelStatus: msg.status === "queued" ? "任务排队中" : `任务状态：${msg.status}`,
+              queuePosition: Number(msg.queue_position || 0),
             });
             break;
           case "cancel_requested":
@@ -227,12 +246,33 @@ const runSynthesisFlow = async ({
               },
             }));
             break;
+          case "segment_failed":
+            set((state) => ({
+              segmentResults: {
+                ...state.segmentResults,
+                [msg.segment_id]: {
+                  segment_id: msg.segment_id,
+                  index: msg.index,
+                  speaker: msg.speaker,
+                  text: msg.text,
+                  status: "failed",
+                  duration_ms: 0,
+                  audio_url: null,
+                  error: msg.error || "",
+                  attempts: Number(msg.attempts || 0),
+                },
+              },
+              failedCount: Number((state.failedCount || 0) + 1),
+            }));
+            break;
           case "progress":
             set({
               progress: {
                 current: msg.current || 0,
                 total: msg.total || 0,
               },
+              failedCount: Number(msg.failed_count || useSynthesisStore.getState().failedCount || 0),
+              retryCount: Number(msg.retry_count || useSynthesisStore.getState().retryCount || 0),
             });
             break;
           case "complete":
@@ -275,6 +315,11 @@ export const useSynthesisStore = create((set) => ({
   modelStatus: "",
   lastSyncError: "",
   progress: { current: 0, total: 0 },
+  queuePosition: 0,
+  failedCount: 0,
+  retryCount: 0,
+  effectiveSegmentConcurrency: 1,
+  queueSnapshot: { running: null, queued: [], queued_count: 0 },
   segmentResults: {},
   fullAudioUrl: null,
   rawAudioUrl: null,
@@ -327,6 +372,9 @@ export const useSynthesisStore = create((set) => ({
       ducking_enabled: false,
       ducking_db: 8,
     },
+    tts_auto_retry: true,
+    tts_retry_attempts: 2,
+    tts_segment_concurrency: 1,
   },
   startSynthesis: async ({ projectId, config }) => {
     return await runSynthesisFlow({
@@ -351,7 +399,10 @@ export const useSynthesisStore = create((set) => ({
       cancelRequestedMessage: "正在取消合成任务...",
       canceledMessage: "合成任务已取消",
       failureMessage: "合成失败",
-      completeToastTitle: (result) => `合成完成，共 ${result.progress?.total || 0} 段`,
+      completeToastTitle: (result) =>
+        result.status === "partial_failed"
+          ? `合成部分完成，失败 ${result.failed_count || 0} 段`
+          : `合成完成，共 ${result.progress?.total || 0} 段`,
     });
   },
   startPartialSynthesis: async ({ projectId, config, segmentIds, rebuildFull = true }) => {
@@ -383,7 +434,9 @@ export const useSynthesisStore = create((set) => ({
       canceledMessage: "局部合成任务已取消",
       failureMessage: "局部合成失败",
       completeToastTitle: (result) =>
-        `重新生成完成，重建 ${result.generated_count || 0} 段，复用 ${result.reused_count || 0} 段`,
+        result.status === "partial_failed"
+          ? `局部重生成部分完成，失败 ${result.failed_count || 0} 段`
+          : `重新生成完成，重建 ${result.generated_count || 0} 段，复用 ${result.reused_count || 0} 段`,
     });
   },
   startPostprocess: async ({ projectId, config }) => {
@@ -411,6 +464,63 @@ export const useSynthesisStore = create((set) => ({
       failureMessage: "后处理失败",
       completeToastTitle: () => "后处理完成",
     });
+  },
+  startRetryFailed: async ({ projectId, config }) => {
+    return await runSynthesisFlow({
+      set,
+      projectId,
+      config,
+      taskKind: "synthesis",
+      endpoint: `/tts/projects/${projectId}/retry-failed`,
+      statusEndpoint: "/tts/synthesize",
+      payload: {},
+      resetSegmentResults: false,
+      mergeSegmentResults: true,
+      resetAudioUrls: false,
+      queueMessage: "失败段重试任务已创建，等待执行",
+      segmentVerb: "重试",
+      exhaustedMessage: "失败段重试连接已关闭（重连失败）",
+      timeoutMessage: "失败段重试任务等待超时",
+      syncErrorMessage: "失败段重试状态同步失败",
+      cancelRequestedMessage: "正在取消失败段重试任务...",
+      canceledMessage: "失败段重试任务已取消",
+      failureMessage: "失败段重试失败",
+      completeToastTitle: (result) =>
+        result.status === "partial_failed"
+          ? `失败段重试后仍有 ${result.failed_count || 0} 段失败`
+          : "失败段重试完成",
+    });
+  },
+  startResumeSynthesis: async ({ projectId, config }) => {
+    return await runSynthesisFlow({
+      set,
+      projectId,
+      config,
+      taskKind: "synthesis",
+      endpoint: `/tts/projects/${projectId}/resume`,
+      statusEndpoint: "/tts/synthesize",
+      payload: {},
+      resetSegmentResults: false,
+      mergeSegmentResults: true,
+      resetAudioUrls: false,
+      queueMessage: "续跑任务已创建，等待执行",
+      segmentVerb: "续跑",
+      exhaustedMessage: "续跑连接已关闭（重连失败）",
+      timeoutMessage: "续跑任务等待超时",
+      syncErrorMessage: "续跑状态同步失败",
+      cancelRequestedMessage: "正在取消续跑任务...",
+      canceledMessage: "续跑任务已取消",
+      failureMessage: "续跑失败",
+      completeToastTitle: (result) =>
+        result.status === "partial_failed"
+          ? `续跑部分完成，仍有 ${result.failed_count || 0} 段失败`
+          : "续跑完成",
+    });
+  },
+  fetchQueueSnapshot: async () => {
+    const payload = await api.get("/tts/queue");
+    set({ queueSnapshot: payload || { running: null, queued: [], queued_count: 0 } });
+    return payload;
   },
   cancelSynthesis: async () => {
     const taskId = useSynthesisStore.getState().taskId;
@@ -475,11 +585,11 @@ export const useSynthesisStore = create((set) => ({
             modelStatus: `${taskLabel}已取消`,
             lastSyncError: "",
           });
-        } else if (synced?.status === "done") {
+        } else if (synced?.status === "done" || synced?.status === "partial_failed") {
           set({
             isRunning: false,
-            status: "done",
-            modelStatus: "任务已完成",
+            status: synced?.status,
+            modelStatus: synced?.status === "partial_failed" ? "任务部分完成" : "任务已完成",
             lastSyncError: "",
           });
         } else if (synced?.status === "error") {
@@ -506,6 +616,11 @@ export const useSynthesisStore = create((set) => ({
       modelStatus: "",
       lastSyncError: "",
       progress: { current: 0, total: 0 },
+      queuePosition: 0,
+      failedCount: 0,
+      retryCount: 0,
+      effectiveSegmentConcurrency: 1,
+      queueSnapshot: { running: null, queued: [], queued_count: 0 },
       segmentResults: {},
       fullAudioUrl: null,
       rawAudioUrl: null,

@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .tts_extended_export_service import build_all_extended_export_files
+
 
 def _from_output_relpath(output_dir: Path, relpath: str | None) -> Path | None:
     if not relpath:
@@ -86,6 +88,13 @@ def write_project_archive(
         segment_count=len(segment_assets),
         used_presets=used_presets,
     )
+    default_variant = "processed" if (
+        project.audio_assets.processed.full_wav_relpath or project.audio_assets.processed.full_mp3_relpath
+    ) else "raw"
+    extended_exports = build_all_extended_export_files(output_dir=output_dir, project=project, variant=default_variant)
+    archive_exports = [path for path in extended_exports if path.exists()]
+    manifest["extended_export_files"] = [path.name for path in archive_exports]
+    manifest["extended_export_variant"] = default_variant
 
     with zipfile.ZipFile(archive_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
         for path in audio_candidates:
@@ -129,6 +138,9 @@ def write_project_archive(
             segment_peaks_path = _from_output_relpath(output_dir, asset.peaks_relpath)
             if segment_peaks_path and segment_peaks_path.exists():
                 zf.write(segment_peaks_path, arcname=f"waveforms/segments/{asset.segment_id}.peaks.json")
+
+        for export_file in archive_exports:
+            zf.write(export_file, arcname=f"exports/{export_file.name}")
 
         if project_json_path.exists():
             zf.write(project_json_path, arcname="project/project.json")

@@ -68,5 +68,12 @@ def public_task(task: dict) -> dict:
         "target_segment_ids": task.get("target_segment_ids", []),
         "generated_count": task.get("generated_count", 0),
         "reused_count": task.get("reused_count", 0),
+        "queue_position": int(task.get("queue_position", 0) or 0),
+        "queued_at": task.get("queued_at", ""),
+        "started_at": task.get("started_at", ""),
+        "finished_at": task.get("finished_at", ""),
+        "failed_count": int(task.get("failed_count", 0) or 0),
+        "retry_count": int(task.get("retry_count", 0) or 0),
+        "effective_segment_concurrency": int(task.get("effective_segment_concurrency", 1) or 1),
         "error": task["error"],
     }

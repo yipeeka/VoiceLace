@@ -38,6 +38,9 @@ export function buildRecommendedRegenerateIds(report) {
 }
 
 export function resolveSegmentDisplayStatus(baseStatus, staleStatus) {
+  if ((baseStatus || "").toLowerCase() === "failed") {
+    return "failed";
+  }
   if (staleStatus === "missing" || staleStatus === "stale") {
     return staleStatus;
   }
@@ -46,6 +49,7 @@ export function resolveSegmentDisplayStatus(baseStatus, staleStatus) {
 
 export function resolveWorkflowStatus(displayStatus) {
   const value = (displayStatus || "").toLowerCase();
+  if (value === "failed") return "failed";
   if (value === "missing") return "missing";
   if (value === "stale") return "stale";
   if (value === "done") return "done";

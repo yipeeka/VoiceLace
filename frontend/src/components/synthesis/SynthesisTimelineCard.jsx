@@ -96,6 +96,13 @@ export default function SynthesisTimelineCard({
         >
           缺音频 {statusCounts?.missing ?? 0}
         </Button>
+        <Button
+          variant={activeStatusFilter === "failed" ? "primary" : "ghost"}
+          size="sm"
+          onClick={() => onStatusFilterChange("failed")}
+        >
+          失败 {statusCounts?.failed ?? 0}
+        </Button>
       </div>
       {selectedSegmentIds.length ? (
         <div className="controlRow" style={{ marginBottom: 10 }}>

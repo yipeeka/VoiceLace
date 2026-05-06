@@ -190,6 +190,45 @@ export function SynthesisGenerateCard({
                 ]}
               />
             </div>
+            <div className="formGroup">
+              <label className="formLabel">自动重试</label>
+              <label className="controlRow" style={{ cursor: "pointer", padding: "8px 12px", background: "var(--bg-elevated)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-default)" }}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(config.tts_auto_retry ?? true)}
+                  onChange={(e) => onSetConfig({ tts_auto_retry: e.target.checked })}
+                  style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
+                />
+                <span style={{ fontSize: 13.5, color: "var(--text-secondary)" }}>失败段自动重试</span>
+              </label>
+            </div>
+          </div>
+
+          <div className="editorGrid">
+            <div className="formGroup">
+              <label className="formLabel">重试次数</label>
+              <Select
+                value={String(config.tts_retry_attempts ?? 2)}
+                onValueChange={(value) => onSetConfig({ tts_retry_attempts: Number(value) })}
+                options={[
+                  { value: "0", label: "0 次" },
+                  { value: "1", label: "1 次" },
+                  { value: "2", label: "2 次" },
+                  { value: "3", label: "3 次" },
+                ]}
+              />
+            </div>
+            <div className="formGroup">
+              <label className="formLabel">段落并发</label>
+              <Select
+                value={String(config.tts_segment_concurrency ?? 1)}
+                onValueChange={(value) => onSetConfig({ tts_segment_concurrency: Number(value) })}
+                options={[
+                  { value: "1", label: "1（稳定）" },
+                  { value: "2", label: "2（实验）" },
+                ]}
+              />
+            </div>
           </div>
 
           <div className="controlRow">

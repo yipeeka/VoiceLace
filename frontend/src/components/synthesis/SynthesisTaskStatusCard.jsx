@@ -12,6 +12,12 @@ export default function SynthesisTaskStatusCard({
   status,
   connectionStatus,
   progress,
+  queuePosition = 0,
+  failedCount = 0,
+  retryCount = 0,
+  effectiveSegmentConcurrency = 1,
+  queueSnapshot,
+  runtimeStatus,
   totalSegments,
   taskId,
   lastSyncError,
@@ -29,8 +35,21 @@ export default function SynthesisTaskStatusCard({
   importWarnings,
   archiveInputRef,
   onImportArchive,
+  onRetryFailed,
+  onResume,
+  onCancelTask,
 }) {
   const normalizedChapterExports = Array.isArray(chapterExports) ? chapterExports : [];
+  const gpu = runtimeStatus?.gpu || {};
+  const queuedCount = Number(queueSnapshot?.queued_count || 0);
+  const canResume = !isRunning && (failedCount > 0 || staleReport?.missing_count > 0 || staleReport?.stale_count > 0);
+  const canRetryFailed = !isRunning && failedCount > 0;
+  const canCancelQueued = status === "queued" || status === "cancel_requested" || isRunning;
+  const projectId = currentProject?.id || "";
+  const hasProject = Boolean(projectId);
+  const buildExtendedUrl = (kind, format = "json", profile = "podcast") => (
+    `${API_ORIGIN}/api/v1/tts/export/extended?project_id=${projectId}&kind=${encodeURIComponent(kind)}&format=${encodeURIComponent(format)}&variant=${encodeURIComponent(audioVariant || "raw")}&profile=${encodeURIComponent(profile)}`
+  );
   return (
     <GlassCard>
       <h2 className="cardTitle">任务状态</h2>
@@ -56,6 +75,34 @@ export default function SynthesisTaskStatusCard({
           </strong>
         </div>
         <div className="statRow">
+          <span>排队位次</span>
+          <strong>{queuePosition > 0 ? `#${queuePosition}` : "运行中/空闲"}</strong>
+        </div>
+        <div className="statRow">
+          <span>队列长度</span>
+          <strong>{queuedCount}</strong>
+        </div>
+        <div className="statRow">
+          <span>失败段</span>
+          <strong>{failedCount}</strong>
+        </div>
+        <div className="statRow">
+          <span>重试次数</span>
+          <strong>{retryCount}</strong>
+        </div>
+        <div className="statRow">
+          <span>段并发</span>
+          <strong>{effectiveSegmentConcurrency}</strong>
+        </div>
+        <div className="statRow">
+          <span>模型</span>
+          <strong>TTS {runtimeStatus?.tts_loaded ? "已加载" : "未加载"} / LLM {runtimeStatus?.llm_loaded ? "已加载" : "未加载"}</strong>
+        </div>
+        <div className="statRow">
+          <span>显存</span>
+          <strong>{gpu.used_vram_mb ?? 0} / {gpu.total_vram_mb ?? 0} MB</strong>
+        </div>
+        <div className="statRow">
           <span>Task ID</span>
           <strong style={{ fontFamily: "monospace", fontSize: 11 }}>{taskId || "—"}</strong>
         </div>
@@ -64,6 +111,17 @@ export default function SynthesisTaskStatusCard({
       {(isRunning || status !== "idle") && (
         <Progress value={progressPct} color={status === "done" ? "success" : status === "error" ? "danger" : "primary"} />
       )}
+      <div className="controlRow" style={{ marginTop: 8, gap: 8, flexWrap: "wrap" }}>
+        <Button variant="secondary" size="sm" disabled={!canResume} onClick={onResume}>
+          继续合成
+        </Button>
+        <Button variant="secondary" size="sm" disabled={!canRetryFailed} onClick={onRetryFailed}>
+          只重试失败段
+        </Button>
+        <Button variant="danger" size="sm" disabled={!canCancelQueued} onClick={onCancelTask}>
+          {status === "queued" ? "取消排队" : "停止任务"}
+        </Button>
+      </div>
       {fullAudioUrl && (
         <div style={{ display: "flex", gap: 10, marginTop: 4, flexWrap: "wrap" }}>
           <a className="downloadLink" href={fullAudioUrl} target="_blank" rel="noreferrer">
@@ -102,6 +160,29 @@ export default function SynthesisTaskStatusCard({
           ) : null}
         </div>
       )}
+      {hasProject ? (
+        <details className="listStack" style={{ marginTop: 8 }}>
+          <summary className="statRow" style={{ cursor: "pointer", listStyle: "none" }}>
+            <span>扩展导出</span>
+            <strong style={{ fontFamily: "monospace", fontSize: 11 }}>
+              {audioVariant === "processed" ? "processed" : "raw"}
+            </strong>
+          </summary>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+            <a className="downloadLink" href={buildExtendedUrl("script", "json")} target="_blank" rel="noreferrer">剧本 JSON</a>
+            <a className="downloadLink" href={buildExtendedUrl("script", "csv")} target="_blank" rel="noreferrer">剧本 CSV</a>
+            <a className="downloadLink" href={buildExtendedUrl("timestamp_manifest", "json")} target="_blank" rel="noreferrer">时间戳 JSON</a>
+            <a className="downloadLink" href={buildExtendedUrl("timestamp_manifest", "csv")} target="_blank" rel="noreferrer">时间戳 CSV</a>
+            <a className="downloadLink" href={buildExtendedUrl("chapters", "json")} target="_blank" rel="noreferrer">章节清单 JSON</a>
+            <a className="downloadLink" href={buildExtendedUrl("chapters", "csv")} target="_blank" rel="noreferrer">章节清单 CSV</a>
+            <a className="downloadLink" href={buildExtendedUrl("metadata", "json", "podcast")} target="_blank" rel="noreferrer">播客元数据</a>
+            <a className="downloadLink" href={buildExtendedUrl("metadata", "json", "audible")} target="_blank" rel="noreferrer">Audible 元数据</a>
+            <a className="downloadLink" href={buildExtendedUrl("ffmetadata", "txt")} target="_blank" rel="noreferrer">FFMetadata</a>
+            <a className="downloadLink" href={buildExtendedUrl("capcut", "csv")} target="_blank" rel="noreferrer">剪映 CSV</a>
+            <a className="downloadLink" href={buildExtendedUrl("premiere_markers", "csv")} target="_blank" rel="noreferrer">PR 标记 CSV</a>
+          </div>
+        </details>
+      ) : null}
       <div className="controlRow" style={{ marginTop: 8, gap: 8, flexWrap: "wrap" }}>
         <Button
           variant={audioVariant === "raw" ? "primary" : "secondary"}
