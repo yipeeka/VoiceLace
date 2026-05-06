@@ -9,6 +9,7 @@ import { SynthesisGenerateCard, SynthesisPostprocessCard } from "../components/s
 import SynthesisTaskStatusCard from "../components/synthesis/SynthesisTaskStatusCard";
 import SynthesisFullAudioCard from "../components/synthesis/SynthesisFullAudioCard";
 import SynthesisTimelineCard from "../components/synthesis/SynthesisTimelineCard";
+import ExportWizardDialog from "../components/synthesis/ExportWizardDialog";
 import { usePlaybackQueue } from "../hooks/usePlaybackQueue";
 import { useSynthesisActions } from "../hooks/useSynthesisActions";
 import { useProjectStore } from "../stores/useProjectStore";
@@ -73,6 +74,7 @@ export default function SynthesisPage() {
   const [isUploadingPostAsset, setIsUploadingPostAsset] = useState(false);
   const [expandedSynthesisPanel, setExpandedSynthesisPanel] = useState("synthesis");
   const [systemRuntimeStatus, setSystemRuntimeStatus] = useState(null);
+  const [exportWizardOpen, setExportWizardOpen] = useState(false);
   const updatedRowTimerRef = useRef(null);
   const { saveScript, isSaving: isScriptSaving, error: scriptError } = useScriptStore();
   const pushToast = useUiStore.getState().pushToast;
@@ -891,6 +893,7 @@ export default function SynthesisPage() {
           onRetryFailed={handleRetryFailed}
           onResume={handleResumeSynthesisRun}
           onCancelTask={handleCancelSynthesis}
+          onOpenExportWizard={() => setExportWizardOpen(true)}
         />
       </div>
 
@@ -979,6 +982,13 @@ export default function SynthesisPage() {
         />
       </div>
       <ScriptDiffPreviewDialog open={diffPreviewOpen} onOpenChange={setDiffPreviewOpen} diff={scriptDiff} />
+      <ExportWizardDialog
+        open={exportWizardOpen}
+        onOpenChange={setExportWizardOpen}
+        API_ORIGIN={API_ORIGIN}
+        currentProject={currentProject}
+        audioVariant={audioVariant}
+      />
     </div>
   );
 }

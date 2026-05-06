@@ -39,6 +39,7 @@ from backend.services import (
     segment_cache_key,
     should_log_stale_report,
     write_project_archive,
+    build_wizard_export_bundle,
     write_extended_export_file,
 )
 from backend.state import get_app_state
@@ -477,6 +478,38 @@ async def export_extended(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return FileResponse(output, media_type=media_type, filename=output.name)
+
+
+@router.get("/export/wizard")
+async def export_wizard_bundle(
+    project_id: str = Query(...),
+    preset: str = Query("audiobook", description="audiobook|editing|data|backup"),
+    variant: str = Query("raw"),
+    state=Depends(get_app_state),
+):
+    normalized_preset = (preset or "audiobook").strip().lower()
+    if normalized_preset in {"backup", "archive"}:
+        archive_path, _, _ = export_project_archive(
+            output_dir=state.settings.output_dir,
+            projects_dir=state.settings.projects_dir,
+            project_id=project_id,
+            list_presets=state.voice_manager.list_presets,
+            write_project_archive=write_project_archive,
+        )
+        return FileResponse(archive_path, media_type="application/zip", filename=archive_path.name)
+
+    project = load_project(state.settings.projects_dir, project_id)
+    try:
+        bundle_path, _ = build_wizard_export_bundle(
+            output_dir=state.settings.output_dir,
+            project=project,
+            preset=normalized_preset,
+            variant=variant,
+            write_extended_export_file=write_extended_export_file,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return FileResponse(bundle_path, media_type="application/zip", filename=bundle_path.name)
 
 
 @router.get("/export/chapter")

@@ -38,6 +38,7 @@ export default function SynthesisTaskStatusCard({
   onRetryFailed,
   onResume,
   onCancelTask,
+  onOpenExportWizard,
 }) {
   const normalizedChapterExports = Array.isArray(chapterExports) ? chapterExports : [];
   const gpu = runtimeStatus?.gpu || {};
@@ -59,50 +60,50 @@ export default function SynthesisTaskStatusCard({
           {staleSummary.missing} 段
         </div>
       ) : null}
-      <div className="listStack">
-        <div className="statRow">
+      <div className="taskStatusGrid">
+        <div className="statRow taskStatusCell">
           <span>状态</span>
           <strong>{modelStatus || status}</strong>
         </div>
-        <div className="statRow">
+        <div className="statRow taskStatusCell">
           <span>连接</span>
           <strong>{connectionStatus}</strong>
         </div>
-        <div className="statRow">
+        <div className="statRow taskStatusCell">
           <span>进度</span>
           <strong style={{ fontFamily: "monospace" }}>
             {progress.current}&thinsp;/&thinsp;{progress.total || totalSegments}
           </strong>
         </div>
-        <div className="statRow">
+        <div className="statRow taskStatusCell">
           <span>排队位次</span>
           <strong>{queuePosition > 0 ? `#${queuePosition}` : "运行中/空闲"}</strong>
         </div>
-        <div className="statRow">
+        <div className="statRow taskStatusCell">
           <span>队列长度</span>
           <strong>{queuedCount}</strong>
         </div>
-        <div className="statRow">
+        <div className="statRow taskStatusCell">
           <span>失败段</span>
           <strong>{failedCount}</strong>
         </div>
-        <div className="statRow">
+        <div className="statRow taskStatusCell">
           <span>重试次数</span>
           <strong>{retryCount}</strong>
         </div>
-        <div className="statRow">
+        <div className="statRow taskStatusCell">
           <span>段并发</span>
           <strong>{effectiveSegmentConcurrency}</strong>
         </div>
-        <div className="statRow">
+        <div className="statRow taskStatusCell taskStatusCellWide">
           <span>模型</span>
           <strong>TTS {runtimeStatus?.tts_loaded ? "已加载" : "未加载"} / LLM {runtimeStatus?.llm_loaded ? "已加载" : "未加载"}</strong>
         </div>
-        <div className="statRow">
+        <div className="statRow taskStatusCell">
           <span>显存</span>
           <strong>{gpu.used_vram_mb ?? 0} / {gpu.total_vram_mb ?? 0} MB</strong>
         </div>
-        <div className="statRow">
+        <div className="statRow taskStatusCell taskStatusCellWide">
           <span>Task ID</span>
           <strong style={{ fontFamily: "monospace", fontSize: 11 }}>{taskId || "—"}</strong>
         </div>
@@ -225,6 +226,15 @@ export default function SynthesisTaskStatusCard({
         </div>
       ) : null}
       <div className="controlRow" style={{ marginTop: 10 }}>
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={Download}
+          disabled={!hasProject}
+          onClick={onOpenExportWizard}
+        >
+          导出向导
+        </Button>
         <Button variant="secondary" size="sm" icon={Upload} onClick={() => archiveInputRef.current?.click()}>
           导入工程 ZIP
         </Button>

@@ -57,6 +57,7 @@ from .tts_path_service import (
 )
 from .tts_export_service import build_archive_manifest, write_project_archive
 from .tts_extended_export_service import build_all_extended_export_files, write_extended_export_file
+from .tts_wizard_export_service import build_wizard_export_bundle
 from .tts_finalize_service import (
     finalize_rebuild_full,
     resolve_partial_final_format,
@@ -139,6 +140,7 @@ __all__ = [
     "write_project_archive",
     "build_all_extended_export_files",
     "write_extended_export_file",
+    "build_wizard_export_bundle",
     "finalize_rebuild_full",
     "resolve_partial_final_format",
     "timeline_from_segment_results",

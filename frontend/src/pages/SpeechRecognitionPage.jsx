@@ -1,13 +1,22 @@
-import { FolderPlus, Languages, Mic, Square, Upload, WandSparkles } from "lucide-react";
+import { FolderPlus, Languages, Mic, Square, Trash2, Upload, WandSparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import GlassCard from "../components/shared/GlassCard";
+import ProjectToolbarCard from "../components/text/ProjectToolbarCard";
 import Button from "../components/ui/Button";
 import { useProjectStore } from "../stores/useProjectStore";
 import { useScriptStore } from "../stores/useScriptStore";
 import { useSpeechRecognitionStore } from "../stores/useSpeechRecognitionStore";
 import { useUiStore } from "../stores/useUiStore";
 import { API_BASE_URL, getWsBaseUrl } from "../utils/api";
+import { openProjectFileWithPicker } from "../utils/projectFile";
+import {
+  buildProjectOption,
+  getProjectSourceTag,
+  getSameNameSiblingProjects,
+  shortProjectId,
+  toProjectFileDisplayName,
+} from "../utils/projectToolbar";
 import { runTaskChannel } from "../utils/taskChannel";
 import { appendSpeechText, replaceSpeechText } from "../utils/speechText";
 
@@ -16,12 +25,16 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [pendingAudio, setPendingAudio] = useState(null);
+  const [newProjectName, setNewProjectName] = useState("");
+  const [renameProjectName, setRenameProjectName] = useState("");
   const [projectName, setProjectName] = useState("");
   const [projectTask, setProjectTask] = useState({ status: "", failedChunks: [], warnings: [], chunkProgress: null, parseTaskId: "" });
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
   const abortRef = useRef(null);
   const translateAbortRef = useRef(null);
+  const archiveInputRef = useRef(null);
+  const projectFileInputRef = useRef(null);
   const speakerLabels = useSpeechRecognitionStore((state) => state.speakerLabels);
   const setSpeakerLabels = useSpeechRecognitionStore((state) => state.setSpeakerLabels);
   const transcript = useSpeechRecognitionStore((state) => state.transcript);
@@ -55,7 +68,18 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const setTranslationEngineStatus = useSpeechRecognitionStore((state) => state.setTranslationEngineStatus);
   const clearTranslationResult = useSpeechRecognitionStore((state) => state.clearTranslationResult);
   const clearResult = useSpeechRecognitionStore((state) => state.clearResult);
+  const currentProject = useProjectStore((state) => state.currentProject);
+  const currentProjectFileName = useProjectStore((state) => state.currentProjectFileName);
+  const projects = useProjectStore((state) => state.projects);
+  const projectSources = useProjectStore((state) => state.projectSources);
+  const importWarnings = useProjectStore((state) => state.importWarnings);
+  const createProject = useProjectStore((state) => state.createProject);
+  const renameProject = useProjectStore((state) => state.renameProject);
   const selectProject = useProjectStore((state) => state.selectProject);
+  const deleteProject = useProjectStore((state) => state.deleteProject);
+  const importArchive = useProjectStore((state) => state.importArchive);
+  const importProjectFile = useProjectStore((state) => state.importProjectFile);
+  const loadProjects = useProjectStore((state) => state.loadProjects);
   const loadProjectScript = useScriptStore((state) => state.loadProjectScript);
   const loadProjectParseQc = useProjectStore((state) => state.loadProjectParseQc);
   const sourceText = useScriptStore((state) => state.sourceText);
@@ -63,6 +87,46 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const [isLoadingTranslationEngine, setIsLoadingTranslationEngine] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
   const isTranslationEngineLoaded = Boolean(translationEngineStatus?.loaded);
+  const isProjectOpsBusy = isTranscribing || isRecording || isCreatingProject;
+
+  const sortedProjects = useMemo(
+    () => [...projects].sort((a, b) => Date.parse(b.updated_at || "") - Date.parse(a.updated_at || "")),
+    [projects],
+  );
+  const visibleProjects = useMemo(() => {
+    let nextVisible = sortedProjects.slice(0, 20);
+    if (currentProject?.id && !nextVisible.some((item) => item.id === currentProject.id)) {
+      const currentSummary = sortedProjects.find((item) => item.id === currentProject.id);
+      if (currentSummary) {
+        nextVisible = [currentSummary, ...nextVisible.slice(0, 19)];
+      }
+    }
+    return nextVisible;
+  }, [currentProject?.id, sortedProjects]);
+  const projectOptions = useMemo(
+    () => visibleProjects.map((project) => buildProjectOption(project, projectSources?.[project.id])),
+    [projectSources, visibleProjects],
+  );
+  const sameNameSiblingProjects = useMemo(
+    () => getSameNameSiblingProjects(projects, currentProject),
+    [projects, currentProject],
+  );
+  const currentProjectMeta = useMemo(() => {
+    if (!currentProject?.id) {
+      return { sourceTag: "未选择", detail: "未选择项目" };
+    }
+    const sourceTag = getProjectSourceTag(projectSources?.[currentProject.id]);
+    const detailParts = [];
+    const fileName = toProjectFileDisplayName(currentProjectFileName || currentProject.project_file_name);
+    if (fileName) {
+      detailParts.push(fileName);
+    }
+    detailParts.push(`#${shortProjectId(currentProject.id)}`);
+    return {
+      sourceTag,
+      detail: detailParts.join(" · "),
+    };
+  }, [currentProject, currentProjectFileName, projectSources]);
 
   const remappedAlignments = useMemo(() => {
     if (!Array.isArray(alignments) || !alignments.length) return [];
@@ -206,6 +270,16 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       });
     }
   }
+
+  useEffect(() => {
+    if (!projects.length) {
+      loadProjects().catch(() => undefined);
+    }
+  }, [loadProjects, projects.length]);
+
+  useEffect(() => {
+    setRenameProjectName(currentProject?.name || "");
+  }, [currentProject?.id, currentProject?.name]);
 
   useEffect(() => {
     refreshTranslationStatus();
@@ -696,9 +770,193 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     onNavigate?.("text");
   }
 
+  async function handleSelectProject(projectId) {
+    if (!projectId) return;
+    await selectProject(projectId);
+    await loadProjectScript(projectId);
+  }
+
+  async function handleCreateProject() {
+    const name = newProjectName.trim() || `项目 ${new Date().toLocaleTimeString("zh-CN")}`;
+    const project = await createProject(name);
+    setNewProjectName("");
+    await loadProjectScript(project.id);
+  }
+
+  async function handleRenameProject() {
+    if (!currentProject?.id) {
+      return;
+    }
+    const nextName = renameProjectName.trim();
+    if (!nextName) {
+      useUiStore.getState().pushToast({ title: "项目名称不能为空", tone: "warning" });
+      return;
+    }
+    if (nextName === currentProject.name) {
+      useUiStore.getState().pushToast({ title: "项目名称未变化", tone: "default" });
+      return;
+    }
+    try {
+      await renameProject(currentProject.id, nextName);
+      setRenameProjectName(nextName);
+    } catch (renameError) {
+      useUiStore.getState().pushToast({
+        title: `项目改名失败：${renameError?.message || "未知错误"}`,
+        tone: "error",
+      });
+    }
+  }
+
+  async function handleDeleteProject() {
+    if (!currentProject?.id) {
+      return;
+    }
+    const ok = window.confirm(`确认删除项目「${currentProject.name}」？该操作不可撤销。`);
+    if (!ok) return;
+    try {
+      await deleteProject(currentProject.id, { silent: true });
+      useUiStore.getState().pushToast({ title: "项目已删除", tone: "success" });
+      const nextProjects = useProjectStore.getState().projects || [];
+      const next = nextProjects[0];
+      if (next?.id) {
+        await handleSelectProject(next.id);
+      }
+    } catch {
+      useUiStore.getState().pushToast({ title: "项目删除失败，请重试", tone: "warning" });
+    }
+  }
+
+  async function handleDeleteSameNameDuplicates() {
+    if (!currentProject?.id) {
+      return;
+    }
+    const siblingProjects = getSameNameSiblingProjects(projects, currentProject);
+    if (!siblingProjects.length) {
+      return;
+    }
+    const ok = window.confirm(
+      `检测到 ${siblingProjects.length} 个与「${currentProject.name}」同名的副本。\n确认删除这些同名副本并保留当前项目？`
+    );
+    if (!ok) {
+      return;
+    }
+    let deletedCount = 0;
+    const failedIds = [];
+    for (const project of siblingProjects) {
+      try {
+        await deleteProject(project.id, { silent: true });
+        deletedCount += 1;
+      } catch {
+        failedIds.push(project.id);
+      }
+    }
+    if (deletedCount > 0) {
+      useUiStore.getState().pushToast({ title: `已删除 ${deletedCount} 个同名副本`, tone: "success" });
+    }
+    if (failedIds.length) {
+      useUiStore.getState().pushToast({ title: `有 ${failedIds.length} 个同名副本删除失败，请重试`, tone: "warning" });
+    }
+  }
+
+  async function handleImportArchive(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const result = await importArchive(file);
+    const project = result?.project;
+    if (!project?.id) return;
+    await loadProjectScript(project.id);
+  }
+
+  async function importProjectFileAndSelect(file, options = {}) {
+    if (!file) return;
+    const result = await importProjectFile(file, options);
+    const project = result?.project;
+    if (!project?.id) return;
+    await loadProjectScript(project.id);
+  }
+
+  async function handleOpenProjectFile(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    await importProjectFileAndSelect(file, { fileName: file?.name || "" });
+  }
+
+  async function handleOpenProjectFileClick() {
+    try {
+      const picked = await openProjectFileWithPicker();
+      if (!picked?.file) {
+        projectFileInputRef.current?.click();
+        return;
+      }
+      await importProjectFileAndSelect(picked.file, { handle: picked.handle, fileName: picked.file.name });
+    } catch (openError) {
+      if (openError?.name === "AbortError") {
+        return;
+      }
+      useUiStore.getState().pushToast({
+        title: `打开项目文件失败：${openError?.message || "未知错误"}`,
+        tone: "error",
+      });
+    }
+  }
+
+  const moreMenuItems = useMemo(() => [
+    {
+      label: "删除当前项目",
+      icon: Trash2,
+      danger: true,
+      disabled: !currentProject?.id,
+      onSelect: handleDeleteProject,
+    },
+    { type: "separator" },
+    {
+      label: sameNameSiblingProjects.length ? `删除同名副本（${sameNameSiblingProjects.length}）` : "删除同名副本",
+      icon: Trash2,
+      danger: true,
+      disabled: !currentProject?.id || sameNameSiblingProjects.length < 1,
+      title: sameNameSiblingProjects.length
+        ? `删除 ${sameNameSiblingProjects.length} 个与当前项目同名的副本`
+        : "当前没有可删除的同名副本",
+      onSelect: handleDeleteSameNameDuplicates,
+    },
+  ], [currentProject?.id, sameNameSiblingProjects.length, handleDeleteProject, handleDeleteSameNameDuplicates]);
+
   return (
-    <div className="pageGrid twoCols">
-      <GlassCard>
+    <div className="speechPageLayout">
+      <div className="speechPageColumn">
+        <GlassCard>
+        <ProjectToolbarCard
+          currentProject={currentProject}
+          currentProjectMeta={currentProjectMeta}
+          projectOptions={projectOptions}
+          projectName={newProjectName}
+          renameProjectName={renameProjectName}
+          isParsing={isProjectOpsBusy}
+          archiveInputRef={archiveInputRef}
+          projectFileInputRef={projectFileInputRef}
+          onProjectNameChange={setNewProjectName}
+          onProjectNameKeyDown={(event) => event.key === "Enter" && handleCreateProject()}
+          onRenameProjectNameChange={setRenameProjectName}
+          onRenameProjectNameKeyDown={(event) => event.key === "Enter" && handleRenameProject()}
+          onSelectProject={handleSelectProject}
+          onCreateProject={handleCreateProject}
+          onRenameProject={handleRenameProject}
+          onOpenProjectFileClick={handleOpenProjectFileClick}
+          onProjectFileInputChange={handleOpenProjectFile}
+          onImportArchive={handleImportArchive}
+          moreMenuItems={moreMenuItems}
+        />
+        {importWarnings?.length ? (
+          <div className="statusBadge warning" style={{ marginTop: 2, display: "block", textAlign: "left" }}>
+            {importWarnings.map((warning, idx) => (
+              <div key={`${idx}-${warning}`}>导入提示 {idx + 1}: {warning}</div>
+            ))}
+          </div>
+        ) : null}
+        </GlassCard>
+
+        <GlassCard>
         <h2 className="cardTitle">
           <Mic size={16} />
           语音识别
@@ -790,9 +1048,11 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           <div className="errorText">失败分块：{projectTask.failedChunks.map((item) => `#${item.index + 1}`).join(", ")}</div>
         ) : null}
         {projectTask?.parseTaskId ? <div className="muted">自动解析任务：{projectTask.parseTaskId}</div> : null}
-      </GlassCard>
+        </GlassCard>
+      </div>
 
-      <GlassCard>
+      <div className="speechPageColumn">
+        <GlassCard>
         <h2 className="cardTitle">
           <WandSparkles size={16} />
           识别预览
@@ -841,9 +1101,9 @@ export default function SpeechRecognitionPage({ onNavigate }) {
             清空结果
           </Button>
         </div>
-      </GlassCard>
+        </GlassCard>
 
-      <GlassCard className="speechTranslationCard">
+        <GlassCard>
         <h2 className="cardTitle">
           <Languages size={16} />
           翻译润色
@@ -922,7 +1182,8 @@ export default function SpeechRecognitionPage({ onNavigate }) {
             清空翻译结果
           </Button>
         </div>
-      </GlassCard>
+        </GlassCard>
+      </div>
     </div>
   );
 }
