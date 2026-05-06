@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -13,6 +14,49 @@ from backend.persistence import append_project_event, save_project
 
 CHUNK_DURATION_MS = 10 * 60 * 1000
 CHUNK_OVERLAP_MS = 2 * 1000
+_AUTO_SPEAKER_PREFIX = re.compile(r"^\s*[\[(（【]?\s*(?:说话人|speaker|spk|s)\s*[-_#]?\s*\d+\s*[\])）】]?\s*[：:]\s*", re.IGNORECASE)
+_LEADING_LABEL = re.compile(r"^\s*([\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z0-9_\-\s]{0,20})\s*[：:]\s*")
+_AUTO_SPEAKER_LABEL = re.compile(r"^(?:说话人|speaker|spk|s)\s*[-_#]?\s*\d+$", re.IGNORECASE)
+
+
+def _normalize_label_token(value: str) -> str:
+    return re.sub(r"\s+", "", str(value or "").strip().lower())
+
+
+def _strip_embedded_speaker_prefix(text: str, speaker: str = "") -> str:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return ""
+
+    for _ in range(4):
+        next_text = _AUTO_SPEAKER_PREFIX.sub("", cleaned).strip()
+        if next_text == cleaned:
+            break
+        cleaned = next_text
+    if not cleaned:
+        return ""
+
+    # Handle chained prefixes like: "旁白：说话人1：这病..."
+    cursor = cleaned
+    labels: list[str] = []
+    for _ in range(4):
+        match = _LEADING_LABEL.match(cursor)
+        if not match:
+            break
+        labels.append(match.group(1))
+        cursor = cursor[match.end() :].strip()
+        if not cursor:
+            return ""
+    if not labels:
+        return cleaned
+
+    normalized_labels = [_normalize_label_token(item) for item in labels]
+    normalized_speaker = _normalize_label_token(speaker)
+    has_auto_label = any(_AUTO_SPEAKER_LABEL.match(item) for item in normalized_labels)
+    first_is_same_speaker = bool(normalized_speaker) and normalized_labels[0] == normalized_speaker
+    if has_auto_label or first_is_same_speaker:
+        return cursor
+    return cleaned
 
 
 def _fallback_project_name(project_name: str | None, audio_name: str | None) -> str:
@@ -89,7 +133,8 @@ def _extract_chunk(input_path: Path, output_path: Path, start_ms: int, end_ms: i
 
 
 def _normalize_segment(seg: dict[str, Any], *, fallback_id: str, offset_ms: int) -> dict[str, Any]:
-    text = str(seg.get("text", "")).strip()
+    speaker = str(seg.get("speaker") or "").strip()
+    text = _strip_embedded_speaker_prefix(str(seg.get("text", "")), speaker)
     if not text:
         return {}
     start_ms = int(seg.get("start_ms") or 0) + int(offset_ms)
@@ -101,7 +146,7 @@ def _normalize_segment(seg: dict[str, Any], *, fallback_id: str, offset_ms: int)
         "start_ms": start_ms,
         "end_ms": end_ms,
         "text": text,
-        "speaker": str(seg.get("speaker") or ""),
+        "speaker": speaker,
     }
 
 

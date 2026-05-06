@@ -105,6 +105,88 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     }
   }
 
+  async function waitForParseTask(parseTaskId) {
+    const taskId = String(parseTaskId || "").trim();
+    if (!taskId) {
+      return null;
+    }
+
+    const syncParseState = async ({ done, fail }) => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/llm/parse/${taskId}`);
+        if (response.status === 202) {
+          const body = await response.json().catch(() => ({}));
+          setProjectTask((prev) => ({
+            ...prev,
+            status: body?.stage_label || body?.status || prev.status || "parse_running",
+            parseTaskId: taskId,
+          }));
+          return false;
+        }
+        if (response.status >= 400) {
+          const message = await readErrorMessage(response, `HTTP ${response.status}`);
+          fail(new Error(message || "自动解析失败"));
+          return true;
+        }
+        const script = await response.json();
+        done(script);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    return await runTaskChannel({
+      wsUrl: `${getWsBaseUrl()}/ws/llm-stream/${taskId}`,
+      timeoutMs: 20 * 60 * 1000,
+      maxTimeoutExtensions: 12,
+      maxReconnectRetries: 5,
+      baseDelayMs: 1000,
+      shouldReconnect: () => true,
+      onConnectionStatus: () => {},
+      onOpen: async () => {},
+      syncTaskState: syncParseState,
+      onMessage: ({ msg, done, fail }) => {
+        if (!msg || typeof msg !== "object") return;
+        if (msg.type === "complete") {
+          done(msg.data || null);
+          return;
+        }
+        if (msg.type === "error") {
+          fail(new Error(String(msg.message || "自动解析失败")));
+          return;
+        }
+        if (msg.type === "canceled") {
+          fail(new Error(String(msg.message || "自动解析已取消")));
+          return;
+        }
+        if (msg.type === "parse_stage") {
+          setProjectTask((prev) => ({
+            ...prev,
+            status: String(msg.stage_label || msg.stage || prev.status || "parse_running"),
+            parseTaskId: taskId,
+          }));
+          return;
+        }
+        if (msg.type === "progress") {
+          setProjectTask((prev) => ({
+            ...prev,
+            status: `解析中 ${Number(msg.percent || 0)}%`,
+            parseTaskId: taskId,
+          }));
+          return;
+        }
+        if (msg.type === "task_status") {
+          setProjectTask((prev) => ({
+            ...prev,
+            status: msg.status === "done" ? "解析完成" : String(msg.status || prev.status || "parse_running"),
+            parseTaskId: taskId,
+          }));
+        }
+      },
+    });
+  }
+
   async function refreshTranslationStatus() {
     try {
       const response = await fetch(`${API_BASE_URL}/llm/translation-engine/status`);
@@ -544,27 +626,10 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       await selectProject(nextProjectId, { suppressToast: true });
       await loadProjectScript(nextProjectId);
 
-      let parseReady = !nextParseTaskId;
-      let parseFailed = false;
-      if (nextParseTaskId) {
-        for (let i = 0; i < 40; i += 1) {
-          await new Promise((resolve) => setTimeout(resolve, 1500));
-          const statusResp = await fetch(`${API_BASE_URL}/llm/parse/${nextParseTaskId}`);
-          if (statusResp.status === 202) {
-            continue;
-          }
-          if (statusResp.status >= 400) {
-            parseFailed = true;
-            parseReady = false;
-          } else {
-            parseReady = true;
-          }
-          break;
-        }
-      }
-
       let issueCount = 0;
-      if (parseReady) {
+      if (nextParseTaskId) {
+        setProjectTask((prev) => ({ ...prev, status: "等待自动解析完成", parseTaskId: nextParseTaskId }));
+        await waitForParseTask(nextParseTaskId);
         await loadProjectScript(nextProjectId);
         try {
           const report = await loadProjectParseQc(nextProjectId);
@@ -572,16 +637,8 @@ export default function SpeechRecognitionPage({ onNavigate }) {
         } catch {
           issueCount = 0;
         }
-      } else if (nextParseTaskId && !parseFailed) {
-        useUiStore.getState().pushToast({
-          title: "解析仍在进行中，先进入剧本页查看",
-          tone: "warning",
-        });
-      } else if (parseFailed) {
-        useUiStore.getState().pushToast({
-          title: "自动解析失败，请检查模型状态后重试解析",
-          tone: "warning",
-        });
+      } else {
+        await loadProjectScript(nextProjectId);
       }
 
       useUiStore.getState().pushToast({

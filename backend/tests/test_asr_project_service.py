@@ -13,9 +13,17 @@ from backend.services.asr_project_service import create_project_from_audio
 
 
 class _FakeAsrEngine:
-    def __init__(self, fail_chunk_name: str | None = None, fail_all: bool = False) -> None:
+    def __init__(
+        self,
+        fail_chunk_name: str | None = None,
+        fail_all: bool = False,
+        segment_text: str = "你好",
+        speaker_name: str = "说话人1",
+    ) -> None:
         self._fail_chunk_name = fail_chunk_name
         self._fail_all = fail_all
+        self._segment_text = segment_text
+        self._speaker_name = speaker_name
 
     async def transcribe(self, audio_path: str, *, backend: str = "whisper", speaker_labels: bool = False):
         if self._fail_all:
@@ -30,8 +38,8 @@ class _FakeAsrEngine:
                     "id": "seg-1",
                     "start_ms": 0,
                     "end_ms": 1200,
-                    "text": "你好",
-                    "speaker": "说话人1" if speaker_labels else "",
+                    "text": self._segment_text,
+                    "speaker": self._speaker_name if speaker_labels else "",
                 }
             ],
             "warnings": [],
@@ -39,6 +47,40 @@ class _FakeAsrEngine:
 
 
 class AsrProjectServiceTest(unittest.TestCase):
+    def test_strip_embedded_auto_speaker_prefix_in_text(self) -> None:
+        root = Path("E:/softs/BeautyVoiceTTS/tmp_test_outputs") / f"asr-project-{uuid.uuid4().hex[:8]}"
+        shutil.rmtree(root, ignore_errors=True)
+        try:
+            projects_dir = root / "projects"
+            output_dir = root / "output"
+            projects_dir.mkdir(parents=True, exist_ok=True)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            state = SimpleNamespace(
+                settings=SimpleNamespace(projects_dir=projects_dir, output_dir=output_dir),
+                asr_engine=_FakeAsrEngine(segment_text="旁白：说话人1：这病,每发都在夏天。"),
+            )
+            audio = output_dir / "sample.wav"
+            audio.write_bytes(b"RIFFdemo")
+
+            async def run() -> dict:
+                return await create_project_from_audio(
+                    state=state,
+                    audio_path=audio,
+                    audio_name="sample.wav",
+                    project_name="",
+                    speaker_labels=True,
+                    parse_mode="verified_five_step_pipeline",
+                    auto_parse=False,
+                    speaker_map={"说话人1": "旁白"},
+                    enqueue_parse_task=None,
+                )
+
+            payload = asyncio.run(run())
+            self.assertEqual(payload["segments"][0]["text"], "这病,每发都在夏天。")
+            self.assertEqual(payload["labeled_text"].splitlines()[0], "旁白：这病,每发都在夏天。")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_partial_failed_still_creates_project_and_events(self) -> None:
         root = Path("E:/softs/BeautyVoiceTTS/tmp_test_outputs") / f"asr-project-{uuid.uuid4().hex[:8]}"
         shutil.rmtree(root, ignore_errors=True)

@@ -184,6 +184,7 @@ export default function ScriptEditorPage() {
     searchReplaceSegments,
     splitSegment,
     mergeSegments,
+    loadProjectScript,
     isSaving,
     error,
   } = useScriptStore();
@@ -260,6 +261,14 @@ export default function ScriptEditorPage() {
       setNewSegment((current) => ({ ...current, index: normalized.segments.length }));
     }
   }, [currentProject?.id, script, resetHistory]);
+
+  useEffect(() => {
+    const projectId = currentProject?.id;
+    if (!projectId || (script?.segments || []).length) {
+      return;
+    }
+    loadProjectScript(projectId).catch(() => undefined);
+  }, [currentProject?.id, loadProjectScript]);
 
   useEffect(() => {
     const marker = window.sessionStorage.getItem("beautyvoice.qc.focus_segment_id") || "";
