@@ -22,12 +22,94 @@ import { buildCharacterStats, buildSpeakerOptions, filterSegmentsBySpeaker, getI
 import { hasEditingDraftChanges } from "../utils/scriptEditorDirty";
 import { computeScriptDiff, normalizeDraftScript } from "../utils/scriptDiff";
 
+const QC_FOCUS_SEGMENTS_KEY = "beautyvoice.qc.focus_segments";
+const QC_FOCUS_SEGMENT_LEGACY_KEY = "beautyvoice.qc.focus_segment_id";
+
+function normalizeQcSeverity(value) {
+  if (value === "high" || value === "medium" || value === "low") {
+    return value;
+  }
+  return "";
+}
+
+function qcSeverityRank(value) {
+  if (value === "high") return 3;
+  if (value === "medium") return 2;
+  if (value === "low") return 1;
+  return 0;
+}
+
+function extractQcIssueSegmentIds(issue) {
+  const ids = [];
+  const addId = (value) => {
+    const normalized = String(value || "").trim();
+    if (normalized) {
+      ids.push(normalized);
+    }
+  };
+
+  addId(issue?.segment_id);
+  (Array.isArray(issue?.segment_ids) ? issue.segment_ids : []).forEach(addId);
+  (Array.isArray(issue?.segments) ? issue.segments : []).forEach((item) => {
+    if (typeof item === "string") {
+      addId(item);
+      return;
+    }
+    addId(item?.id || item?.segment_id);
+  });
+  (Array.isArray(issue?.evidence?.items) ? issue.evidence.items : []).forEach((item) => {
+    addId(item?.segment_id || item?.id);
+  });
+
+  return Array.from(new Set(ids));
+}
+
+function buildQcHighlightBySegmentId(issues) {
+  const next = {};
+  (Array.isArray(issues) ? issues : []).forEach((issue) => {
+    const severity = normalizeQcSeverity(issue?.severity) || "low";
+    extractQcIssueSegmentIds(issue).forEach((segmentId) => {
+      const current = normalizeQcSeverity(next[segmentId]);
+      if (!current || qcSeverityRank(severity) > qcSeverityRank(current)) {
+        next[segmentId] = severity;
+      }
+    });
+  });
+  return next;
+}
+
+function getQcHighlightStyle(severity) {
+  if (severity === "high") {
+    return {
+      borderColor: "var(--danger)",
+      boxShadow: "0 0 0 2px rgba(248,113,113,0.2)",
+      background: "rgba(248,113,113,0.08)",
+    };
+  }
+  if (severity === "medium") {
+    return {
+      borderColor: "var(--warning)",
+      boxShadow: "0 0 0 2px rgba(251,191,36,0.2)",
+      background: "rgba(251,191,36,0.08)",
+    };
+  }
+  if (severity === "low") {
+    return {
+      borderColor: "var(--info)",
+      boxShadow: "0 0 0 2px rgba(96,165,250,0.18)",
+      background: "rgba(96,165,250,0.06)",
+    };
+  }
+  return null;
+}
+
 function SortableSegmentCard({
   segment,
   isEditing,
   isInsertAnchor,
   draft,
   isFocused,
+  qcSeverity,
   speakerOptions,
   canEdit,
   canReorder,
@@ -54,15 +136,19 @@ function SortableSegmentCard({
   };
 
   const charColor = getCharColor(segment.speaker);
+  const qcStyle = getQcHighlightStyle(qcSeverity);
+  const qcLabel = qcSeverity === "high" ? "高风险" : qcSeverity === "medium" ? "中风险" : qcSeverity === "low" ? "低风险" : "";
 
   return (
     <div
       ref={setNodeRef}
+      data-segment-id={segment.id}
       style={{
         ...style,
-        ...(isFocused ? { boxShadow: "0 0 0 1px var(--accent-primary) inset" } : {}),
+        ...(qcStyle || {}),
+        ...(isFocused ? { outline: "1px solid var(--accent-primary)", outlineOffset: "-1px" } : {}),
       }}
-      className={`segmentCard ${isEditing ? "editing" : ""} ${isInsertAnchor ? "insertAnchor" : ""}`}
+      className={`segmentCard ${isEditing ? "editing" : ""} ${isInsertAnchor ? "insertAnchor" : ""} ${qcSeverity ? `qc-${qcSeverity}` : ""}`}
     >
       {/* Drag handle */}
       {canEdit && !isEditing && (
@@ -119,6 +205,26 @@ function SortableSegmentCard({
             <div className="segmentHeader">
               <span className="segmentIndex">#{(segment.index ?? 0) + 1}</span>
               <CharacterBadge name={segment.speaker || "旁白"} />
+              {qcLabel ? (
+                <span
+                  className="statusBadge"
+                  style={{
+                    fontSize: 10.5,
+                    background: qcSeverity === "high"
+                      ? "var(--danger-dim)"
+                      : qcSeverity === "medium"
+                        ? "var(--warning-dim)"
+                        : "var(--info-dim)",
+                    color: qcSeverity === "high"
+                      ? "var(--danger)"
+                      : qcSeverity === "medium"
+                        ? "var(--warning)"
+                        : "var(--info)",
+                  }}
+                >
+                  {qcLabel}
+                </span>
+              ) : null}
               <span className="segmentType">{segment.type}</span>
               {segment.emotion && segment.emotion !== "neutral" && (
                 <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: "var(--radius-full)", background: "var(--bg-elevated)", color: "var(--text-muted)", border: "1px solid var(--border-subtle)" }}>
@@ -173,7 +279,14 @@ function SortableSegmentCard({
 }
 
 export default function ScriptEditorPage() {
-  const { currentProject, currentProjectFileHandle, bindCurrentProjectFile, refreshCurrentProject } = useProjectStore();
+  const {
+    currentProject,
+    currentProjectFileHandle,
+    bindCurrentProjectFile,
+    refreshCurrentProject,
+    parseQcReport,
+    loadProjectParseQc,
+  } = useProjectStore();
   const {
     script,
     replaceScript,
@@ -199,6 +312,7 @@ export default function ScriptEditorPage() {
   const [segmentDraft, setSegmentDraft] = useState(null);
   const [cursorBySegmentId, setCursorBySegmentId] = useState({});
   const [focusSegmentId, setFocusSegmentId] = useState("");
+  const [qcHighlightBySegmentId, setQcHighlightBySegmentId] = useState({});
   const [newSegment, setNewSegment] = useState(() => createSegmentDraft(0));
   const [insertAfterSegmentId, setInsertAfterSegmentId] = useState(null);
   const [activeSpeakerFilter, setActiveSpeakerFilter] = useState("all");
@@ -271,10 +385,58 @@ export default function ScriptEditorPage() {
   }, [currentProject?.id, loadProjectScript]);
 
   useEffect(() => {
-    const marker = window.sessionStorage.getItem("beautyvoice.qc.focus_segment_id") || "";
-    if (!marker) return;
-    window.sessionStorage.removeItem("beautyvoice.qc.focus_segment_id");
-    setFocusSegmentId(marker);
+    const projectId = currentProject?.id;
+    if (!projectId) {
+      return;
+    }
+    loadProjectParseQc(projectId).catch(() => undefined);
+  }, [currentProject?.id, loadProjectParseQc]);
+
+  useEffect(() => {
+    const payloadRaw = window.sessionStorage.getItem(QC_FOCUS_SEGMENTS_KEY) || "";
+    const legacyMarker = window.sessionStorage.getItem(QC_FOCUS_SEGMENT_LEGACY_KEY) || "";
+    let parsed = null;
+    if (payloadRaw) {
+      try {
+        parsed = JSON.parse(payloadRaw);
+      } catch {
+        parsed = null;
+      }
+    }
+    window.sessionStorage.removeItem(QC_FOCUS_SEGMENTS_KEY);
+    window.sessionStorage.removeItem(QC_FOCUS_SEGMENT_LEGACY_KEY);
+
+    if (parsed && typeof parsed === "object") {
+      const mapping = {};
+      const rawMap = parsed?.highlight_by_segment_id;
+      if (rawMap && typeof rawMap === "object") {
+        Object.entries(rawMap).forEach(([segmentId, severity]) => {
+          const normalizedId = String(segmentId || "").trim();
+          const normalizedSeverity = normalizeQcSeverity(severity);
+          if (!normalizedId || !normalizedSeverity) {
+            return;
+          }
+          mapping[normalizedId] = normalizedSeverity;
+        });
+      }
+      setQcHighlightBySegmentId(mapping);
+      const focusId = String(parsed?.focus_segment_id || "").trim();
+      if (focusId) {
+        setFocusSegmentId(focusId);
+        return;
+      }
+      const focusIds = Array.isArray(parsed?.focus_segment_ids) ? parsed.focus_segment_ids : [];
+      const firstId = String(focusIds[0] || "").trim();
+      setFocusSegmentId(firstId);
+      return;
+    }
+
+    if (legacyMarker) {
+      setFocusSegmentId(legacyMarker);
+      return;
+    }
+    setFocusSegmentId("");
+    setQcHighlightBySegmentId({});
   }, [currentProject?.id]);
 
   // Character stats
@@ -288,11 +450,39 @@ export default function ScriptEditorPage() {
     () => filterSegmentsBySpeaker(segments, activeSpeakerFilter),
     [segments, activeSpeakerFilter]
   );
+  const reportQcHighlightBySegmentId = useMemo(
+    () => buildQcHighlightBySegmentId(parseQcReport?.issues),
+    [parseQcReport?.issues]
+  );
+  const effectiveQcHighlightBySegmentId = useMemo(
+    () => ({
+      ...reportQcHighlightBySegmentId,
+      ...qcHighlightBySegmentId,
+    }),
+    [reportQcHighlightBySegmentId, qcHighlightBySegmentId]
+  );
+  const visibleQcHighlightCount = useMemo(
+    () => visibleSegments.filter((segment) => effectiveQcHighlightBySegmentId[segment.id]).length,
+    [visibleSegments, effectiveQcHighlightBySegmentId]
+  );
   const isFilterActive = activeSpeakerFilter !== "all";
   const insertAfterLabel = useMemo(
     () => getInsertAnchorLabel(segments, insertAfterSegmentId),
     [segments, insertAfterSegmentId]
   );
+
+  useEffect(() => {
+    if (!focusSegmentId) {
+      return;
+    }
+    const nodes = document.querySelectorAll("[data-segment-id]");
+    for (const node of nodes) {
+      if (node?.getAttribute("data-segment-id") === focusSegmentId) {
+        node.scrollIntoView({ behavior: "smooth", block: "center" });
+        break;
+      }
+    }
+  }, [focusSegmentId, visibleSegments.length]);
 
   useEffect(() => {
     if (activeSpeakerFilter === "all") {
@@ -779,6 +969,9 @@ export default function ScriptEditorPage() {
                 : `拖动左侧手柄可调整顺序，点击内容编辑片段。${hasUnsavedChanges ? "（当前有未保存改动）" : "（当前已保存）"}`}
             </p>
           </div>
+          {visibleQcHighlightCount ? (
+            <span className="statusBadge warning">质检高亮 {visibleQcHighlightCount} 段</span>
+          ) : null}
         </div>
 
         {visibleSegments.length ? (
@@ -790,6 +983,7 @@ export default function ScriptEditorPage() {
                     key={segment.id}
                     segment={segment}
                     isFocused={focusSegmentId === segment.id}
+                    qcSeverity={effectiveQcHighlightBySegmentId[segment.id] || ""}
                     isEditing={editingId === segment.id}
                     isInsertAnchor={insertAfterSegmentId === segment.id}
                     draft={segmentDraft?.id === segment.id ? segmentDraft : null}

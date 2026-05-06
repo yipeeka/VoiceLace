@@ -5,7 +5,11 @@ import GlassCard from "../components/shared/GlassCard";
 import EmptyState from "../components/shared/EmptyState";
 import Button from "../components/ui/Button";
 import { useProjectStore } from "../stores/useProjectStore";
+import { useScriptStore } from "../stores/useScriptStore";
 import { formatError } from "../utils/errors";
+
+const QC_FOCUS_SEGMENTS_KEY = "beautyvoice.qc.focus_segments";
+const QC_FOCUS_SEGMENT_LEGACY_KEY = "beautyvoice.qc.focus_segment_id";
 
 function severityTone(severity) {
   if (severity === "high") return "error";
@@ -13,8 +17,42 @@ function severityTone(severity) {
   return "default";
 }
 
+function normalizeSeverity(value) {
+  if (value === "high" || value === "medium" || value === "low") {
+    return value;
+  }
+  return "low";
+}
+
+function severityRank(value) {
+  if (value === "high") return 3;
+  if (value === "medium") return 2;
+  return 1;
+}
+
+function extractIssueSegmentIds(issue) {
+  const ids = [];
+  const directIds = Array.isArray(issue?.segment_ids) ? issue.segment_ids : [];
+  for (const id of directIds) {
+    const normalized = String(id || "").trim();
+    if (normalized) {
+      ids.push(normalized);
+    }
+  }
+  const evidenceItems = Array.isArray(issue?.evidence?.items) ? issue.evidence.items : [];
+  for (const item of evidenceItems) {
+    const normalized = String(item?.segment_id || "").trim();
+    if (normalized) {
+      ids.push(normalized);
+    }
+  }
+  return Array.from(new Set(ids));
+}
+
 export default function ParseQcPage({ onNavigate }) {
   const { currentProject, parseQcReport, loadProjectParseQc } = useProjectStore();
+  const scriptSegments = useScriptStore((state) => state.script?.segments || []);
+  const loadProjectScript = useScriptStore((state) => state.loadProjectScript);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -32,16 +70,76 @@ export default function ParseQcPage({ onNavigate }) {
   }
 
   useEffect(() => {
+    if (!currentProject?.id) {
+      return;
+    }
     loadReport().catch(() => undefined);
+    loadProjectScript(currentProject.id).catch(() => undefined);
   }, [currentProject?.id]);
 
   const summary = parseQcReport?.summary || {};
   const metrics = parseQcReport?.metrics || {};
   const issues = useMemo(() => (Array.isArray(parseQcReport?.issues) ? parseQcReport.issues : []), [parseQcReport?.issues]);
+  const segmentNumberById = useMemo(() => {
+    const next = new Map();
+    (scriptSegments || []).forEach((segment, idx) => {
+      const id = String(segment?.id || "").trim();
+      if (!id) {
+        return;
+      }
+      next.set(id, Number(segment?.index ?? idx) + 1);
+    });
+    return next;
+  }, [scriptSegments]);
+  const highlightBySegmentId = useMemo(() => {
+    const next = {};
+    issues.forEach((issue) => {
+      const severity = normalizeSeverity(issue?.severity);
+      extractIssueSegmentIds(issue).forEach((segmentId) => {
+        const current = normalizeSeverity(next[segmentId]);
+        if (!next[segmentId] || severityRank(severity) > severityRank(current)) {
+          next[segmentId] = severity;
+        }
+      });
+    });
+    return next;
+  }, [issues]);
 
-  function jumpToSegment(segmentId) {
-    if (!segmentId) return;
-    window.sessionStorage.setItem("beautyvoice.qc.focus_segment_id", segmentId);
+  function formatSegmentTag(segmentId) {
+    const normalized = String(segmentId || "").trim();
+    if (!normalized) {
+      return "#?";
+    }
+    const number = segmentNumberById.get(normalized);
+    return number ? `#${number}` : "#?";
+  }
+
+  function formatSegmentList(segmentIds, limit = 6) {
+    const list = Array.from(new Set((segmentIds || []).map((item) => String(item || "").trim()).filter(Boolean)));
+    if (!list.length) {
+      return "";
+    }
+    const labels = list.slice(0, limit).map((segmentId) => formatSegmentTag(segmentId));
+    return `${labels.join(", ")}${list.length > limit ? " ..." : ""}`;
+  }
+
+  function jumpToIssue(issue, preferredSegmentId = "") {
+    const issueSegmentIds = extractIssueSegmentIds(issue);
+    const preferred = String(preferredSegmentId || "").trim();
+    const focusedIds = preferred
+      ? Array.from(new Set([preferred, ...issueSegmentIds]))
+      : issueSegmentIds;
+    if (!focusedIds.length) {
+      return;
+    }
+    const payload = {
+      focus_segment_id: focusedIds[0],
+      focus_segment_ids: focusedIds,
+      highlight_by_segment_id: highlightBySegmentId,
+      timestamp: Date.now(),
+    };
+    window.sessionStorage.setItem(QC_FOCUS_SEGMENTS_KEY, JSON.stringify(payload));
+    window.sessionStorage.setItem(QC_FOCUS_SEGMENT_LEGACY_KEY, focusedIds[0]);
     onNavigate?.("script");
   }
 
@@ -97,7 +195,7 @@ export default function ParseQcPage({ onNavigate }) {
         ) : (
           <div className="listStack">
             {issues.map((issue) => {
-              const segmentIds = Array.isArray(issue?.segment_ids) ? issue.segment_ids : [];
+              const segmentIds = extractIssueSegmentIds(issue);
               const missingItems = issue?.type === "coverage_missing" && Array.isArray(issue?.evidence?.items)
                 ? issue.evidence.items
                 : [];
@@ -109,13 +207,13 @@ export default function ParseQcPage({ onNavigate }) {
                       <span className={`statusBadge ${severityTone(issue.severity)}`}>{issue.severity || "low"}</span>
                     </div>
                     <span className="muted" style={{ wordBreak: "break-word" }}>{issue.description || ""}</span>
-                    {segmentIds.length ? <span className="muted">涉及片段：{segmentIds.slice(0, 6).join(", ")}{segmentIds.length > 6 ? " ..." : ""}</span> : null}
+                    {segmentIds.length ? <span className="muted">涉及片段：{formatSegmentList(segmentIds, 6)}</span> : null}
                     {missingItems.length ? (
                       <div className="listStack" style={{ marginTop: 6 }}>
                         {missingItems.slice(0, 4).map((item) => (
                           <div key={`${issue.id}-${item.segment_id}`} style={{ border: "1px solid var(--border-subtle)", borderRadius: 8, padding: 8 }}>
                             <div className="controlRow" style={{ justifyContent: "space-between", gap: 8 }}>
-                              <strong style={{ fontSize: 12 }}>片段 {item.segment_id}</strong>
+                              <strong style={{ fontSize: 12 }}>片段 {formatSegmentTag(item.segment_id)}</strong>
                               <span className="muted" style={{ fontSize: 12 }}>相似度 {(Number(item.similarity || 0) * 100).toFixed(1)}%</span>
                             </div>
                             {item.before_context ? <div className="muted" style={{ fontSize: 12 }}>前文：{item.before_context}</div> : null}
@@ -127,7 +225,7 @@ export default function ParseQcPage({ onNavigate }) {
                               {item.segment_diff ? <pre className="codeBlock" style={{ marginTop: 4 }}>片段 diff: {item.segment_diff}</pre> : null}
                             </div>
                             <div className="controlRow" style={{ marginTop: 6 }}>
-                              <Button variant="secondary" size="sm" onClick={() => jumpToSegment(item.segment_id)}>
+                              <Button variant="secondary" size="sm" onClick={() => jumpToIssue(issue, item.segment_id)}>
                                 定位此片段
                               </Button>
                             </div>
@@ -137,7 +235,7 @@ export default function ParseQcPage({ onNavigate }) {
                     ) : null}
                   </div>
                   {segmentIds[0] ? (
-                    <Button variant="secondary" size="sm" onClick={() => jumpToSegment(segmentIds[0])}>
+                    <Button variant="secondary" size="sm" onClick={() => jumpToIssue(issue)}>
                       定位片段
                     </Button>
                   ) : null}

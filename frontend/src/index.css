@@ -1001,6 +1001,21 @@ select.textInput option {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-secondary) 20%, transparent);
 }
 
+.segmentCard.qc-high {
+  border-color: color-mix(in srgb, var(--danger) 68%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 26%, transparent);
+}
+
+.segmentCard.qc-medium {
+  border-color: color-mix(in srgb, var(--warning) 65%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--warning) 24%, transparent);
+}
+
+.segmentCard.qc-low {
+  border-color: color-mix(in srgb, var(--accent-secondary) 58%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-secondary) 20%, transparent);
+}
+
 .segmentColorBar {
   width: 3px;
   border-radius: var(--radius-full);
