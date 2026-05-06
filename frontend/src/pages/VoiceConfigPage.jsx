@@ -56,6 +56,13 @@ const BACKEND_OPTIONS = [
   { value: "omnivoice", label: "OmniVoice" },
   { value: "voxcpm2", label: "VoxCPM2" },
 ];
+const RECOMMEND_SOURCE_OPTIONS = [
+  { value: "secondary_local", label: "小模型（默认）" },
+  { value: "primary_local", label: "主模型" },
+  { value: "openai", label: "OpenAI API" },
+  { value: "gemini", label: "Gemini API" },
+  { value: "rule", label: "规则推荐（不走 LLM）" },
+];
 const QUALITY_FILTER_OPTIONS = [
   { value: "all", label: "全部质量" },
   { value: "pass", label: "质量通过" },
@@ -187,6 +194,13 @@ function qualityStatusLabel(status) {
   if (status === "warning") return "质量告警";
   if (status === "fail") return "质量失败";
   return "未检测";
+}
+
+function isPlaceholderCharacterDescription(name, description) {
+  const value = String(description || "").replace(/\s+/g, "");
+  const normalizedName = String(name || "").replace(/\s+/g, "");
+  if (!value) return false;
+  return value === "角色档案" || value === `${normalizedName}的角色档案` || value === `${normalizedName}角色档案` || value.endsWith("的角色档案");
 }
 
 function ReferenceAudioPlayer({ audioPath }) {
@@ -353,12 +367,13 @@ export default function VoiceConfigPage() {
     setAssignments, assignVoice, loadPresets,
     createPreset, updatePreset, deletePreset, reorderPresets, saveAssignments, previewVoice,
     uploadReferenceAudio, transcribeAudio, setPreviewSlotPreset, setPreviewSlotBackend,
-    checkPresetQuality, fetchPresetRecommendations, clearPresetRecommendations,
+    checkPresetQuality, fetchPresetRecommendations, clearPresetRecommendations, unloadRecommendationModel,
   } = useVoiceStore();
 
   const [form, setForm] = useState({ ...emptyForm });
   const [activeBackend, setActiveBackend] = useState("omnivoice");
   const [previewBackend, setPreviewBackend] = useState("omnivoice");
+  const [recommendSource, setRecommendSource] = useState("secondary_local");
   const [searchKeyword, setSearchKeyword] = useState("");
   const [favoriteOnly, setFavoriteOnly] = useState(false);
   const [qualityFilter, setQualityFilter] = useState("all");
@@ -400,15 +415,17 @@ export default function VoiceConfigPage() {
         continue;
       }
       if (!merged.has(name)) {
+        const rawDescription = (character?.description || "").trim();
         merged.set(name, {
           name,
-          description: (character?.description || "").trim(),
+          description: isPlaceholderCharacterDescription(name, rawDescription) ? "" : rawDescription,
           appearance_count: Number(character?.appearance_count || 0) || 0,
         });
       } else if (!merged.get(name)?.description && character?.description) {
+        const rawDescription = (character?.description || "").trim();
         merged.set(name, {
           ...merged.get(name),
-          description: (character?.description || "").trim(),
+          description: isPlaceholderCharacterDescription(name, rawDescription) ? "" : rawDescription,
         });
       }
     }
@@ -693,7 +710,12 @@ export default function VoiceConfigPage() {
       projectId: currentProject.id,
       backend: previewBackend,
       limit: 3,
+      source: recommendSource,
     });
+  }
+
+  async function handleUnloadRecommendationModel() {
+    await unloadRecommendationModel(recommendSource);
   }
 
 function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
@@ -1616,15 +1638,34 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
           <h2 className="cardTitle">角色分配</h2>
           <p className="cardSubtitle">为项目中每个角色选择对应的声音预设。</p>
           <div className="controlRow" style={{ justifyContent: "space-between" }}>
-            <Button
-              variant="secondary"
-              icon={Sparkles}
-              disabled={!currentProject?.id || isLoading}
-              onClick={handleFetchRecommendations}
-            >
-              {isLoading ? "推荐中..." : "按角色描述推荐"}
-            </Button>
-            <span className="muted">推荐使用当前试听后端：{previewBackend === "voxcpm2" ? "VoxCPM2" : "OmniVoice"}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <Button
+                variant="secondary"
+                icon={Sparkles}
+                disabled={!currentProject?.id || isLoading}
+                onClick={handleFetchRecommendations}
+              >
+                {isLoading ? "推荐中..." : "按内容推荐"}
+              </Button>
+              <div style={{ minWidth: 180 }}>
+                <Select
+                  value={recommendSource}
+                  onValueChange={(value) => setRecommendSource(value)}
+                  options={RECOMMEND_SOURCE_OPTIONS}
+                />
+              </div>
+              <Button
+                variant="secondary"
+                disabled={!["secondary_local", "primary_local"].includes(recommendSource) || isSaving || isLoading}
+                onClick={handleUnloadRecommendationModel}
+              >
+                卸载模型
+              </Button>
+            </div>
+            <span className="muted">
+              推荐使用当前试听后端：{previewBackend === "voxcpm2" ? "VoxCPM2" : "OmniVoice"}
+              {presetRecommendations?.source_used ? ` / 来源：${presetRecommendations.source_used}` : ""}
+            </span>
           </div>
 
           {characters.length ? (

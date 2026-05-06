@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import re
 import struct
@@ -12,16 +13,39 @@ from backend.models import Project, VoicePreset, VoiceQualityIssue, VoiceQuality
 
 _TOKEN_PATTERN = re.compile(r"[a-z0-9\u4e00-\u9fff]{2,}", re.IGNORECASE)
 _WORD_SPLIT_PATTERN = re.compile(r"[^a-z0-9\u4e00-\u9fff]+", re.IGNORECASE)
+_JSON_BLOCK_PATTERN = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.IGNORECASE | re.DOTALL)
+_SOURCE_SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[。！？!?；;])\s*|\n+")
 _RECOMMEND_KEYWORDS = {
-    "male": ["男", "男性", "男声", "大叔", "老者", "爷爷", "叔叔", "先生"],
-    "female": ["女", "女性", "女声", "少女", "御姐", "女士", "姐姐", "妈妈"],
-    "old": ["老", "年长", "年迈", "老人", "长者"],
-    "young": ["年轻", "青年", "少年", "少女", "小伙", "小姑娘"],
-    "calm": ["平静", "冷静", "稳重", "克制", "低调"],
-    "lively": ["活泼", "欢快", "俏皮", "轻快", "灵动"],
-    "dramatic": ["戏剧", "夸张", "高张力", "冲突", "激动"],
-    "gentle": ["温柔", "柔和", "亲切", "细腻"],
-    "whisper": ["低语", "耳语", "悄声", "轻声"],
+    "male": ["男", "男性", "男声", "大叔", "老者", "爷爷", "叔叔", "书生", "差役", "male"],
+    "female": ["女", "女性", "女声", "少女", "御姐", "女士", "姐姐", "妈妈", "female"],
+    "child": ["童子", "孩童", "孩子", "小孩", "儿童", "少年", "child", "cartoon"],
+    "old": ["老", "年长", "年迈", "老人", "长者", "elderly"],
+    "young": ["年轻", "青年", "少年", "少女", "小伙", "小姑娘", "young"],
+    "narrator": ["旁白", "narrator", "narration", "讲述", "叙述", "news", "novel"],
+    "calm": ["平静", "冷静", "稳重", "克制", "低调", "calm", "reliable", "professional"],
+    "lively": ["活泼", "欢快", "俏皮", "轻快", "灵动", "lively", "sunshine", "positive"],
+    "dramatic": ["戏剧", "夸张", "高张力", "冲突", "激动", "dramatic", "passion"],
+    "gentle": ["温柔", "柔和", "亲切", "细腻", "gentle", "friendly", "warm"],
+    "whisper": ["低语", "耳语", "悄声", "轻声", "whisper"],
+}
+
+_ROLE_TRAITS = {
+    "narrator": ["旁白", "narrator", "narration", "讲述", "叙述", "稳重", "calm", "news", "novel"],
+    "旁白": ["旁白", "narrator", "narration", "讲述", "叙述", "稳重", "calm", "news", "novel"],
+    "老": ["男性", "男声", "年长", "稳重", "old", "male", "reliable", "professional"],
+    "父": ["男性", "男声", "年长", "稳重", "old", "male", "reliable"],
+    "爹": ["男性", "男声", "年长", "稳重", "old", "male", "reliable"],
+    "儿子": ["男孩", "少年", "年轻", "young", "child", "male"],
+    "童": ["儿童", "孩童", "少年", "child", "cartoon", "lively"],
+    "孩": ["儿童", "孩童", "少年", "child", "cartoon", "lively"],
+    "差役": ["男性", "男声", "威严", "坚定", "male", "assertive", "professional"],
+    "兵": ["男性", "男声", "威严", "坚定", "male", "assertive", "professional"],
+    "汉子": ["男性", "男声", "粗犷", "市井", "male", "lively"],
+    "男人": ["男性", "男声", "male"],
+    "妇": ["女性", "女声", "成熟女性", "female", "middle", "warm"],
+    "娘": ["女性", "女声", "成熟女性", "female", "middle", "warm"],
+    "女": ["女性", "女声", "female"],
+    "茶客": ["男性", "男声", "市井", "叙事", "male", "novel"],
 }
 
 
@@ -32,6 +56,47 @@ def _safe_db_value(value: float | int | None) -> float | None:
     if numeric == float("inf") or numeric == float("-inf"):
         return None
     return round(numeric, 3)
+
+
+def _is_placeholder_character_description(name: str, description: str) -> bool:
+    value = (description or "").strip()
+    if not value:
+        return False
+    normalized = re.sub(r"\s+", "", value)
+    normalized_name = re.sub(r"\s+", "", name or "")
+    placeholders = {
+        f"{normalized_name}的角色档案",
+        f"{normalized_name}角色档案",
+        "角色档案",
+    }
+    return normalized in placeholders or normalized.endswith("的角色档案")
+
+
+def _infer_character_traits(name: str) -> str:
+    normalized = (name or "").strip()
+    traits: list[str] = []
+    for key, values in _ROLE_TRAITS.items():
+        if key == normalized or (key not in {"narrator", "旁白"} and key in normalized):
+            traits.extend(values)
+    return " ".join(normalize_tags(traits))
+
+
+def _build_source_contexts(source_text: str, names: set[str], max_sentences: int = 5) -> dict[str, str]:
+    contexts = {name: [] for name in names}
+    text = (source_text or "").strip()
+    if not text or not names:
+        return {name: "" for name in names}
+
+    sentences = [item.strip() for item in _SOURCE_SENTENCE_SPLIT_PATTERN.split(text) if item.strip()]
+    for sentence in sentences:
+        for name in names:
+            if not name or name == "narrator":
+                continue
+            if name in sentence and len(contexts[name]) < max_sentences:
+                contexts[name].append(sentence)
+    if "narrator" in contexts and not contexts["narrator"]:
+        contexts["narrator"] = sentences[:max_sentences]
+    return {name: " ".join(items) for name, items in contexts.items()}
 
 
 def _analyze_wav_audio(audio_path: Path, report: VoiceQualityReport) -> bool:
@@ -211,7 +276,7 @@ def _build_character_rows(project: Project) -> list[dict]:
         if speaker not in character_map:
             character_map[speaker] = {"name": speaker, "description": "", "appearance_count": 0}
         character_map[speaker]["appearance_count"] = int(character_map[speaker]["appearance_count"] or 0) + 1
-        if len(segment_group[speaker]) < 3 and (segment.text or "").strip():
+        if len(segment_group[speaker]) < 8 and (segment.text or "").strip():
             segment_group[speaker].append(segment.text.strip())
 
     for character in project.script.characters:
@@ -222,12 +287,14 @@ def _build_character_rows(project: Project) -> list[dict]:
             character_map[name] = {"name": name, "description": "", "appearance_count": 0}
         current_description = (character_map[name].get("description") or "").strip()
         if not current_description:
-            character_map[name]["description"] = (character.description or "").strip()
+            raw_description = (character.description or "").strip()
+            character_map[name]["description"] = "" if _is_placeholder_character_description(name, raw_description) else raw_description
         character_map[name]["appearance_count"] = max(
             int(character_map[name]["appearance_count"] or 0),
             int(character.appearance_count or 0),
         )
 
+    source_contexts = _build_source_contexts(project.script.source_text, set(character_map.keys()))
     rows: list[dict] = []
     for name, row in character_map.items():
         rows.append(
@@ -236,6 +303,8 @@ def _build_character_rows(project: Project) -> list[dict]:
                 "description": row.get("description", ""),
                 "appearance_count": int(row.get("appearance_count", 0) or 0),
                 "sample_text": " ".join(segment_group.get(name, [])),
+                "source_context": source_contexts.get(name, ""),
+                "role_traits": _infer_character_traits(name),
             }
         )
     rows.sort(key=lambda item: item.get("appearance_count", 0), reverse=True)
@@ -291,8 +360,16 @@ def recommend_presets_for_project(project: Project, presets: list[VoicePreset], 
     results: list[dict] = []
 
     for character in characters:
+        description = character.get("description", "")
         character_text = " ".join(
-            chunk for chunk in [character.get("name", ""), character.get("description", ""), character.get("sample_text", "")]
+            chunk
+            for chunk in [
+                character.get("name", ""),
+                description,
+                character.get("sample_text", ""),
+                character.get("source_context", ""),
+                character.get("role_traits", ""),
+            ]
             if chunk
         )
         character_tokens = _tokenize(character_text)
@@ -303,14 +380,14 @@ def recommend_presets_for_project(project: Project, presets: list[VoicePreset], 
             preset_tokens = _tokenize(preset_text)
             overlap = character_tokens.intersection(preset_tokens)
 
-            score = 20
+            score = 0
             reasons: list[str] = []
             if overlap:
                 score += min(40, len(overlap) * 8)
                 overlap_preview = sorted(list(overlap))[:4]
                 reasons.append(f"词项匹配：{', '.join(overlap_preview)}")
 
-            if preset.favorite:
+            if preset.favorite and score > 0:
                 score += 4
                 reasons.append("收藏预设加权")
 
@@ -337,17 +414,18 @@ def recommend_presets_for_project(project: Project, presets: list[VoicePreset], 
                 reasons.append("参考音频质量：fail")
 
             normalized_score = max(0, min(100, int(score)))
-            candidates.append(
-                {
-                    "preset_id": preset.id,
-                    "name": preset.name,
-                    "score": normalized_score,
-                    "favorite": bool(preset.favorite),
-                    "tags": preset.tags,
-                    "quality_status": quality_status,
-                    "reasons": reasons[:3] if reasons else ["基础匹配"],
-                }
-            )
+            if normalized_score > 0:
+                candidates.append(
+                    {
+                        "preset_id": preset.id,
+                        "name": preset.name,
+                        "score": normalized_score,
+                        "favorite": bool(preset.favorite),
+                        "tags": preset.tags,
+                        "quality_status": quality_status,
+                        "reasons": reasons[:3] if reasons else ["内容匹配"],
+                    }
+                )
 
         candidates.sort(key=lambda item: (item["score"], int(item["favorite"])), reverse=True)
         results.append(
@@ -356,6 +434,7 @@ def recommend_presets_for_project(project: Project, presets: list[VoicePreset], 
                 "description": character.get("description", ""),
                 "appearance_count": character.get("appearance_count", 0),
                 "top": candidates[:top_k],
+                "source_context": character.get("source_context", ""),
             }
         )
 
@@ -365,6 +444,166 @@ def recommend_presets_for_project(project: Project, presets: list[VoicePreset], 
         "limit": top_k,
         "recommendations": results,
     }
+
+
+def build_content_recommendation_payload(project: Project, presets: list[VoicePreset], backend: str, limit: int = 3) -> dict:
+    target_backend = (backend or "omnivoice").strip().lower()
+    if target_backend not in {"omnivoice", "voxcpm2"}:
+        target_backend = "omnivoice"
+    top_k = max(1, min(10, int(limit or 3)))
+    characters = _build_character_rows(project)
+    payload_characters: list[dict] = []
+    for character in characters:
+        payload_characters.append(
+            {
+                "name": character.get("name", ""),
+                "description": character.get("description", ""),
+                "appearance_count": int(character.get("appearance_count", 0) or 0),
+                "sample_text": character.get("sample_text", ""),
+                "source_context": character.get("source_context", ""),
+                "role_traits": character.get("role_traits", ""),
+            }
+        )
+
+    payload_presets: list[dict] = []
+    for preset in presets:
+        quality = preset.quality_reports.get(target_backend)
+        quality_status = quality.status if quality else "unknown"
+        omni = preset.resolved_omnivoice_profile()
+        vox = preset.resolved_voxcpm2_profile()
+        backend_hint = (
+            {
+                "voice_mode": omni.voice_mode,
+                "style": omni.style or "",
+                "custom_instruct": omni.custom_instruct or "",
+            }
+            if target_backend == "omnivoice"
+            else {
+                "voice_mode": vox.voice_mode,
+                "design_instruction": vox.design_instruction or "",
+                "control_instruction": vox.control_instruction or "",
+            }
+        )
+        payload_presets.append(
+            {
+                "id": preset.id,
+                "name": preset.name,
+                "tags": preset.tags,
+                "description": preset.description,
+                "suitable_role_description": preset.suitable_role_description,
+                "favorite": bool(preset.favorite),
+                "quality_status": quality_status,
+                "backend_hint": backend_hint,
+            }
+        )
+
+    return {
+        "project_id": project.id,
+        "backend": target_backend,
+        "limit": top_k,
+        "characters": payload_characters,
+        "presets": payload_presets,
+    }
+
+
+def content_recommendation_prompt(limit: int) -> str:
+    top_k = max(1, min(10, int(limit or 3)))
+    return (
+        "你是中文配音导演。根据角色内容样本与预设信息，为每个角色推荐最匹配的声音预设。"
+        "重点看角色台词、原文上下文、旁白内容、语气与情绪；角色描述如果为空或类似“某某的角色档案”，必须忽略。"
+        "角色名只作为年龄/性别/身份的辅助线索，不能覆盖内容样本。"
+        "仅输出 JSON，不要输出任何解释文字。"
+        '\nJSON 格式必须是：{"recommendations":[{"character":"角色名","top":[{"preset_id":"预设ID","score":0-100,"reasons":["简短理由"]}]}]}。'
+        f"\n每个角色 top 数量不超过 {top_k}，reasons 最多 2 条。"
+        "\nscore 需为整数，分数越高越匹配。"
+    )
+
+
+def parse_content_recommendations(
+    raw_text: str,
+    *,
+    characters: list[dict],
+    preset_ids: set[str],
+    limit: int,
+) -> tuple[list[dict], list[str]]:
+    top_k = max(1, min(10, int(limit or 3)))
+    warnings: list[str] = []
+    parsed: dict = {}
+
+    content = (raw_text or "").strip()
+    if not content:
+        return [], ["LLM 返回空内容"]
+
+    try:
+        parsed = json.loads(content)
+    except Exception:
+        match = _JSON_BLOCK_PATTERN.search(content)
+        if match:
+            try:
+                parsed = json.loads(match.group(1))
+            except Exception:
+                parsed = {}
+        else:
+            parsed = {}
+    if not isinstance(parsed, dict):
+        return [], ["LLM 返回格式不是 JSON 对象"]
+
+    rows = parsed.get("recommendations")
+    if not isinstance(rows, list):
+        return [], ["LLM 返回缺少 recommendations 列表"]
+
+    by_character: dict[str, dict] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("character", "")).strip()
+        if not name or name in by_character:
+            continue
+        by_character[name] = row
+
+    normalized_rows: list[dict] = []
+    for character in characters:
+        name = str(character.get("name", "")).strip()
+        source = by_character.get(name, {})
+        top_items = source.get("top", []) if isinstance(source, dict) else []
+        normalized_top: list[dict] = []
+        seen_ids: set[str] = set()
+        if isinstance(top_items, list):
+            for item in top_items:
+                if not isinstance(item, dict):
+                    continue
+                preset_id = str(item.get("preset_id", "")).strip()
+                if not preset_id or preset_id in seen_ids:
+                    continue
+                if preset_id not in preset_ids:
+                    warnings.append(f"LLM 返回未知 preset_id: {preset_id}")
+                    continue
+                seen_ids.add(preset_id)
+                score_value = item.get("score", 0)
+                try:
+                    score = int(float(score_value))
+                except Exception:
+                    score = 0
+                score = max(0, min(100, score))
+                reasons = item.get("reasons", [])
+                if not isinstance(reasons, list):
+                    reasons = []
+                normalized_top.append(
+                    {
+                        "preset_id": preset_id,
+                        "score": score,
+                        "reasons": [str(reason).strip() for reason in reasons if str(reason).strip()][:2] or ["内容匹配"],
+                    }
+                )
+                if len(normalized_top) >= top_k:
+                    break
+        normalized_rows.append(
+            {
+                "character": name,
+                "top": normalized_top,
+            }
+        )
+    return normalized_rows, warnings
 
 
 def split_tag_text(tag_text: str) -> list[str]:

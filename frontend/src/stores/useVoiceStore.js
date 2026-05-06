@@ -296,20 +296,41 @@ export const useVoiceStore = create((set) => ({
       throw error;
     }
   },
-  fetchPresetRecommendations: async ({ projectId, backend = "omnivoice", limit = 3 }) => {
+  fetchPresetRecommendations: async ({ projectId, backend = "omnivoice", limit = 3, source = "secondary_local" }) => {
     set({ isLoading: true, error: "" });
     try {
       const result = await api.post("/voices/recommend", {
         project_id: projectId,
         backend,
         limit,
+        source,
       });
       set({ presetRecommendations: result, isLoading: false });
+      const sourceUsed = (result?.source_used || source || "").trim();
+      if (sourceUsed === "rule_fallback") {
+        useUiStore.getState().pushToast({ title: "LLM 推荐失败，已自动回退规则推荐", tone: "warning" });
+      }
       return result;
     } catch (error) {
       const message = getErrorMessage(error, "推荐失败");
       set({ isLoading: false, error: message });
       useUiStore.getState().pushToast({ title: formatError("推荐失败", message), tone: "error" });
+      throw error;
+    }
+  },
+  unloadRecommendationModel: async (source = "secondary_local") => {
+    set({ isSaving: true, error: "" });
+    try {
+      const sourceName = (source || "secondary_local").trim();
+      const endpoint = sourceName === "primary_local" ? "/system/unload-llm" : "/llm/translation-engine/unload";
+      const result = await api.post(endpoint, {});
+      set({ isSaving: false });
+      useUiStore.getState().pushToast({ title: "推荐模型已卸载", tone: "success" });
+      return result;
+    } catch (error) {
+      const message = getErrorMessage(error, "卸载推荐模型失败");
+      set({ isSaving: false, error: message });
+      useUiStore.getState().pushToast({ title: formatError("卸载推荐模型失败", message), tone: "error" });
       throw error;
     }
   },

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import wave
 import mimetypes
 from pathlib import Path
 import time
+from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
@@ -18,11 +20,19 @@ from backend.models import (
     VoiceRecommendRequest,
 )
 from backend.services.project_core_service import get_project
-from backend.services.voice_preset_service import analyze_reference_audio, normalize_tags, recommend_presets_for_project
+from backend.services.voice_preset_service import (
+    analyze_reference_audio,
+    build_content_recommendation_payload,
+    content_recommendation_prompt,
+    normalize_tags,
+    parse_content_recommendations,
+    recommend_presets_for_project,
+)
 from backend.state import get_app_state
 
 router = APIRouter()
 _PREVIEW_TTL_SECONDS = 10 * 60
+_ALLOWED_RECOMMEND_SOURCES = {"secondary_local", "primary_local", "openai", "gemini", "rule"}
 
 
 def _cleanup_expired_previews(output_dir: Path) -> None:
@@ -52,6 +62,115 @@ def _normalize_preset(preset: VoicePreset) -> VoicePreset:
             "tags": normalize_tags(preset.tags),
         }
     )
+
+
+def _build_recommendation_engine_config(state, source: str) -> dict[str, Any]:
+    cfg = state.orchestrator.config
+    source_name = (source or "secondary_local").strip().lower()
+    if source_name == "secondary_local":
+        return {
+            "backend": "llama_cpp",
+            "model_path": cfg.secondary_llm_model_path,
+            "clip_model_path": cfg.secondary_llm_clip_model_path,
+            "n_ctx": int(cfg.secondary_llm_n_ctx),
+            "n_gpu_layers": int(cfg.secondary_llm_n_gpu_layers),
+            "n_threads": int(cfg.secondary_llm_threads),
+            "enable_think_mode": bool(cfg.secondary_enable_llama_cpp_think_mode),
+            "options": {
+                "temperature": float(cfg.secondary_llm_temperature),
+                "top_p": float(cfg.secondary_llm_top_p),
+                "top_k": int(cfg.secondary_llm_top_k),
+                "min_p": float(cfg.secondary_llm_min_p),
+                "presence_penalty": float(cfg.secondary_llm_presence_penalty),
+                "repeat_penalty": float(cfg.secondary_llm_repeat_penalty),
+                "max_tokens": int(cfg.secondary_llm_max_tokens),
+                "api_model": cfg.llm_api_model,
+            },
+        }
+    if source_name == "primary_local":
+        return {
+            "backend": "llama_cpp",
+            "model_path": cfg.llm_model_path,
+            "clip_model_path": cfg.llm_clip_model_path,
+            "n_ctx": int(cfg.llm_n_ctx),
+            "n_gpu_layers": int(cfg.llm_n_gpu_layers),
+            "n_threads": int(cfg.llm_threads),
+            "enable_think_mode": bool(cfg.enable_llama_cpp_think_mode),
+            "options": {
+                "temperature": float(cfg.llm_temperature),
+                "top_p": float(cfg.llm_top_p),
+                "top_k": int(cfg.llm_top_k),
+                "min_p": float(cfg.llm_min_p),
+                "presence_penalty": float(cfg.llm_presence_penalty),
+                "repeat_penalty": float(cfg.llm_repeat_penalty),
+                "max_tokens": int(cfg.llm_max_tokens),
+                "api_model": cfg.llm_api_model,
+            },
+        }
+    if source_name == "openai":
+        return {
+            "backend": "openai",
+            "model_path": cfg.llm_model_path,
+            "clip_model_path": cfg.llm_clip_model_path,
+            "n_ctx": int(cfg.llm_n_ctx),
+            "n_gpu_layers": int(cfg.llm_n_gpu_layers),
+            "n_threads": int(cfg.llm_threads),
+            "enable_think_mode": False,
+            "options": {
+                "temperature": float(cfg.llm_temperature),
+                "top_p": float(cfg.llm_top_p),
+                "top_k": int(cfg.llm_top_k),
+                "min_p": float(cfg.llm_min_p),
+                "presence_penalty": float(cfg.llm_presence_penalty),
+                "repeat_penalty": float(cfg.llm_repeat_penalty),
+                "max_tokens": int(cfg.llm_max_tokens),
+                "api_model": cfg.llm_api_model,
+            },
+        }
+    if source_name == "gemini":
+        return {
+            "backend": "gemini",
+            "model_path": cfg.llm_model_path,
+            "clip_model_path": cfg.llm_clip_model_path,
+            "n_ctx": int(cfg.llm_n_ctx),
+            "n_gpu_layers": int(cfg.llm_n_gpu_layers),
+            "n_threads": int(cfg.llm_threads),
+            "enable_think_mode": False,
+            "options": {
+                "temperature": float(cfg.llm_temperature),
+                "top_p": float(cfg.llm_top_p),
+                "top_k": int(cfg.llm_top_k),
+                "min_p": float(cfg.llm_min_p),
+                "presence_penalty": float(cfg.llm_presence_penalty),
+                "repeat_penalty": float(cfg.llm_repeat_penalty),
+                "max_tokens": int(cfg.llm_max_tokens),
+                "api_model": cfg.llm_api_model,
+            },
+        }
+    raise HTTPException(status_code=400, detail=f"Unsupported recommendation source: {source_name}")
+
+
+async def _ensure_recommendation_engine_ready(state, source: str) -> tuple[Any, dict[str, Any]]:
+    config = _build_recommendation_engine_config(state, source)
+    engine = state.translation_llm_engine
+    current_source = (state.translation_engine_source or "").strip().lower()
+    if engine.is_loaded and current_source != source:
+        await engine.unload_model()
+        state.translation_engine_source = ""
+        state.translation_engine_error = ""
+    if not engine.is_loaded:
+        engine.enable_llama_cpp_think_mode = bool(config["enable_think_mode"])
+        await engine.load_model(
+            model_path=config["model_path"],
+            clip_model_path=config["clip_model_path"],
+            n_ctx=config["n_ctx"],
+            n_gpu_layers=config["n_gpu_layers"],
+            backend=config["backend"],
+            n_threads=config["n_threads"],
+        )
+        state.translation_engine_source = source
+        state.translation_engine_error = ""
+    return engine, config["options"]
 
 
 @router.get("/presets")
@@ -174,7 +293,90 @@ async def quality_check_preset(
 async def recommend_presets(payload: VoiceRecommendRequest, state=Depends(get_app_state)):
     project = get_project(payload.project_id, projects_dir=state.settings.projects_dir)
     presets = state.voice_manager.list_presets()
-    return recommend_presets_for_project(project, presets, backend=payload.backend, limit=payload.limit)
+    source = (payload.source or "secondary_local").strip().lower()
+    if source not in _ALLOWED_RECOMMEND_SOURCES:
+        raise HTTPException(status_code=400, detail=f"Unsupported recommendation source: {source}")
+
+    rule_result = recommend_presets_for_project(project, presets, backend=payload.backend, limit=payload.limit)
+    if source == "rule":
+        return {
+            **rule_result,
+            "source_requested": source,
+            "source_used": "rule",
+            "warnings": [],
+        }
+
+    llm_payload = build_content_recommendation_payload(project, presets, backend=payload.backend, limit=payload.limit)
+    prompt = content_recommendation_prompt(payload.limit)
+    warnings: list[str] = []
+
+    try:
+        engine, llm_options = await _ensure_recommendation_engine_ready(state, source)
+        llm_text = await engine.generate_text(
+            text=json.dumps(llm_payload, ensure_ascii=False),
+            system_prompt=prompt,
+            llm_options=llm_options,
+        )
+        normalized_rows, parse_warnings = parse_content_recommendations(
+            llm_text,
+            characters=llm_payload["characters"],
+            preset_ids={preset.id for preset in presets},
+            limit=payload.limit,
+        )
+        warnings.extend(parse_warnings)
+        if normalized_rows:
+            preset_map = {preset.id: preset for preset in presets}
+            top_by_character = {row.get("character", ""): row.get("top", []) for row in normalized_rows}
+            merged_rows: list[dict] = []
+            for row in rule_result.get("recommendations", []):
+                character_name = row.get("character", "")
+                llm_top = top_by_character.get(character_name, [])
+                if llm_top:
+                    enriched_top = []
+                    for item in llm_top:
+                        preset_id = item.get("preset_id", "")
+                        preset = preset_map.get(preset_id)
+                        if not preset:
+                            continue
+                        quality = preset.quality_reports.get(rule_result.get("backend", "omnivoice"))
+                        quality_status = quality.status if quality else "unknown"
+                        enriched_top.append(
+                            {
+                                "preset_id": preset_id,
+                                "name": preset.name,
+                                "score": int(item.get("score", 0)),
+                                "favorite": bool(preset.favorite),
+                                "tags": preset.tags,
+                                "quality_status": quality_status,
+                                "reasons": item.get("reasons", ["内容匹配"]),
+                            }
+                        )
+                    if enriched_top:
+                        merged_rows.append(
+                            {
+                                **row,
+                                "top": enriched_top[: payload.limit],
+                            }
+                        )
+                        continue
+                merged_rows.append(row)
+            if merged_rows:
+                return {
+                    **rule_result,
+                    "recommendations": merged_rows,
+                    "source_requested": source,
+                    "source_used": source,
+                    "warnings": warnings,
+                }
+    except Exception as exc:
+        warnings.append(f"LLM 推荐失败，已回退规则推荐: {exc}")
+
+    return {
+        **rule_result,
+        "source_requested": source,
+        "source_used": "rule_fallback",
+        "warnings": warnings or ["LLM 推荐不可用，已回退规则推荐"],
+    }
 
 
 @router.get("/reference-audio")
