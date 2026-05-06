@@ -54,11 +54,14 @@ def hash_payload(payload: dict) -> str:
 def public_task(task: dict) -> dict:
     return {
         "task_id": task["task_id"],
+        "kind": task.get("kind", "synthesis"),
         "status": task["status"],
         "segments": task["segments"],
         "project_id": task["project_id"],
         "progress": task["progress"],
         "export_url": task["export_url"],
+        "processed_export_url": task.get("processed_export_url", ""),
+        "chapter_exports": task.get("chapter_exports", []),
         "subtitle_srt_url": task.get("subtitle_srt_url", ""),
         "subtitle_lrc_url": task.get("subtitle_lrc_url", ""),
         "scope": task.get("scope", "full"),

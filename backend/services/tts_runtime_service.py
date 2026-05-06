@@ -23,6 +23,7 @@ async def emit_task_event(*, state, task: dict, task_id: str, message: dict) -> 
             task["project_id"],
             {
                 "source": "tts",
+                "kind": task.get("kind", "synthesis"),
                 "task_id": task_id,
                 "status": task.get("status", ""),
                 "event": message,

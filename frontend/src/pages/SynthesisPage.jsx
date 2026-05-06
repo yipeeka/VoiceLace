@@ -5,7 +5,7 @@ import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import ScriptSidebarColumn from "../components/script/ScriptSidebarColumn";
 import ScriptDiffPreviewDialog from "../components/script/ScriptDiffPreviewDialog";
 import Button from "../components/ui/Button";
-import SynthesisConfigCard from "../components/synthesis/SynthesisConfigCard";
+import { SynthesisGenerateCard, SynthesisPostprocessCard } from "../components/synthesis/SynthesisConfigCard";
 import SynthesisTaskStatusCard from "../components/synthesis/SynthesisTaskStatusCard";
 import SynthesisFullAudioCard from "../components/synthesis/SynthesisFullAudioCard";
 import SynthesisTimelineCard from "../components/synthesis/SynthesisTimelineCard";
@@ -46,9 +46,10 @@ function formatTimeMs(ms) {
 export default function SynthesisPage() {
   const { currentProject, refreshCurrentProject, importArchive, importWarnings } = useProjectStore();
   const {
-    taskId, status, connectionStatus, modelStatus, lastSyncError, progress, segmentResults, fullAudioUrl, isRunning, error,
+    taskId, status, connectionStatus, modelStatus, lastSyncError, progress, segmentResults, fullAudioUrl, rawAudioUrl, processedAudioUrl,
+    chapterExports, audioVariant, isRunning, error,
     subtitleSrtUrl, subtitleLrcUrl,
-    startSynthesis, startPartialSynthesis, cancelSynthesis, reset,
+    startSynthesis, startPartialSynthesis, startPostprocess, cancelSynthesis, reset, setAudioVariant,
   } = useSynthesisStore();
   const archiveInputRef = useRef(null);
   const lastProjectIdRef = useRef(null);
@@ -66,6 +67,8 @@ export default function SynthesisPage() {
   const [resolvedSegmentDurations, setResolvedSegmentDurations] = useState({});
   const [fullAudioCurrentTime, setFullAudioCurrentTime] = useState(0);
   const [diffPreviewOpen, setDiffPreviewOpen] = useState(false);
+  const [isUploadingPostAsset, setIsUploadingPostAsset] = useState(false);
+  const [expandedSynthesisPanel, setExpandedSynthesisPanel] = useState("synthesis");
   const updatedRowTimerRef = useRef(null);
   const { saveScript, isSaving: isScriptSaving, error: scriptError } = useScriptStore();
   const pushToast = useUiStore.getState().pushToast;
@@ -88,6 +91,30 @@ export default function SynthesisPage() {
     },
     gap_duration_ms: 300,
     output_format: "wav",
+    postprocess_enabled: false,
+    loudness_normalize: true,
+    target_lufs: -16,
+    trim_silence_enabled: false,
+    trim_threshold_db: -45,
+    trim_min_silence_ms: 120,
+    fade_in_ms: 40,
+    fade_out_ms: 80,
+    mp3_bitrate_kbps: 192,
+    chapter_markers: [],
+    bgm_track: {
+      relpath: "",
+      gain_db: 0,
+      loop: true,
+      ducking_enabled: false,
+      ducking_db: 8,
+    },
+    ambience_track: {
+      relpath: "",
+      gain_db: 0,
+      loop: true,
+      ducking_enabled: false,
+      ducking_db: 8,
+    },
   });
 
   const setConfig = (updater) =>
@@ -116,6 +143,7 @@ export default function SynthesisPage() {
       setRecentlyUpdatedSegmentId(null);
       setResolvedSegmentDurations({});
       setFullAudioCurrentTime(0);
+      setExpandedSynthesisPanel("synthesis");
       if (updatedRowTimerRef.current) {
         clearTimeout(updatedRowTimerRef.current);
         updatedRowTimerRef.current = null;
@@ -167,17 +195,37 @@ export default function SynthesisPage() {
     if (!currentProject?.id) {
       return;
     }
-    const hasImportedAudio =
-      Boolean(currentProject.audio_assets?.full_wav_relpath) || Boolean(currentProject.audio_assets?.full_mp3_relpath);
-    if (!hasImportedAudio) {
-      return;
-    }
     const format = config.output_format || "wav";
-    useSynthesisStore.setState((state) => ({
-      fullAudioUrl: state.fullAudioUrl || `${API_ORIGIN}/api/v1/tts/export?project_id=${currentProject.id}&format=${format}`,
-      subtitleSrtUrl: state.subtitleSrtUrl || `${API_ORIGIN}/api/v1/tts/subtitle?project_id=${currentProject.id}&format=srt`,
-      subtitleLrcUrl: state.subtitleLrcUrl || `${API_ORIGIN}/api/v1/tts/subtitle?project_id=${currentProject.id}&format=lrc`,
-    }));
+    const rawUrl = `${API_ORIGIN}/api/v1/tts/export?project_id=${currentProject.id}&format=${format}&variant=raw`;
+    const processedUrl = `${API_ORIGIN}/api/v1/tts/export?project_id=${currentProject.id}&format=${format}&variant=processed`;
+    const hasProcessed =
+      Boolean(currentProject.audio_assets?.processed?.full_wav_relpath) ||
+      Boolean(currentProject.audio_assets?.processed?.full_mp3_relpath);
+    const hasRaw =
+      Boolean(currentProject.audio_assets?.full_wav_relpath) ||
+      Boolean(currentProject.audio_assets?.full_mp3_relpath);
+    const chapterExports = Array.isArray(currentProject.audio_assets?.processed?.chapters)
+      ? currentProject.audio_assets.processed.chapters.map((item) => ({
+        id: item.id,
+        title: item.title,
+        wav_url: `/api/v1/tts/export/chapter?project_id=${currentProject.id}&chapter_id=${item.id}&format=wav&variant=processed`,
+        mp3_url: `/api/v1/tts/export/chapter?project_id=${currentProject.id}&chapter_id=${item.id}&format=mp3&variant=processed`,
+      }))
+      : [];
+
+    useSynthesisStore.setState(() => {
+      const nextVariant = hasProcessed ? "processed" : "raw";
+      const nextFullAudioUrl = hasProcessed ? processedUrl : hasRaw ? rawUrl : null;
+      return {
+        rawAudioUrl: hasRaw ? rawUrl : null,
+        processedAudioUrl: hasProcessed ? processedUrl : null,
+        fullAudioUrl: nextFullAudioUrl,
+        audioVariant: nextVariant,
+        subtitleSrtUrl: `${API_ORIGIN}/api/v1/tts/subtitle?project_id=${currentProject.id}&format=srt`,
+        subtitleLrcUrl: `${API_ORIGIN}/api/v1/tts/subtitle?project_id=${currentProject.id}&format=lrc`,
+        chapterExports,
+      };
+    });
   }, [config.output_format, currentProject]);
 
   const staleBySegmentId = useMemo(() => {
@@ -593,6 +641,80 @@ export default function SynthesisPage() {
     await startSynthesisTask();
   }
 
+  function buildRuntimeConfig(baseConfig) {
+    return {
+      ...baseConfig,
+      guidance_scale: Number(baseConfig.guidance_scale),
+      num_step: Number(baseConfig.num_step),
+      gap_duration_ms: Number(baseConfig.gap_duration_ms),
+      target_lufs: Number(baseConfig.target_lufs),
+      trim_threshold_db: Number(baseConfig.trim_threshold_db),
+      trim_min_silence_ms: Number(baseConfig.trim_min_silence_ms),
+      fade_in_ms: Number(baseConfig.fade_in_ms),
+      fade_out_ms: Number(baseConfig.fade_out_ms),
+      mp3_bitrate_kbps: Number(baseConfig.mp3_bitrate_kbps),
+      bgm_track: {
+        ...(baseConfig.bgm_track || {}),
+        gain_db: Number(baseConfig.bgm_track?.gain_db || 0),
+        ducking_db: Number(baseConfig.bgm_track?.ducking_db || 8),
+      },
+      ambience_track: {
+        ...(baseConfig.ambience_track || {}),
+        gain_db: Number(baseConfig.ambience_track?.gain_db || 0),
+      },
+    };
+  }
+
+  async function handleStartPostprocess() {
+    if (guardUnsavedChanges("开始后处理")) {
+      return;
+    }
+    if (!currentProject?.id || isRunning) {
+      return;
+    }
+    await startPostprocess({
+      projectId: currentProject.id,
+      config: buildRuntimeConfig(config),
+    });
+    await refreshCurrentProject(currentProject.id);
+  }
+
+  async function handleUploadPostprocessAsset(assetType, file) {
+    if (!currentProject?.id || !file) {
+      return;
+    }
+    setIsUploadingPostAsset(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const result = await api.uploadForm(
+        `/tts/projects/${currentProject.id}/postprocess/assets?type=${assetType}`,
+        form,
+      );
+      if (assetType === "bgm") {
+        setConfig({
+          bgm_track: {
+            ...(config.bgm_track || {}),
+            relpath: result.relpath || "",
+          },
+        });
+      } else {
+        setConfig({
+          ambience_track: {
+            ...(config.ambience_track || {}),
+            relpath: result.relpath || "",
+          },
+        });
+      }
+      await refreshCurrentProject(currentProject.id);
+      pushToast({ title: `${assetType === "bgm" ? "背景音乐" : "环境音"}已绑定`, tone: "success" });
+    } catch (uploadError) {
+      pushToast({ title: `素材上传失败：${uploadError?.message || uploadError}`, tone: "error" });
+    } finally {
+      setIsUploadingPostAsset(false);
+    }
+  }
+
   async function handleSingleSegmentSynthesis(segmentId) {
     if (guardUnsavedChanges("重新生成")) {
       return;
@@ -628,15 +750,31 @@ export default function SynthesisPage() {
     <div className="pageGrid" style={{ gap: 20 }}>
       {/* Control row */}
       <div className="pageGrid twoCols" style={{ alignItems: "stretch" }}>
-        <SynthesisConfigCard
-          config={config}
-          currentProject={currentProject}
-          isRunning={isRunning}
-          error={error}
-          onSetConfig={setConfig}
-          onStart={handleStart}
-          onCancel={handleCancelSynthesis}
-        />
+        <div className="listStack">
+          <SynthesisGenerateCard
+            expanded={expandedSynthesisPanel === "synthesis"}
+            onToggle={() => setExpandedSynthesisPanel((current) => (current === "synthesis" ? "" : "synthesis"))}
+            config={config}
+            currentProject={currentProject}
+            isRunning={isRunning}
+            error={error}
+            onSetConfig={setConfig}
+            onStart={handleStart}
+            onCancel={handleCancelSynthesis}
+          />
+          <SynthesisPostprocessCard
+            expanded={expandedSynthesisPanel === "postprocess"}
+            onToggle={() => setExpandedSynthesisPanel((current) => (current === "postprocess" ? "" : "postprocess"))}
+            config={config}
+            segments={draftScript?.segments || []}
+            currentProject={currentProject}
+            isRunning={isRunning}
+            isUploadingPostAsset={isUploadingPostAsset}
+            onSetConfig={setConfig}
+            onStartPostprocess={handleStartPostprocess}
+            onUploadPostprocessAsset={handleUploadPostprocessAsset}
+          />
+        </div>
         <SynthesisTaskStatusCard
           API_ORIGIN={API_ORIGIN}
           staleReport={staleReport}
@@ -651,6 +789,11 @@ export default function SynthesisPage() {
           isRunning={isRunning}
           progressPct={progressPct}
           fullAudioUrl={fullAudioUrl}
+          rawAudioUrl={rawAudioUrl}
+          processedAudioUrl={processedAudioUrl}
+          chapterExports={chapterExports}
+          audioVariant={audioVariant}
+          onAudioVariantChange={setAudioVariant}
           subtitleSrtUrl={subtitleSrtUrl}
           subtitleLrcUrl={subtitleLrcUrl}
           currentProject={currentProject}
@@ -664,6 +807,7 @@ export default function SynthesisPage() {
       <SynthesisFullAudioCard
         projectId={currentProject?.id}
         fullAudioUrl={fullAudioUrl}
+        audioVariant={audioVariant}
         segments={segments}
         gapDurationMs={Number(config.gap_duration_ms || 300)}
         onCurrentTimeChange={setFullAudioCurrentTime}

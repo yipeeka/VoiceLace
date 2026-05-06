@@ -46,6 +46,9 @@ from .project_script_service import segment_content_payload, sync_script_metadat
 from .tts_path_service import (
     project_full_dir,
     project_output_root,
+    project_postprocess_assets_dir,
+    project_processed_chapters_dir,
+    project_processed_dir,
     project_segment_waveforms_dir,
     project_segments_dir,
     project_subtitles_dir,
@@ -60,18 +63,21 @@ from .tts_finalize_service import (
     update_project_audio_assets_after_synthesis,
 )
 from .tts_query_service import build_project_waveform_response, resolve_export_audio_path, resolve_subtitle_path
+from .tts_query_service import build_project_waveform_response_for_variant
 from .tts_lifecycle_service import build_tts_status_response, create_tts_task_record
 from .tts_runtime_service import emit_task_event, normalize_segment_tts_overrides
 from .tts_delivery_service import (
     export_project_archive,
     load_project_segment_peaks_payload,
     load_project_waveform_payload,
+    load_project_waveform_payload_for_variant,
     resolve_export_audio_response_path,
     resolve_project_segment_audio_path,
     resolve_subtitle_response_path,
     should_log_stale_report,
     write_silence_wav,
 )
+from .tts_postprocess_service import bind_postprocess_asset_to_project, run_postprocess_task
 from .tts_scan_service import build_synthesis_scan_plan
 from .tts_segment_service import process_synthesis_segment
 from .tts_pipeline_service import run_synthesis_task
@@ -120,6 +126,9 @@ __all__ = [
     "sync_script_metadata",
     "project_full_dir",
     "project_output_root",
+    "project_postprocess_assets_dir",
+    "project_processed_chapters_dir",
+    "project_processed_dir",
     "project_segment_waveforms_dir",
     "project_segments_dir",
     "project_subtitles_dir",
@@ -132,6 +141,7 @@ __all__ = [
     "timeline_from_segment_results",
     "update_project_audio_assets_after_synthesis",
     "build_project_waveform_response",
+    "build_project_waveform_response_for_variant",
     "resolve_export_audio_path",
     "resolve_subtitle_path",
     "build_tts_status_response",
@@ -140,6 +150,7 @@ __all__ = [
     "export_project_archive",
     "load_project_segment_peaks_payload",
     "load_project_waveform_payload",
+    "load_project_waveform_payload_for_variant",
     "normalize_segment_tts_overrides",
     "resolve_export_audio_response_path",
     "resolve_project_segment_audio_path",
@@ -149,6 +160,8 @@ __all__ = [
     "build_synthesis_scan_plan",
     "process_synthesis_segment",
     "run_synthesis_task",
+    "run_postprocess_task",
+    "bind_postprocess_asset_to_project",
     "hash_payload",
     "public_task",
     "segment_cache_key",

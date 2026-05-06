@@ -277,7 +277,7 @@ async def run_synthesis_task(*, task_id: str, payload: SynthesizeRequest, state,
             )
 
         task["status"] = "done"
-        task["export_url"] = f"/api/v1/tts/export?project_id={payload.project_id}&format={final_format}"
+        task["export_url"] = f"/api/v1/tts/export?project_id={payload.project_id}&format={final_format}&variant=raw"
         task["subtitle_srt_url"] = f"/api/v1/tts/subtitle?project_id={payload.project_id}&format=srt"
         task["subtitle_lrc_url"] = f"/api/v1/tts/subtitle?project_id={payload.project_id}&format=lrc"
         update_project_audio_assets_after_synthesis(

@@ -18,6 +18,11 @@ export default function SynthesisTaskStatusCard({
   isRunning,
   progressPct,
   fullAudioUrl,
+  rawAudioUrl,
+  processedAudioUrl,
+  chapterExports = [],
+  audioVariant = "raw",
+  onAudioVariantChange,
   subtitleSrtUrl,
   subtitleLrcUrl,
   currentProject,
@@ -25,6 +30,7 @@ export default function SynthesisTaskStatusCard({
   archiveInputRef,
   onImportArchive,
 }) {
+  const normalizedChapterExports = Array.isArray(chapterExports) ? chapterExports : [];
   return (
     <GlassCard>
       <h2 className="cardTitle">任务状态</h2>
@@ -59,11 +65,21 @@ export default function SynthesisTaskStatusCard({
         <Progress value={progressPct} color={status === "done" ? "success" : status === "error" ? "danger" : "primary"} />
       )}
       {fullAudioUrl && (
-        <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+        <div style={{ display: "flex", gap: 10, marginTop: 4, flexWrap: "wrap" }}>
           <a className="downloadLink" href={fullAudioUrl} target="_blank" rel="noreferrer">
             <Download size={14} />
-            下载完整音频
+            下载当前音频
           </a>
+          {rawAudioUrl ? (
+            <a className="downloadLink" href={rawAudioUrl} target="_blank" rel="noreferrer">
+              下载原始音频
+            </a>
+          ) : null}
+          {processedAudioUrl ? (
+            <a className="downloadLink" href={processedAudioUrl} target="_blank" rel="noreferrer">
+              下载后处理音频
+            </a>
+          ) : null}
           {subtitleSrtUrl ? (
             <a className="downloadLink" href={subtitleSrtUrl} target="_blank" rel="noreferrer">
               下载 SRT
@@ -86,6 +102,47 @@ export default function SynthesisTaskStatusCard({
           ) : null}
         </div>
       )}
+      <div className="controlRow" style={{ marginTop: 8, gap: 8, flexWrap: "wrap" }}>
+        <Button
+          variant={audioVariant === "raw" ? "primary" : "secondary"}
+          size="sm"
+          disabled={!rawAudioUrl}
+          onClick={() => onAudioVariantChange?.("raw")}
+        >
+          播放原始
+        </Button>
+        <Button
+          variant={audioVariant === "processed" ? "primary" : "secondary"}
+          size="sm"
+          disabled={!processedAudioUrl}
+          onClick={() => onAudioVariantChange?.("processed")}
+        >
+          播放后处理
+        </Button>
+      </div>
+      {normalizedChapterExports.length ? (
+        <div className="listStack" style={{ marginTop: 8 }}>
+          {normalizedChapterExports.map((chapter) => (
+            <div key={chapter.id} className="statRow" style={{ gap: 8, alignItems: "center" }}>
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {chapter.title || chapter.id}
+              </span>
+              <div className="controlRow" style={{ gap: 8 }}>
+                {chapter.wav_url ? (
+                  <a className="downloadLink" href={`${API_ORIGIN}${chapter.wav_url}`} target="_blank" rel="noreferrer">
+                    WAV
+                  </a>
+                ) : null}
+                {chapter.mp3_url ? (
+                  <a className="downloadLink" href={`${API_ORIGIN}${chapter.mp3_url}`} target="_blank" rel="noreferrer">
+                    MP3
+                  </a>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <div className="controlRow" style={{ marginTop: 10 }}>
         <Button variant="secondary" size="sm" icon={Upload} onClick={() => archiveInputRef.current?.click()}>
           导入工程 ZIP

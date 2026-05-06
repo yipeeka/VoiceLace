@@ -7,6 +7,9 @@ from pathlib import Path
 from backend.services.tts_path_service import (
     project_full_dir,
     project_output_root,
+    project_postprocess_assets_dir,
+    project_processed_chapters_dir,
+    project_processed_dir,
     project_segment_waveforms_dir,
     project_segments_dir,
     project_subtitles_dir,
@@ -27,6 +30,15 @@ class TtsPathServiceTest(unittest.TestCase):
             output_dir / "projects" / project_id / "subtitles",
         )
         self.assertEqual(project_waveforms_dir(output_dir=output_dir, project_id=project_id), output_dir / "projects" / project_id / "waveforms")
+        self.assertEqual(project_processed_dir(output_dir=output_dir, project_id=project_id), output_dir / "projects" / project_id / "processed")
+        self.assertEqual(
+            project_processed_chapters_dir(output_dir=output_dir, project_id=project_id),
+            output_dir / "projects" / project_id / "processed" / "chapters",
+        )
+        self.assertEqual(
+            project_postprocess_assets_dir(output_dir=output_dir, project_id=project_id),
+            output_dir / "projects" / project_id / "postprocess_assets",
+        )
         self.assertEqual(
             project_segment_waveforms_dir(output_dir=output_dir, project_id=project_id),
             output_dir / "projects" / project_id / "waveforms" / "segments",

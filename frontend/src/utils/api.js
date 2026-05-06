@@ -114,4 +114,14 @@ export const api = {
     }
     return response.json();
   },
+  uploadForm: async (path, formData) => {
+    const response = await fetch(`${BASE_URL}${path}`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!response.ok) {
+      throw await buildApiError(response, path);
+    }
+    return response.json();
+  },
 };

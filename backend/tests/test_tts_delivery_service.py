@@ -23,7 +23,7 @@ class TtsDeliveryServiceTest(unittest.TestCase):
             projects_dir.mkdir(parents=True, exist_ok=True)
             project = save_project(projects_dir, Project(name="tts"))
 
-            def _resolve_export_audio_path(*, output_dir, project, req_format):
+            def _resolve_export_audio_path(*, output_dir, project, req_format, variant):
                 return output_dir / f"{project.id}.{req_format}", "audio/mpeg"
 
             path, media_type = resolve_export_audio_response_path(
@@ -31,6 +31,7 @@ class TtsDeliveryServiceTest(unittest.TestCase):
                 projects_dir=projects_dir,
                 project_id=project.id,
                 req_format="mp3",
+                variant="raw",
                 resolve_export_audio_path=_resolve_export_audio_path,
             )
 

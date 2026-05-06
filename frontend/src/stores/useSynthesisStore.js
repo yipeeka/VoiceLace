@@ -21,10 +21,13 @@ const runSynthesisFlow = async ({
   set,
   projectId,
   config,
+  taskKind,
   endpoint,
+  statusEndpoint,
   payload,
   resetSegmentResults,
   mergeSegmentResults,
+  resetAudioUrls,
   queueMessage,
   segmentVerb,
   exhaustedMessage,
@@ -37,16 +40,19 @@ const runSynthesisFlow = async ({
 }) => {
   const startupState = {
     isRunning: true,
+    taskKind,
     status: "starting",
     connectionStatus: "connecting",
     modelStatus: "正在建立连接...",
     lastSyncError: "",
     error: "",
     progress: { current: 0, total: 0 },
-    fullAudioUrl: null,
-    subtitleSrtUrl: null,
-    subtitleLrcUrl: null,
   };
+  if (resetAudioUrls) {
+    startupState.fullAudioUrl = null;
+    startupState.subtitleSrtUrl = null;
+    startupState.subtitleLrcUrl = null;
+  }
   if (resetSegmentResults) {
     startupState.segmentResults = {};
   }
@@ -58,10 +64,15 @@ const runSynthesisFlow = async ({
     const wsUrl = `${getWsBaseUrl()}/ws/tts-progress/${taskId}`;
 
     const completeWithResult = (result) => {
+      const resolvedKind = result.kind || taskKind || "synthesis";
       const exportPath =
-        result.export_url || `/api/v1/tts/export?project_id=${projectId}&format=${config.output_format || "wav"}`;
+        result.processed_export_url ||
+        result.export_url ||
+        `/api/v1/tts/export?project_id=${projectId}&format=${config.output_format || "wav"}&variant=raw`;
+      const resolvedAudioUrl = `${API_ORIGIN}${exportPath}`;
       set((state) => ({
         isRunning: false,
+        taskKind: resolvedKind,
         status: "done",
         modelStatus: "",
         lastSyncError: "",
@@ -72,7 +83,12 @@ const runSynthesisFlow = async ({
               ...(result.segments || {}),
             }
           : result.segments || {},
-        fullAudioUrl: `${API_ORIGIN}${exportPath}`,
+        fullAudioUrl: resolvedAudioUrl,
+        rawAudioUrl: resolvedKind === "postprocess" ? state.rawAudioUrl : resolvedAudioUrl,
+        processedAudioUrl: resolvedKind === "postprocess" ? resolvedAudioUrl : null,
+        chapterExports:
+          resolvedKind === "postprocess" && Array.isArray(result.chapter_exports) ? result.chapter_exports : [],
+        audioVariant: resolvedKind === "postprocess" ? "processed" : "raw",
         subtitleSrtUrl: result.subtitle_srt_url ? `${API_ORIGIN}${result.subtitle_srt_url}` : null,
         subtitleLrcUrl: result.subtitle_lrc_url ? `${API_ORIGIN}${result.subtitle_lrc_url}` : null,
       }));
@@ -117,7 +133,7 @@ const runSynthesisFlow = async ({
       onOpen: channelBridge.onOpen,
       syncTaskState: async ({ done, fail }) => {
         try {
-          const state = await api.get(`/tts/synthesize/${taskId}`);
+          const state = await api.get(`${statusEndpoint}/${taskId}`);
           if (state?.status === "done") {
             done(completeWithResult(state));
             return true;
@@ -191,6 +207,12 @@ const runSynthesisFlow = async ({
               modelStatus: msg.message || msg.type,
             });
             break;
+          case "postprocess_stage":
+            set({
+              status: "running",
+              modelStatus: msg.message || "后处理进行中",
+            });
+            break;
           case "segment_start":
             set({
               status: "running",
@@ -247,6 +269,7 @@ const runSynthesisFlow = async ({
 
 export const useSynthesisStore = create((set) => ({
   taskId: null,
+  taskKind: "synthesis",
   status: "idle",
   connectionStatus: "idle",
   modelStatus: "",
@@ -254,6 +277,10 @@ export const useSynthesisStore = create((set) => ({
   progress: { current: 0, total: 0 },
   segmentResults: {},
   fullAudioUrl: null,
+  rawAudioUrl: null,
+  processedAudioUrl: null,
+  chapterExports: [],
+  audioVariant: "raw",
   subtitleSrtUrl: null,
   subtitleLrcUrl: null,
   isRunning: false,
@@ -276,19 +303,46 @@ export const useSynthesisStore = create((set) => ({
     },
     gap_duration_ms: 300,
     output_format: "wav",
+    postprocess_enabled: false,
+    loudness_normalize: true,
+    target_lufs: -16,
+    trim_silence_enabled: false,
+    trim_threshold_db: -45,
+    trim_min_silence_ms: 120,
+    fade_in_ms: 40,
+    fade_out_ms: 80,
+    mp3_bitrate_kbps: 192,
+    chapter_markers: [],
+    bgm_track: {
+      relpath: "",
+      gain_db: 0,
+      loop: true,
+      ducking_enabled: false,
+      ducking_db: 8,
+    },
+    ambience_track: {
+      relpath: "",
+      gain_db: 0,
+      loop: true,
+      ducking_enabled: false,
+      ducking_db: 8,
+    },
   },
   startSynthesis: async ({ projectId, config }) => {
     return await runSynthesisFlow({
       set,
       projectId,
       config,
+      taskKind: "synthesis",
       endpoint: "/tts/synthesize",
+      statusEndpoint: "/tts/synthesize",
       payload: {
         project_id: projectId,
         config,
       },
       resetSegmentResults: true,
       mergeSegmentResults: false,
+      resetAudioUrls: true,
       queueMessage: "任务已创建，等待执行",
       segmentVerb: "合成",
       exhaustedMessage: "合成连接已关闭（重连失败）",
@@ -308,7 +362,9 @@ export const useSynthesisStore = create((set) => ({
       set,
       projectId,
       config,
+      taskKind: "synthesis",
       endpoint: "/tts/synthesize/segments",
+      statusEndpoint: "/tts/synthesize",
       payload: {
         project_id: projectId,
         config,
@@ -317,6 +373,7 @@ export const useSynthesisStore = create((set) => ({
       },
       resetSegmentResults: false,
       mergeSegmentResults: true,
+      resetAudioUrls: true,
       queueMessage: "局部任务已创建，等待执行",
       segmentVerb: "处理",
       exhaustedMessage: "局部合成连接已关闭（重连失败）",
@@ -329,8 +386,36 @@ export const useSynthesisStore = create((set) => ({
         `重新生成完成，重建 ${result.generated_count || 0} 段，复用 ${result.reused_count || 0} 段`,
     });
   },
+  startPostprocess: async ({ projectId, config }) => {
+    return await runSynthesisFlow({
+      set,
+      projectId,
+      config,
+      taskKind: "postprocess",
+      endpoint: `/tts/projects/${projectId}/postprocess`,
+      statusEndpoint: "/tts/postprocess",
+      payload: {
+        project_id: projectId,
+        config,
+      },
+      resetSegmentResults: false,
+      mergeSegmentResults: true,
+      resetAudioUrls: false,
+      queueMessage: "后处理任务已创建，等待执行",
+      segmentVerb: "后处理",
+      exhaustedMessage: "后处理连接已关闭（重连失败）",
+      timeoutMessage: "后处理任务等待超时",
+      syncErrorMessage: "后处理状态同步失败",
+      cancelRequestedMessage: "正在取消后处理任务...",
+      canceledMessage: "后处理任务已取消",
+      failureMessage: "后处理失败",
+      completeToastTitle: () => "后处理完成",
+    });
+  },
   cancelSynthesis: async () => {
     const taskId = useSynthesisStore.getState().taskId;
+    const taskKind = useSynthesisStore.getState().taskKind || "synthesis";
+    const taskLabel = taskKind === "postprocess" ? "后处理任务" : "合成任务";
     if (!taskId) {
       return { status: "idle" };
     }
@@ -351,9 +436,9 @@ export const useSynthesisStore = create((set) => ({
         isRunning: false,
         status: "canceled",
         connectionStatus: "open",
-        modelStatus: "合成任务已取消",
+        modelStatus: `${taskLabel}已取消`,
       });
-      useUiStore.getState().pushToast({ title: "合成任务已取消", tone: "default" });
+      useUiStore.getState().pushToast({ title: `${taskLabel}已取消`, tone: "default" });
       return result;
     }
     if (backendStatus === "error") {
@@ -374,7 +459,7 @@ export const useSynthesisStore = create((set) => ({
       connectionStatus: "open",
       modelStatus: "任务取消中...",
     });
-    useUiStore.getState().pushToast({ title: "已请求取消合成任务", tone: "default" });
+    useUiStore.getState().pushToast({ title: `已请求取消${taskLabel}`, tone: "default" });
     // Fallback: if WS event is missed, reconcile status once.
     setTimeout(async () => {
       const state = useSynthesisStore.getState();
@@ -382,12 +467,12 @@ export const useSynthesisStore = create((set) => ({
         return;
       }
       try {
-        const synced = await api.get(`/tts/synthesize/${taskId}`);
+        const synced = await api.get(taskKind === "postprocess" ? `/tts/postprocess/${taskId}` : `/tts/synthesize/${taskId}`);
         if (synced?.status === "canceled") {
           set({
             isRunning: false,
             status: "canceled",
-            modelStatus: "合成任务已取消",
+            modelStatus: `${taskLabel}已取消`,
             lastSyncError: "",
           });
         } else if (synced?.status === "done") {
@@ -415,6 +500,7 @@ export const useSynthesisStore = create((set) => ({
   reset: () =>
     set({
       taskId: null,
+      taskKind: "synthesis",
       status: "idle",
       connectionStatus: "idle",
       modelStatus: "",
@@ -422,9 +508,25 @@ export const useSynthesisStore = create((set) => ({
       progress: { current: 0, total: 0 },
       segmentResults: {},
       fullAudioUrl: null,
+      rawAudioUrl: null,
+      processedAudioUrl: null,
+      chapterExports: [],
+      audioVariant: "raw",
       subtitleSrtUrl: null,
       subtitleLrcUrl: null,
       isRunning: false,
       error: "",
+    }),
+  setAudioVariant: (variant) =>
+    set((state) => {
+      const normalized = variant === "processed" ? "processed" : "raw";
+      const fullAudioUrl =
+        normalized === "processed"
+          ? state.processedAudioUrl || state.rawAudioUrl
+          : state.rawAudioUrl || state.fullAudioUrl;
+      return {
+        audioVariant: normalized,
+        fullAudioUrl: fullAudioUrl || null,
+      };
     }),
 }));

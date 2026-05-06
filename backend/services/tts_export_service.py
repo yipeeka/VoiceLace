@@ -45,6 +45,8 @@ def build_archive_manifest(
         "waveform_files": [p.name for p in [full_peaks_path] if p and p.exists()],
         "preset_count": len(used_presets),
         "has_reference_audio": any(bool(p.ref_audio_path) for p in used_presets),
+        "has_processed_audio": bool(project.audio_assets.processed.full_wav_relpath or project.audio_assets.processed.full_mp3_relpath),
+        "processed_chapter_count": len(project.audio_assets.processed.chapters or []),
     }
 
 
@@ -63,6 +65,10 @@ def write_project_archive(
     subtitle_srt = _from_output_relpath(output_dir, project.audio_assets.subtitle_srt_relpath)
     subtitle_lrc = _from_output_relpath(output_dir, project.audio_assets.subtitle_lrc_relpath)
     full_peaks = _from_output_relpath(output_dir, project.audio_assets.full_peaks_relpath)
+    processed_wav = _from_output_relpath(output_dir, project.audio_assets.processed.full_wav_relpath)
+    processed_mp3 = _from_output_relpath(output_dir, project.audio_assets.processed.full_mp3_relpath)
+    processed_manifest = _from_output_relpath(output_dir, project.audio_assets.processed.manifest_relpath)
+    processed_peaks = _from_output_relpath(output_dir, project.audio_assets.processed.full_peaks_relpath)
     segment_assets = list(project.audio_assets.segments.values())
 
     audio_candidates = [path for path in [full_wav, full_mp3] if path and path.exists()]
@@ -90,6 +96,31 @@ def write_project_archive(
                 zf.write(path, arcname=f"subtitles/{path.name}")
         if full_peaks and full_peaks.exists():
             zf.write(full_peaks, arcname="waveforms/full.peaks.json")
+        for path, arcname in [
+            (processed_wav, "audio/processed/processed.wav"),
+            (processed_mp3, "audio/processed/processed.mp3"),
+            (processed_manifest, "audio/processed/processed.manifest.json"),
+            (processed_peaks, "waveforms/processed.peaks.json"),
+        ]:
+            if path and path.exists():
+                zf.write(path, arcname=arcname)
+
+        processed_chapters = project.audio_assets.processed.chapters or []
+        for chapter in processed_chapters:
+            if isinstance(chapter, dict):
+                chapter_id = chapter.get("id", "")
+                wav_relpath = chapter.get("wav_relpath")
+                mp3_relpath = chapter.get("mp3_relpath")
+            else:
+                chapter_id = getattr(chapter, "id", "")
+                wav_relpath = getattr(chapter, "wav_relpath", None)
+                mp3_relpath = getattr(chapter, "mp3_relpath", None)
+            wav_path = _from_output_relpath(output_dir, wav_relpath)
+            mp3_path = _from_output_relpath(output_dir, mp3_relpath)
+            if wav_path and wav_path.exists():
+                zf.write(wav_path, arcname=f"audio/processed/chapters/{chapter_id}.wav")
+            if mp3_path and mp3_path.exists():
+                zf.write(mp3_path, arcname=f"audio/processed/chapters/{chapter_id}.mp3")
 
         for asset in segment_assets:
             segment_path = _from_output_relpath(output_dir, asset.audio_relpath)

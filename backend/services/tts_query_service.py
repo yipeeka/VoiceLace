@@ -11,13 +11,26 @@ def _from_output_relpath(output_dir: Path, relpath: str | None) -> Path | None:
     return output_dir / relpath
 
 
-def resolve_export_audio_path(*, output_dir: Path, project, req_format: str) -> tuple[Path, str]:
+def resolve_export_audio_path(
+    *,
+    output_dir: Path,
+    project,
+    req_format: str,
+    variant: str = "raw",
+) -> tuple[Path, str]:
     normalized = (req_format or "wav").lower()
+    normalized_variant = (variant or "raw").lower()
     output = None
-    if normalized == "mp3":
-        output = _from_output_relpath(output_dir, project.audio_assets.full_mp3_relpath)
-    if output is None:
-        output = _from_output_relpath(output_dir, project.audio_assets.full_wav_relpath)
+    if normalized_variant == "processed":
+        if normalized == "mp3":
+            output = _from_output_relpath(output_dir, project.audio_assets.processed.full_mp3_relpath)
+        if output is None:
+            output = _from_output_relpath(output_dir, project.audio_assets.processed.full_wav_relpath)
+    else:
+        if normalized == "mp3":
+            output = _from_output_relpath(output_dir, project.audio_assets.full_mp3_relpath)
+        if output is None:
+            output = _from_output_relpath(output_dir, project.audio_assets.full_wav_relpath)
     if output is None:
         output = output_dir / f"{project.id}.{normalized}"
     media_type = "audio/mpeg" if normalized == "mp3" else "audio/wav"
@@ -34,7 +47,28 @@ def resolve_subtitle_path(*, output_dir: Path, project_id: str, project, fmt: st
 
 
 def build_project_waveform_response(*, output_dir: Path, project_id: str, project, level: int | None) -> dict[str, Any]:
-    peaks_path = _from_output_relpath(output_dir, project.audio_assets.full_peaks_relpath)
+    return build_project_waveform_response_for_variant(
+        output_dir=output_dir,
+        project_id=project_id,
+        project=project,
+        level=level,
+        variant="raw",
+    )
+
+
+def build_project_waveform_response_for_variant(
+    *,
+    output_dir: Path,
+    project_id: str,
+    project,
+    level: int | None,
+    variant: str = "raw",
+) -> dict[str, Any]:
+    normalized_variant = (variant or "raw").lower()
+    if normalized_variant == "processed":
+        peaks_path = _from_output_relpath(output_dir, project.audio_assets.processed.full_peaks_relpath)
+    else:
+        peaks_path = _from_output_relpath(output_dir, project.audio_assets.full_peaks_relpath)
     if peaks_path is None or not peaks_path.exists():
         raise FileNotFoundError("Project full waveform peaks not found")
 

@@ -26,6 +26,20 @@ class TtsQueryServiceTest(unittest.TestCase):
             self.assertTrue(str(path).endswith("full.mp3"))
             self.assertEqual(media_type, "audio/mpeg")
 
+    def test_resolve_export_audio_path_supports_processed_variant(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir)
+            project = Project(name="export-processed")
+            project.audio_assets.processed.full_wav_relpath = f"projects/{project.id}/processed/processed.wav"
+            path, media_type = resolve_export_audio_path(
+                output_dir=output_dir,
+                project=project,
+                req_format="wav",
+                variant="processed",
+            )
+            self.assertTrue(str(path).endswith("processed.wav"))
+            self.assertEqual(media_type, "audio/wav")
+
     def test_resolve_subtitle_path_prefers_relpath(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_dir = Path(tmp_dir)

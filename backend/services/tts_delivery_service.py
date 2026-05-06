@@ -57,12 +57,32 @@ def load_project_waveform_payload(*, output_dir, projects_dir, project_id: str, 
     )
 
 
+def load_project_waveform_payload_for_variant(
+    *,
+    output_dir,
+    projects_dir,
+    project_id: str,
+    level: int | None,
+    variant: str,
+    build_project_waveform_response_for_variant,
+):
+    project = load_project(projects_dir, project_id)
+    return build_project_waveform_response_for_variant(
+        output_dir=output_dir,
+        project_id=project_id,
+        project=project,
+        level=level,
+        variant=variant,
+    )
+
+
 def resolve_export_audio_response_path(
     *,
     output_dir,
     projects_dir,
     project_id: str,
     req_format: str,
+    variant: str,
     resolve_export_audio_path,
 ):
     project = load_project(projects_dir, project_id)
@@ -70,9 +90,13 @@ def resolve_export_audio_response_path(
         output_dir=output_dir,
         project=project,
         req_format=req_format,
+        variant=variant,
     )
     if output.exists():
         return output, media_type
+
+    if (variant or "raw").lower() == "processed":
+        raise FileNotFoundError("Processed export not found")
 
     wav_fallback = output_dir / f"{project_id}.wav"
     if not wav_fallback.exists():

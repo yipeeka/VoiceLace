@@ -23,6 +23,18 @@ def project_waveforms_dir(*, output_dir: Path, project_id: str) -> Path:
     return project_output_root(output_dir=output_dir, project_id=project_id) / "waveforms"
 
 
+def project_processed_dir(*, output_dir: Path, project_id: str) -> Path:
+    return project_output_root(output_dir=output_dir, project_id=project_id) / "processed"
+
+
+def project_processed_chapters_dir(*, output_dir: Path, project_id: str) -> Path:
+    return project_processed_dir(output_dir=output_dir, project_id=project_id) / "chapters"
+
+
+def project_postprocess_assets_dir(*, output_dir: Path, project_id: str) -> Path:
+    return project_output_root(output_dir=output_dir, project_id=project_id) / "postprocess_assets"
+
+
 def project_segment_waveforms_dir(*, output_dir: Path, project_id: str) -> Path:
     return project_waveforms_dir(output_dir=output_dir, project_id=project_id) / "segments"
 

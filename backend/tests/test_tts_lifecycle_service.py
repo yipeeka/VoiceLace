@@ -10,9 +10,10 @@ class TtsLifecycleServiceTest(unittest.TestCase):
         task = create_tts_task_record(task_id="t1", project_id="p1")
         self.assertEqual(task["task_id"], "t1")
         self.assertEqual(task["project_id"], "p1")
+        self.assertEqual(task["kind"], "synthesis")
         self.assertEqual(task["status"], "queued")
         self.assertEqual(task["progress"], {"current": 0, "total": 0})
-        self.assertEqual(task["events"], [{"type": "task_status", "status": "queued"}])
+        self.assertEqual(task["events"], [{"type": "task_status", "status": "queued", "kind": "synthesis"}])
 
     def test_build_tts_status_response_error(self) -> None:
         code, payload = build_tts_status_response(

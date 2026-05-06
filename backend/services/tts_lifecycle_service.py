@@ -3,18 +3,21 @@ from __future__ import annotations
 from backend.services.tts_task_service import public_task
 
 
-def create_tts_task_record(*, task_id: str, project_id: str) -> dict:
+def create_tts_task_record(*, task_id: str, project_id: str, kind: str = "synthesis") -> dict:
     return {
         "task_id": task_id,
+        "kind": kind,
         "status": "queued",
         "segments": {},
         "project_id": project_id,
         "progress": {"current": 0, "total": 0},
         "export_url": "",
+        "processed_export_url": "",
+        "chapter_exports": [],
         "subtitle_srt_url": "",
         "subtitle_lrc_url": "",
         "error": "",
-        "events": [{"type": "task_status", "status": "queued"}],
+        "events": [{"type": "task_status", "status": "queued", "kind": kind}],
     }
 
 

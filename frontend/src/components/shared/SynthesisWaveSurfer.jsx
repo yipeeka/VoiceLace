@@ -50,6 +50,7 @@ function buildChannelDataFromMinMax(data) {
 export default function SynthesisWaveSurfer({
   projectId,
   audioUrl,
+  audioVariant = "raw",
   segments = [],
   gapDurationMs = 300,
   height = 100,
@@ -92,7 +93,7 @@ export default function SynthesisWaveSurfer({
         return;
       }
       try {
-        const payload = await api.get(`/tts/projects/${projectId}/waveform?level=${requestedLevel}`);
+        const payload = await api.get(`/tts/projects/${projectId}/waveform?level=${requestedLevel}&variant=${audioVariant}`);
         if (canceled) return;
         setWaveformError("");
         setWaveformPayload({
@@ -111,7 +112,7 @@ export default function SynthesisWaveSurfer({
     return () => {
       canceled = true;
     };
-  }, [projectId, audioUrl, requestedLevel]);
+  }, [projectId, audioUrl, requestedLevel, audioVariant]);
 
   const regionConfig = useMemo(() => {
     const defaultColor = "rgba(100, 100, 100, 0.1)";
