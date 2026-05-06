@@ -6,10 +6,19 @@ from pathlib import Path
 import time
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 
-from backend.models import ReorderVoicePresetsRequest, TranscribeRequest, VoicePreset, VoicePreviewRequest
+from backend.models import (
+    ReorderVoicePresetsRequest,
+    TranscribeRequest,
+    VoicePreset,
+    VoicePreviewRequest,
+    VoiceQualityCheckRequest,
+    VoiceRecommendRequest,
+)
+from backend.services.project_core_service import get_project
+from backend.services.voice_preset_service import analyze_reference_audio, normalize_tags, recommend_presets_for_project
 from backend.state import get_app_state
 
 router = APIRouter()
@@ -34,6 +43,17 @@ def _is_within(path: Path, root: Path) -> bool:
         return False
 
 
+def _normalize_preset(preset: VoicePreset) -> VoicePreset:
+    return preset.model_copy(
+        update={
+            "name": (preset.name or "").strip(),
+            "description": (preset.description or "").strip(),
+            "suitable_role_description": (preset.suitable_role_description or "").strip(),
+            "tags": normalize_tags(preset.tags),
+        }
+    )
+
+
 @router.get("/presets")
 async def list_presets(state=Depends(get_app_state)):
     return state.voice_manager.list_presets()
@@ -42,7 +62,7 @@ async def list_presets(state=Depends(get_app_state)):
 @router.post("/presets")
 async def create_preset(payload: VoicePreset, state=Depends(get_app_state)):
     presets = state.voice_manager.list_presets()
-    preset = payload.model_copy(update={"id": payload.id or str(uuid4())})
+    preset = _normalize_preset(payload.model_copy(update={"id": payload.id or str(uuid4())}))
     presets.append(preset)
     state.voice_manager.save_presets(presets)
     return preset
@@ -50,7 +70,7 @@ async def create_preset(payload: VoicePreset, state=Depends(get_app_state)):
 
 @router.put("/presets/{preset_id}")
 async def update_preset(preset_id: str, payload: VoicePreset, state=Depends(get_app_state)):
-    updated = payload.model_copy(update={"id": preset_id})
+    updated = _normalize_preset(payload.model_copy(update={"id": preset_id}))
     presets = [
         updated if preset.id == preset_id else preset
         for preset in state.voice_manager.list_presets()
@@ -105,7 +125,56 @@ async def upload_reference_audio(file: UploadFile = File(...), state=Depends(get
                 duration = round(frame_count / frame_rate, 3) if frame_rate else 0
         except Exception:
             duration = 0
-    return {"file_path": str(target), "duration": duration}
+    quality_report = analyze_reference_audio(target)
+    return {"file_path": str(target), "duration": duration, "quality_report": quality_report.model_dump(mode="json")}
+
+
+@router.post("/presets/{preset_id}/quality-check")
+async def quality_check_preset(
+    preset_id: str,
+    payload: VoiceQualityCheckRequest | None = Body(default=None),
+    state=Depends(get_app_state),
+):
+    presets = state.voice_manager.list_presets()
+    target_index = next((index for index, preset in enumerate(presets) if preset.id == preset_id), -1)
+    if target_index < 0:
+        raise HTTPException(status_code=404, detail="Voice preset not found")
+
+    preset = presets[target_index]
+    backends = [payload.backend] if payload and payload.backend else ["omnivoice", "voxcpm2"]
+    quality_reports = dict(preset.quality_reports or {})
+    checked: dict[str, dict] = {}
+
+    for backend in backends:
+        backend_name = (backend or "").strip().lower()
+        if backend_name not in {"omnivoice", "voxcpm2"}:
+            continue
+        if backend_name == "omnivoice":
+            ref_audio_path = (preset.resolved_omnivoice_profile().ref_audio_path or "").strip()
+        else:
+            ref_audio_path = (preset.resolved_voxcpm2_profile().ref_audio_path or "").strip()
+        if not ref_audio_path:
+            if payload and payload.backend == backend_name:
+                raise HTTPException(status_code=400, detail=f"{backend_name} 尚未配置参考音频")
+            continue
+        report = analyze_reference_audio(Path(ref_audio_path).expanduser())
+        quality_reports[backend_name] = report
+        checked[backend_name] = report.model_dump(mode="json")
+
+    if not checked:
+        raise HTTPException(status_code=400, detail="没有可检测的参考音频")
+
+    updated = _normalize_preset(preset.model_copy(update={"quality_reports": quality_reports}))
+    presets[target_index] = updated
+    state.voice_manager.save_presets(presets)
+    return {"preset_id": preset_id, "checked": checked, "quality_reports": updated.quality_reports}
+
+
+@router.post("/recommend")
+async def recommend_presets(payload: VoiceRecommendRequest, state=Depends(get_app_state)):
+    project = get_project(payload.project_id, projects_dir=state.settings.projects_dir)
+    presets = state.voice_manager.list_presets()
+    return recommend_presets_for_project(project, presets, backend=payload.backend, limit=payload.limit)
 
 
 @router.get("/reference-audio")

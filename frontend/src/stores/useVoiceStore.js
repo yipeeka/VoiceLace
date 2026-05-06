@@ -32,7 +32,13 @@ export const useVoiceStore = create((set) => ({
   previewAudioUrl: null,
   previewAudioBlob: null,
   previewMeta: null,
+  previewSlots: {
+    a: { presetId: "", audioUrl: null, audioBlob: null, meta: null, backend: "omnivoice" },
+    b: { presetId: "", audioUrl: null, audioBlob: null, meta: null, backend: "omnivoice" },
+  },
+  presetRecommendations: null,
   uploadedRefAudioPath: "",
+  lastReferenceQualityReport: null,
   transcribedRefText: "",
   isLoading: false,
   isSaving: false,
@@ -40,6 +46,27 @@ export const useVoiceStore = create((set) => ({
   error: "",
   setPresets: (presets) => set({ presets }),
   setAssignments: (assignments) => set({ assignments }),
+  setPreviewSlotPreset: (slot, presetId) =>
+    set((state) => ({
+      previewSlots: {
+        ...state.previewSlots,
+        [slot]: {
+          ...(state.previewSlots?.[slot] || {}),
+          presetId: presetId || "",
+        },
+      },
+    })),
+  setPreviewSlotBackend: (slot, backend) =>
+    set((state) => ({
+      previewSlots: {
+        ...state.previewSlots,
+        [slot]: {
+          ...(state.previewSlots?.[slot] || {}),
+          backend: (backend || "omnivoice").toLowerCase(),
+        },
+      },
+    })),
+  clearPresetRecommendations: () => set({ presetRecommendations: null }),
   assignVoice: (characterName, presetId) =>
     set((state) => ({
       assignments: {
@@ -98,6 +125,16 @@ export const useVoiceStore = create((set) => ({
       set((state) => ({
         presets: state.presets.filter((preset) => preset.id !== presetId),
         assignments: Object.fromEntries(Object.entries(state.assignments).filter(([, id]) => id !== presetId)),
+        previewSlots: {
+          a:
+            state.previewSlots?.a?.presetId === presetId
+              ? { presetId: "", audioUrl: null, audioBlob: null, meta: null, backend: "omnivoice" }
+              : state.previewSlots?.a,
+          b:
+            state.previewSlots?.b?.presetId === presetId
+              ? { presetId: "", audioUrl: null, audioBlob: null, meta: null, backend: "omnivoice" }
+              : state.previewSlots?.b,
+        },
         isSaving: false,
       }));
       useUiStore.getState().pushToast({ title: "声音预设已删除", tone: "success" });
@@ -139,7 +176,7 @@ export const useVoiceStore = create((set) => ({
       throw error;
     }
   },
-  previewVoice: async ({ preset, text, ttsBackend, sourceMode }) => {
+  previewVoice: async ({ preset, text, ttsBackend, sourceMode, slot = "" }) => {
     set({ isSaving: true, error: "" });
     try {
       const backendName = (ttsBackend || "omnivoice").toLowerCase();
@@ -148,21 +185,44 @@ export const useVoiceStore = create((set) => ({
         text,
         tts_backend: backendName,
       });
-      const previousUrl = useVoiceStore.getState().previewAudioUrl;
+      const previousUrl = slot
+        ? useVoiceStore.getState().previewSlots?.[slot]?.audioUrl
+        : useVoiceStore.getState().previewAudioUrl;
       if (previousUrl) {
         URL.revokeObjectURL(previousUrl);
       }
       const url = URL.createObjectURL(blob);
-      set({
-        previewAudioUrl: url,
-        previewAudioBlob: blob,
-        previewMeta: {
-          backend: backendName,
-          source_mode: sourceMode || "design",
-          text: text || "",
-        },
-        isSaving: false,
-      });
+      if (slot) {
+        set((state) => ({
+          previewSlots: {
+            ...state.previewSlots,
+            [slot]: {
+              ...(state.previewSlots?.[slot] || {}),
+              presetId: preset?.id || "",
+              backend: backendName,
+              audioUrl: url,
+              audioBlob: blob,
+              meta: {
+                backend: backendName,
+                source_mode: sourceMode || "design",
+                text: text || "",
+              },
+            },
+          },
+          isSaving: false,
+        }));
+      } else {
+        set({
+          previewAudioUrl: url,
+          previewAudioBlob: blob,
+          previewMeta: {
+            backend: backendName,
+            source_mode: sourceMode || "design",
+            text: text || "",
+          },
+          isSaving: false,
+        });
+      }
       useUiStore.getState().pushToast({
         title: `试听音频已生成（${backendName.toUpperCase()}）`,
         tone: "success",
@@ -179,7 +239,11 @@ export const useVoiceStore = create((set) => ({
     set({ isSaving: true, error: "" });
     try {
       const result = await api.uploadFile("/voices/upload-ref", file);
-      set({ uploadedRefAudioPath: result.file_path, isSaving: false });
+      set({
+        uploadedRefAudioPath: result.file_path,
+        lastReferenceQualityReport: result.quality_report || null,
+        isSaving: false,
+      });
       useUiStore.getState().pushToast({ title: "参考音频上传成功", tone: "success" });
       return result;
     } catch (error) {
@@ -200,6 +264,52 @@ export const useVoiceStore = create((set) => ({
       const message = getErrorMessage(error, "转写失败");
       set({ isTranscribing: false, error: message });
       useUiStore.getState().pushToast({ title: formatError("转写失败", message), tone: "error" });
+      throw error;
+    }
+  },
+  checkPresetQuality: async (presetId, backend) => {
+    set({ isSaving: true, error: "" });
+    try {
+      const payload = backend ? { backend } : {};
+      const result = await api.post(`/voices/presets/${presetId}/quality-check`, payload);
+      const updatedReports = result?.quality_reports || {};
+      set((state) => ({
+        presets: state.presets.map((item) =>
+          item.id === presetId
+            ? {
+                ...item,
+                quality_reports: {
+                  ...(item.quality_reports || {}),
+                  ...updatedReports,
+                },
+              }
+            : item
+        ),
+        isSaving: false,
+      }));
+      useUiStore.getState().pushToast({ title: "参考音频质量检测完成", tone: "success" });
+      return result;
+    } catch (error) {
+      const message = getErrorMessage(error, "质量检测失败");
+      set({ isSaving: false, error: message });
+      useUiStore.getState().pushToast({ title: formatError("质量检测失败", message), tone: "error" });
+      throw error;
+    }
+  },
+  fetchPresetRecommendations: async ({ projectId, backend = "omnivoice", limit = 3 }) => {
+    set({ isLoading: true, error: "" });
+    try {
+      const result = await api.post("/voices/recommend", {
+        project_id: projectId,
+        backend,
+        limit,
+      });
+      set({ presetRecommendations: result, isLoading: false });
+      return result;
+    } catch (error) {
+      const message = getErrorMessage(error, "推荐失败");
+      set({ isLoading: false, error: message });
+      useUiStore.getState().pushToast({ title: formatError("推荐失败", message), tone: "error" });
       throw error;
     }
   },

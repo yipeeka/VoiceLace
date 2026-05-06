@@ -1,4 +1,4 @@
-import { GripVertical, Mic, Plus, Trash2 } from "lucide-react";
+import { GripVertical, Mic, Plus, Search, Sparkles, Star, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, rectSortingStrategy, SortableContext, useSortable } from "@dnd-kit/sortable";
@@ -55,6 +55,13 @@ const STYLE_OPTIONS = [
 const BACKEND_OPTIONS = [
   { value: "omnivoice", label: "OmniVoice" },
   { value: "voxcpm2", label: "VoxCPM2" },
+];
+const QUALITY_FILTER_OPTIONS = [
+  { value: "all", label: "全部质量" },
+  { value: "pass", label: "质量通过" },
+  { value: "warning", label: "质量告警" },
+  { value: "fail", label: "质量失败" },
+  { value: "unknown", label: "未检测" },
 ];
 
 const DEFAULT_OMNIVOICE_PROFILE = {
@@ -159,6 +166,29 @@ function buildReferenceAudioUrl(path) {
   return `${API_ORIGIN}/api/v1/voices/reference-audio?path=${encodeURIComponent(value)}`;
 }
 
+function parseTags(text) {
+  return Array.from(
+    new Set(
+      String(text || "")
+        .split(/[,，\s]+/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+function resolvePresetQualityStatus(preset, backend = "omnivoice") {
+  const report = preset?.quality_reports?.[backend];
+  return report?.status || "unknown";
+}
+
+function qualityStatusLabel(status) {
+  if (status === "pass") return "质量通过";
+  if (status === "warning") return "质量告警";
+  if (status === "fail") return "质量失败";
+  return "未检测";
+}
+
 function ReferenceAudioPlayer({ audioPath }) {
   const audioUrl = buildReferenceAudioUrl(audioPath);
   if (!audioUrl) return null;
@@ -176,6 +206,10 @@ const emptyForm = {
   accent: "",
   dialect: "",
   custom_instruct: "",
+  tags: [],
+  favorite: false,
+  suitable_role_description: "",
+  quality_reports: {},
   speed: 1.0,
   clone_denoise: true,
   clone_num_step: 32,
@@ -188,10 +222,14 @@ const emptyForm = {
 
 function SortablePresetCard({
   preset,
+  displayBackend,
   isSelected,
   onToggleSelect,
   onPreview,
   onDelete,
+  onUseSlotA,
+  onUseSlotB,
+  onCycleMode,
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: preset.id,
@@ -202,6 +240,8 @@ function SortablePresetCard({
     transition,
     opacity: isDragging ? 0.75 : 1,
   };
+  const displayMode = preset?.voice_mode || "auto";
+  const qualityStatus = resolvePresetQualityStatus(preset, displayBackend || "omnivoice");
 
   return (
     <div
@@ -232,7 +272,30 @@ function SortablePresetCard({
         {preset.gender === "female" ? "♀" : preset.gender === "male" ? "♂" : "🎙"}
       </div>
       <div className="presetName" title={preset.name}>{preset.name}</div>
-      <span className={`presetModeBadge ${preset.voice_mode}`}>{preset.voice_mode}</span>
+      <div className="presetMetaRow">
+        {preset.favorite ? <span className="presetFavorite"><Star size={12} fill="currentColor" /> 收藏</span> : null}
+        <span className={`statusBadge ${qualityStatus === "pass" ? "success" : qualityStatus === "warning" ? "warning" : qualityStatus === "fail" ? "error" : "default"}`}>
+          {qualityStatusLabel(qualityStatus)}
+        </span>
+      </div>
+      {Array.isArray(preset.tags) && preset.tags.length ? (
+        <div className="presetTags">
+          {preset.tags.slice(0, 3).map((tag) => (
+            <span key={`${preset.id}-${tag}`} className="presetTag">{tag}</span>
+          ))}
+        </div>
+      ) : null}
+      <button
+        type="button"
+        className={`presetModeBadge presetModeButton ${displayMode}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          onCycleMode?.();
+        }}
+        title="点击切换 voice_mode"
+      >
+        {String(displayMode || "auto").toUpperCase()}
+      </button>
       <div className="controlRow" style={{ marginTop: 4 }}>
         <Button
           variant="ghost"
@@ -243,6 +306,26 @@ function SortablePresetCard({
           }}
         >
           试听
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            onUseSlotA?.();
+          }}
+        >
+          放入A
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            onUseSlotB?.();
+          }}
+        >
+          放入B
         </Button>
         <Button
           variant="danger"
@@ -264,16 +347,22 @@ export default function VoiceConfigPage() {
   const setProjectSaveAction = useUiStore((state) => state.setProjectSaveAction);
   const clearProjectSaveAction = useUiStore((state) => state.clearProjectSaveAction);
   const {
-    presets, assignments, previewAudioUrl, previewAudioBlob, previewMeta,
+    presets, assignments, previewAudioUrl, previewAudioBlob, previewMeta, previewSlots, presetRecommendations,
+    lastReferenceQualityReport,
     isLoading, isSaving, isTranscribing, error,
     setAssignments, assignVoice, loadPresets,
     createPreset, updatePreset, deletePreset, reorderPresets, saveAssignments, previewVoice,
-    uploadReferenceAudio, transcribeAudio,
+    uploadReferenceAudio, transcribeAudio, setPreviewSlotPreset, setPreviewSlotBackend,
+    checkPresetQuality, fetchPresetRecommendations, clearPresetRecommendations,
   } = useVoiceStore();
 
   const [form, setForm] = useState({ ...emptyForm });
   const [activeBackend, setActiveBackend] = useState("omnivoice");
   const [previewBackend, setPreviewBackend] = useState("omnivoice");
+  const [searchKeyword, setSearchKeyword] = useState("");
+  const [favoriteOnly, setFavoriteOnly] = useState(false);
+  const [qualityFilter, setQualityFilter] = useState("all");
+  const [tagFilter, setTagFilter] = useState("all");
   const [selectedPresetId, setSelectedPresetId] = useState(null);
   const [sampleText, setSampleText] = useState("这是试听文本，用于确认角色声音风格。");
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -303,7 +392,7 @@ export default function VoiceConfigPage() {
 
     const merged = new Map();
     for (const [name, count] of segmentCounts.entries()) {
-      merged.set(name, { name, appearance_count: count });
+      merged.set(name, { name, description: "", appearance_count: count });
     }
     for (const character of effectiveScript.characters || []) {
       const name = (character?.name || "").trim();
@@ -313,7 +402,13 @@ export default function VoiceConfigPage() {
       if (!merged.has(name)) {
         merged.set(name, {
           name,
+          description: (character?.description || "").trim(),
           appearance_count: Number(character?.appearance_count || 0) || 0,
+        });
+      } else if (!merged.get(name)?.description && character?.description) {
+        merged.set(name, {
+          ...merged.get(name),
+          description: (character?.description || "").trim(),
         });
       }
     }
@@ -327,18 +422,78 @@ export default function VoiceConfigPage() {
   const selectedPreset = presets.find((p) => p.id === selectedPresetId);
   const presetIds = useMemo(() => presets.map((preset) => preset.id), [presets]);
   const isEditMode = Boolean(selectedPresetId && selectedPreset);
+  const allTags = useMemo(() => {
+    const tags = new Set();
+    presets.forEach((preset) => {
+      (preset.tags || []).forEach((tag) => {
+        if (tag) tags.add(tag);
+      });
+    });
+    return Array.from(tags).sort((a, b) => a.localeCompare(b, "zh-CN"));
+  }, [presets]);
+  const filteredPresets = useMemo(() => {
+    const keyword = searchKeyword.trim().toLowerCase();
+    return presets.filter((preset) => {
+      if (favoriteOnly && !preset.favorite) {
+        return false;
+      }
+      if (tagFilter !== "all" && !(preset.tags || []).includes(tagFilter)) {
+        return false;
+      }
+      const qualityStatus = resolvePresetQualityStatus(preset, previewBackend);
+      if (qualityFilter !== "all" && qualityStatus !== qualityFilter) {
+        return false;
+      }
+      if (!keyword) {
+        return true;
+      }
+      const searchable = [
+        preset.name,
+        preset.description,
+        preset.suitable_role_description,
+        (preset.tags || []).join(" "),
+        preset.gender,
+        preset.age,
+        preset.pitch,
+        preset.style,
+        preset.accent,
+        preset.dialect,
+        preset.custom_instruct,
+        preset?.backend_profiles?.omnivoice?.custom_instruct,
+        preset?.backend_profiles?.voxcpm2?.design_instruction,
+        preset?.backend_profiles?.voxcpm2?.control_instruction,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return searchable.includes(keyword);
+    });
+  }, [favoriteOnly, presets, previewBackend, qualityFilter, searchKeyword, tagFilter]);
+  const isFilterActive = Boolean(searchKeyword.trim()) || favoriteOnly || tagFilter !== "all" || qualityFilter !== "all";
+  const displayPresets = isFilterActive ? filteredPresets : presets;
+  const displayPresetIds = useMemo(() => displayPresets.map((preset) => preset.id), [displayPresets]);
+  const recommendationMap = useMemo(() => {
+    const rows = presetRecommendations?.recommendations || [];
+    return rows.reduce((acc, item) => {
+      acc[item.character] = item.top || [];
+      return acc;
+    }, {});
+  }, [presetRecommendations]);
+  const currentBackendQualityReport = useMemo(
+    () => form?.quality_reports?.[activeBackend] || null,
+    [activeBackend, form?.quality_reports]
+  );
+  const slotAState = previewSlots?.a || { presetId: "", audioUrl: null, audioBlob: null, backend: "omnivoice" };
+  const slotBState = previewSlots?.b || { presetId: "", audioUrl: null, audioBlob: null, backend: "omnivoice" };
 
-  useEffect(() => {
-    if (!selectedPreset) {
-      return;
-    }
-    const omnivoiceProfile = resolveOmniProfile(selectedPreset);
-    const voxcpm2Profile = resolveVoxProfile(selectedPreset);
-    setForm({
+  function buildFormFromPreset(preset) {
+    const omnivoiceProfile = resolveOmniProfile(preset);
+    const voxcpm2Profile = resolveVoxProfile(preset);
+    return {
       ...emptyForm,
-      ...selectedPreset,
-      voice_mode: omnivoiceProfile.voice_mode || selectedPreset.voice_mode || "design",
-      speed: Number(omnivoiceProfile.speed ?? selectedPreset.speed ?? 1),
+      ...preset,
+      voice_mode: preset.voice_mode || omnivoiceProfile.voice_mode || voxcpm2Profile.voice_mode || "design",
+      speed: Number(omnivoiceProfile.speed ?? preset.speed ?? 1),
       clone_denoise: omnivoiceProfile.clone_denoise ?? true,
       clone_num_step: Number(omnivoiceProfile.clone_num_step ?? 32),
       clone_guidance_scale: Number(omnivoiceProfile.clone_guidance_scale ?? 2.0),
@@ -346,7 +501,18 @@ export default function VoiceConfigPage() {
         omnivoice: omnivoiceProfile,
         voxcpm2: voxcpm2Profile,
       },
-    });
+      tags: Array.isArray(preset?.tags) ? preset.tags : [],
+      favorite: Boolean(preset?.favorite),
+      suitable_role_description: preset?.suitable_role_description || "",
+      quality_reports: preset?.quality_reports || {},
+    };
+  }
+
+  useEffect(() => {
+    if (!selectedPreset) {
+      return;
+    }
+    setForm(buildFormFromPreset(selectedPreset));
   }, [selectedPreset]);
 
   function setField(key, val) {
@@ -369,7 +535,6 @@ export default function VoiceConfigPage() {
   function setBackendVoiceMode(backend, value) {
     setForm((prev) => ({
       ...prev,
-      voice_mode: value,
       backend_profiles: {
         ...prev.backend_profiles,
         [backend]: {
@@ -380,33 +545,33 @@ export default function VoiceConfigPage() {
     }));
   }
 
-  function buildPresetPayload() {
+  function buildPresetPayload(sourceForm = form) {
     const omnivoiceProfile = {
       ...DEFAULT_OMNIVOICE_PROFILE,
-      ...(form.backend_profiles?.omnivoice || {}),
-      voice_mode: form.backend_profiles?.omnivoice?.voice_mode || "design",
-      speed: Number(form.backend_profiles?.omnivoice?.speed ?? 1) || 1,
-      clone_num_step: Math.max(1, Math.min(128, Math.round(Number(form.backend_profiles?.omnivoice?.clone_num_step ?? 32) || 32))),
-      clone_guidance_scale: Math.max(0, Math.min(10, Number(form.backend_profiles?.omnivoice?.clone_guidance_scale ?? 2) || 2)),
-      clone_denoise: Boolean(form.backend_profiles?.omnivoice?.clone_denoise ?? true),
-      ref_audio_path: (form.backend_profiles?.omnivoice?.ref_audio_path || "").trim(),
-      ref_text: (form.backend_profiles?.omnivoice?.ref_text || "").trim(),
-      custom_instruct: (form.backend_profiles?.omnivoice?.custom_instruct || "").trim(),
-      accent: (form.backend_profiles?.omnivoice?.accent || "").trim(),
-      dialect: (form.backend_profiles?.omnivoice?.dialect || "").trim(),
+      ...(sourceForm.backend_profiles?.omnivoice || {}),
+      voice_mode: sourceForm.backend_profiles?.omnivoice?.voice_mode || "design",
+      speed: Number(sourceForm.backend_profiles?.omnivoice?.speed ?? 1) || 1,
+      clone_num_step: Math.max(1, Math.min(128, Math.round(Number(sourceForm.backend_profiles?.omnivoice?.clone_num_step ?? 32) || 32))),
+      clone_guidance_scale: Math.max(0, Math.min(10, Number(sourceForm.backend_profiles?.omnivoice?.clone_guidance_scale ?? 2) || 2)),
+      clone_denoise: Boolean(sourceForm.backend_profiles?.omnivoice?.clone_denoise ?? true),
+      ref_audio_path: (sourceForm.backend_profiles?.omnivoice?.ref_audio_path || "").trim(),
+      ref_text: (sourceForm.backend_profiles?.omnivoice?.ref_text || "").trim(),
+      custom_instruct: (sourceForm.backend_profiles?.omnivoice?.custom_instruct || "").trim(),
+      accent: (sourceForm.backend_profiles?.omnivoice?.accent || "").trim(),
+      dialect: (sourceForm.backend_profiles?.omnivoice?.dialect || "").trim(),
     };
     const voxcpm2Profile = {
       ...DEFAULT_VOXCPM2_PROFILE,
-      ...(form.backend_profiles?.voxcpm2 || {}),
-      voice_mode: form.backend_profiles?.voxcpm2?.voice_mode || "design",
-      design_instruction: (form.backend_profiles?.voxcpm2?.design_instruction || "").trim(),
-      control_instruction: (form.backend_profiles?.voxcpm2?.control_instruction || "").trim(),
-      ref_audio_path: (form.backend_profiles?.voxcpm2?.ref_audio_path || "").trim(),
-      ref_text: (form.backend_profiles?.voxcpm2?.ref_text || "").trim(),
-      use_hifi_clone: Boolean(form.backend_profiles?.voxcpm2?.use_hifi_clone),
-      cfg_value: Math.max(0.1, Number(form.backend_profiles?.voxcpm2?.cfg_value ?? 2.0) || 2.0),
-      inference_timesteps: Math.max(1, Math.min(100, Math.round(Number(form.backend_profiles?.voxcpm2?.inference_timesteps ?? 10) || 10))),
-      denoise: Boolean(form.backend_profiles?.voxcpm2?.denoise),
+      ...(sourceForm.backend_profiles?.voxcpm2 || {}),
+      voice_mode: sourceForm.backend_profiles?.voxcpm2?.voice_mode || "design",
+      design_instruction: (sourceForm.backend_profiles?.voxcpm2?.design_instruction || "").trim(),
+      control_instruction: (sourceForm.backend_profiles?.voxcpm2?.control_instruction || "").trim(),
+      ref_audio_path: (sourceForm.backend_profiles?.voxcpm2?.ref_audio_path || "").trim(),
+      ref_text: (sourceForm.backend_profiles?.voxcpm2?.ref_text || "").trim(),
+      use_hifi_clone: Boolean(sourceForm.backend_profiles?.voxcpm2?.use_hifi_clone),
+      cfg_value: Math.max(0.1, Number(sourceForm.backend_profiles?.voxcpm2?.cfg_value ?? 2.0) || 2.0),
+      inference_timesteps: Math.max(1, Math.min(100, Math.round(Number(sourceForm.backend_profiles?.voxcpm2?.inference_timesteps ?? 10) || 10))),
+      denoise: Boolean(sourceForm.backend_profiles?.voxcpm2?.denoise),
     };
 
     if (omnivoiceProfile.voice_mode !== "clone") {
@@ -423,9 +588,13 @@ export default function VoiceConfigPage() {
     }
 
     const payload = {
-      ...form,
-      name: form.name.trim(),
-      voice_mode: form.voice_mode || omnivoiceProfile.voice_mode,
+      ...sourceForm,
+      name: sourceForm.name.trim(),
+      description: (sourceForm.description || "").trim(),
+      tags: Array.isArray(sourceForm.tags) ? sourceForm.tags : parseTags(sourceForm.tags || ""),
+      favorite: Boolean(sourceForm.favorite),
+      suitable_role_description: (sourceForm.suitable_role_description || "").trim(),
+      voice_mode: sourceForm.voice_mode || omnivoiceProfile.voice_mode,
       speed: omnivoiceProfile.speed,
       gender: omnivoiceProfile.gender || "",
       age: omnivoiceProfile.age || "",
@@ -443,6 +612,7 @@ export default function VoiceConfigPage() {
         omnivoice: omnivoiceProfile,
         voxcpm2: voxcpm2Profile,
       },
+      quality_reports: sourceForm.quality_reports || {},
     };
     return payload;
   }
@@ -489,6 +659,119 @@ export default function VoiceConfigPage() {
     });
   }
 
+  async function handlePreviewSlot(slot) {
+    const slotState = previewSlots?.[slot] || {};
+    const presetId = slotState.presetId || "";
+    const backend = slotState.backend || "omnivoice";
+    if (!presetId) {
+      useUiStore.getState().pushToast({ title: `请先为 ${slot.toUpperCase()} 槽选择预设`, tone: "error" });
+      return;
+    }
+    const preset = presets.find((item) => item.id === presetId);
+    if (!preset) {
+      useUiStore.getState().pushToast({ title: `未找到 ${slot.toUpperCase()} 槽预设`, tone: "error" });
+      return;
+    }
+    await previewVoice({
+      slot,
+      preset,
+      text: sampleText,
+      ttsBackend: backend,
+      sourceMode: getProfileModeFromPreset(preset, backend),
+    });
+  }
+
+  async function handleCheckQuality(backend) {
+    if (!selectedPresetId) return;
+    await checkPresetQuality(selectedPresetId, backend);
+    await loadPresets();
+  }
+
+  async function handleFetchRecommendations() {
+    if (!currentProject?.id) return;
+    await fetchPresetRecommendations({
+      projectId: currentProject.id,
+      backend: previewBackend,
+      limit: 3,
+    });
+  }
+
+function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
+    const nextForm = {
+      ...baseForm,
+      backend_profiles: {
+        ...(baseForm.backend_profiles || {}),
+        [targetBackend]: {
+          ...(baseForm.backend_profiles?.[targetBackend] || {}),
+          voice_mode: "clone",
+          ref_audio_path: refAudioPath,
+          ref_text: referenceText,
+        },
+      },
+    };
+    if (targetBackend === "voxcpm2" && nextForm.backend_profiles?.voxcpm2) {
+      nextForm.backend_profiles.voxcpm2.use_hifi_clone = Boolean(nextForm.backend_profiles.voxcpm2.use_hifi_clone);
+      // Avoid carrying OmniVoice design text into VoxCPM2 clone control instruction.
+      nextForm.backend_profiles.voxcpm2.control_instruction = "";
+    }
+    return nextForm;
+  }
+
+  async function handleCyclePresetVoiceMode(preset) {
+    const modeOrder = ["design", "clone", "auto"];
+    const currentMode = (preset?.voice_mode || "design").toLowerCase();
+    const currentIndex = modeOrder.indexOf(currentMode);
+    const nextMode = modeOrder[(currentIndex + 1 + modeOrder.length) % modeOrder.length];
+    const nextForm = {
+      ...buildFormFromPreset(preset),
+      voice_mode: nextMode,
+    };
+    const savedPreset = await updatePreset(preset.id, buildPresetPayload(nextForm));
+    if (selectedPresetId === preset.id) {
+      setForm(buildFormFromPreset(savedPreset));
+    }
+    useUiStore.getState().pushToast({
+      title: `已切换模式为 ${nextMode.toUpperCase()}`,
+      tone: "success",
+    });
+  }
+
+  async function syncAndAutoSavePreset({ preset, sourceBackend, audioBlob, referenceText }) {
+    const normalizedSource = (sourceBackend || "omnivoice").toLowerCase();
+    const targetBackend = normalizedSource === "voxcpm2" ? "omnivoice" : "voxcpm2";
+    const file = new File([audioBlob], `preview_sync_${normalizedSource}_${Date.now()}.wav`, {
+      type: "audio/wav",
+    });
+    const uploaded = await uploadReferenceAudio(file);
+    const refAudioPath = uploaded?.file_path || "";
+    if (!refAudioPath) {
+      throw new Error("上传试听音频后未返回有效路径");
+    }
+
+    const baseForm = selectedPresetId === preset.id ? form : buildFormFromPreset(preset);
+    const nextForm = buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath);
+    setSelectedPresetId(preset.id);
+    setActiveBackend(targetBackend);
+    setForm(nextForm);
+
+    try {
+      const savedPreset = await updatePreset(preset.id, buildPresetPayload(nextForm));
+      const savedForm = buildFormFromPreset(savedPreset);
+      setSelectedPresetId(savedPreset.id);
+      setForm(savedForm);
+      setActiveBackend(targetBackend);
+      useUiStore.getState().pushToast({
+        title: `已同步并保存为 ${targetBackend === "voxcpm2" ? "VoxCPM2" : "OmniVoice"} Clone`,
+        tone: "success",
+      });
+    } catch (error) {
+      useUiStore.getState().pushToast({
+        title: `同步成功但自动保存失败：${error?.message || "未知错误"}`,
+        tone: "error",
+      });
+    }
+  }
+
   async function handleSyncPreviewToOtherBackend() {
     if ((!previewAudioUrl && !previewAudioBlob) || !selectedPreset) {
       useUiStore.getState().pushToast({ title: "请先生成试听音频", tone: "error" });
@@ -502,8 +785,6 @@ export default function VoiceConfigPage() {
       return;
     }
     const sourceBackend = (previewMeta?.backend || previewBackend || "omnivoice").toLowerCase();
-    const targetBackend = sourceBackend === "voxcpm2" ? "omnivoice" : "voxcpm2";
-    const sourceMode = previewMeta?.source_mode || getProfileModeFromPreset(selectedPreset, sourceBackend) || "design";
     const referenceText = (previewMeta?.text || sampleText || "").trim();
     try {
       const blob = previewAudioBlob || (await (async () => {
@@ -513,43 +794,55 @@ export default function VoiceConfigPage() {
         }
         return response.blob();
       })());
-      const file = new File([blob], `preview_sync_${sourceBackend}_${Date.now()}.wav`, {
-        type: "audio/wav",
-      });
-      const uploaded = await uploadReferenceAudio(file);
-      const refAudioPath = uploaded?.file_path || "";
-      if (!refAudioPath) {
-        throw new Error("上传试听音频后未返回有效路径");
-      }
-      setForm((prev) => {
-        const next = {
-          ...prev,
-          // 同步只迁移目标 backend 的克隆配置，不改变预设卡片标签。
-          voice_mode: prev.voice_mode || sourceMode,
-          backend_profiles: {
-            ...prev.backend_profiles,
-            [targetBackend]: {
-              ...(prev.backend_profiles?.[targetBackend] || {}),
-              // 同步过程使用 clone 语义将源音色迁移到目标后端。
-              voice_mode: "clone",
-              ref_audio_path: refAudioPath,
-              ref_text: referenceText,
-            },
-          },
-        };
-        if (targetBackend === "voxcpm2" && next.backend_profiles?.voxcpm2) {
-          next.backend_profiles.voxcpm2.use_hifi_clone = Boolean(next.backend_profiles.voxcpm2.use_hifi_clone);
-        }
-        return next;
-      });
-      setActiveBackend(targetBackend);
-      useUiStore.getState().pushToast({
-        title: `已同步到 ${targetBackend === "voxcpm2" ? "VoxCPM2" : "OmniVoice"} profile（已填充 clone 参数，点击“更新预设”保存）`,
-        tone: "success",
+      await syncAndAutoSavePreset({
+        preset: selectedPreset,
+        sourceBackend,
+        audioBlob: blob,
+        referenceText,
       });
     } catch (error) {
       useUiStore.getState().pushToast({
         title: `同步失败：${error?.message || "未知错误"}`,
+        tone: "error",
+      });
+    }
+  }
+
+  async function syncFromPreviewSlot(slot) {
+    const slotState = previewSlots?.[slot] || {};
+    const presetId = slotState.presetId || "";
+    if (!presetId) {
+      useUiStore.getState().pushToast({ title: `请先为 ${slot.toUpperCase()} 槽选择预设`, tone: "error" });
+      return;
+    }
+    const preset = presets.find((item) => item.id === presetId);
+    if (!preset) {
+      useUiStore.getState().pushToast({ title: `未找到 ${slot.toUpperCase()} 槽预设`, tone: "error" });
+      return;
+    }
+    const sourceBackend = (slotState.meta?.backend || slotState.backend || "omnivoice").toLowerCase();
+    const referenceText = (slotState.meta?.text || sampleText || "").trim();
+    try {
+      let blob = slotState.audioBlob || null;
+      if (!blob && slotState.audioUrl) {
+        const response = await fetch(slotState.audioUrl);
+        if (!response.ok) {
+          throw new Error(`读取 ${slot.toUpperCase()} 槽试听音频失败: HTTP ${response.status}`);
+        }
+        blob = await response.blob();
+      }
+      if (!blob) {
+        throw new Error(`${slot.toUpperCase()} 槽还没有可同步的试听音频`);
+      }
+      await syncAndAutoSavePreset({
+        preset,
+        sourceBackend,
+        audioBlob: blob,
+        referenceText,
+      });
+    } catch (error) {
+      useUiStore.getState().pushToast({
+        title: `${slot.toUpperCase()} 槽同步失败：${error?.message || "未知错误"}`,
         tone: "error",
       });
     }
@@ -562,6 +855,15 @@ export default function VoiceConfigPage() {
       return;
     }
     setBackendField(backend, "ref_audio_path", filePath);
+    if (result?.quality_report) {
+      setForm((prev) => ({
+        ...prev,
+        quality_reports: {
+          ...(prev.quality_reports || {}),
+          [backend]: result.quality_report,
+        },
+      }));
+    }
   }
 
   async function handleTranscribe(backend) {
@@ -572,6 +874,10 @@ export default function VoiceConfigPage() {
   }
 
   async function handlePresetDragEnd(event) {
+    if (isFilterActive) {
+      useUiStore.getState().pushToast({ title: "筛选状态下不支持拖拽排序", tone: "error" });
+      return;
+    }
     const { active, over } = event;
     if (!over || active.id === over.id) {
       return;
@@ -627,6 +933,14 @@ export default function VoiceConfigPage() {
     return () => clearProjectSaveAction();
   }, [setProjectSaveAction, clearProjectSaveAction, handleSaveProjectFile]);
 
+  useEffect(() => {
+    if (!currentProject?.id) {
+      clearPresetRecommendations();
+      return;
+    }
+    clearPresetRecommendations();
+  }, [currentProject?.id, clearPresetRecommendations]);
+
   return (
     <div className="pageGrid twoCols">
       {/* LEFT: Preset management */}
@@ -649,7 +963,6 @@ export default function VoiceConfigPage() {
               options={BACKEND_OPTIONS}
             />
           </div>
-
           <Tabs value={activeBackend} onValueChange={(v) => setActiveBackend(v)}>
             <TabsList>
               <TabsTrigger value="omnivoice">OmniVoice Profile</TabsTrigger>
@@ -999,6 +1312,66 @@ export default function VoiceConfigPage() {
               placeholder="记录这个声音适合的角色气质..."
             />
           </div>
+          <div className="editorGrid">
+            <label className="checkRow" style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 24 }}>
+              <input
+                type="checkbox"
+                checked={Boolean(form.favorite)}
+                onChange={(e) => setField("favorite", e.target.checked)}
+              />
+              <span>收藏预设</span>
+            </label>
+            <div className="formGroup">
+              <label className="formLabel">标签（空格/逗号分隔）</label>
+              <input
+                className="textInput"
+                value={Array.isArray(form.tags) ? form.tags.join(", ") : ""}
+                onChange={(e) => setField("tags", parseTags(e.target.value))}
+                placeholder="如：温柔, 女声, 旁白"
+              />
+            </div>
+          </div>
+          <div className="formGroup">
+            <label className="formLabel">适合角色描述</label>
+            <textarea
+              className="textArea compactArea"
+              value={form.suitable_role_description || ""}
+              onChange={(e) => setField("suitable_role_description", e.target.value)}
+              placeholder="例如：适合温柔旁白、青年女性、古风人物"
+            />
+          </div>
+          <div className="controlRow" style={{ alignItems: "center" }}>
+            <span className={`statusBadge ${currentBackendQualityReport?.status === "pass" ? "success" : currentBackendQualityReport?.status === "warning" ? "warning" : currentBackendQualityReport?.status === "fail" ? "error" : "default"}`}>
+              {qualityStatusLabel(currentBackendQualityReport?.status || "unknown")}
+            </span>
+            <span className="muted">
+              {currentBackendQualityReport?.checked_at
+                ? `最近检测：${new Date(currentBackendQualityReport.checked_at).toLocaleString()}`
+                : "当前后端尚未检测"}
+            </span>
+            {isEditMode ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => handleCheckQuality(activeBackend)}
+                disabled={isSaving}
+              >
+                {isSaving ? "检测中..." : "重新检测"}
+              </Button>
+            ) : null}
+          </div>
+          {Array.isArray(currentBackendQualityReport?.issues) && currentBackendQualityReport.issues.length ? (
+            <div className="listStack" style={{ marginTop: -6 }}>
+              {currentBackendQualityReport.issues.slice(0, 3).map((issue, index) => (
+                <span key={`${issue.code}-${index}`} className="muted">
+                  {issue.severity === "fail" ? "失败" : "告警"}：{issue.message}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {lastReferenceQualityReport && !isEditMode ? (
+            <span className="muted">上传参考音频后会自动检测质量，保存后可在这里查看结果。</span>
+          ) : null}
 
           <div className="controlRow">
             <Button
@@ -1033,14 +1406,61 @@ export default function VoiceConfigPage() {
         <GlassCard>
           <h2 className="cardTitle">声音预设</h2>
           <p className="cardSubtitle">可拖拽调整预设顺序，新的顺序会自动保存。</p>
+          <div className="editorGrid">
+            <div className="formGroup">
+              <label className="formLabel">搜索</label>
+              <div style={{ position: "relative" }}>
+                <Search size={14} style={{ position: "absolute", left: 10, top: 10, color: "var(--text-muted)" }} />
+                <input
+                  className="textInput"
+                  style={{ paddingLeft: 32 }}
+                  value={searchKeyword}
+                  onChange={(e) => setSearchKeyword(e.target.value)}
+                  placeholder="按名称、标签、描述搜索"
+                />
+              </div>
+            </div>
+            <div className="formGroup">
+              <label className="formLabel">标签筛选</label>
+              <Select
+                value={tagFilter}
+                onValueChange={(value) => setTagFilter(value)}
+                options={[{ value: "all", label: "全部标签" }, ...allTags.map((tag) => ({ value: tag, label: tag }))]}
+              />
+            </div>
+          </div>
+          <div className="editorGrid">
+            <div className="formGroup">
+              <label className="formLabel">质量筛选</label>
+              <Select
+                value={qualityFilter}
+                onValueChange={(value) => setQualityFilter(value)}
+                options={QUALITY_FILTER_OPTIONS}
+              />
+            </div>
+            <label className="checkRow" style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 24 }}>
+              <input
+                type="checkbox"
+                checked={favoriteOnly}
+                onChange={(e) => setFavoriteOnly(e.target.checked)}
+              />
+              <span>只看收藏</span>
+            </label>
+          </div>
           {presets.length ? (
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handlePresetDragEnd}>
-              <SortableContext items={presetIds} strategy={rectSortingStrategy}>
+              <SortableContext items={displayPresetIds} strategy={rectSortingStrategy}>
                 <div className="presetGrid">
-                  {presets.map((preset) => (
+                  {!displayPresets.length ? (
+                    <div className="presetCard" style={{ minHeight: 140, justifyContent: "center", alignItems: "center" }}>
+                      <span className="muted">当前筛选无匹配预设</span>
+                    </div>
+                  ) : null}
+                  {displayPresets.map((preset) => (
                     <SortablePresetCard
                       key={preset.id}
                       preset={preset}
+                      displayBackend={activeBackend}
                       isSelected={selectedPresetId === preset.id}
                       onToggleSelect={() => {
                         if (preset.id === selectedPresetId) {
@@ -1053,6 +1473,22 @@ export default function VoiceConfigPage() {
                       }}
                       onDelete={() => setDeleteTarget(preset.id)}
                       onPreview={() => handlePreviewPreset(preset)}
+                      onUseSlotA={() => {
+                        setPreviewSlotPreset("a", preset.id);
+                        setSelectedPresetId(preset.id);
+                      }}
+                      onUseSlotB={() => {
+                        setPreviewSlotPreset("b", preset.id);
+                        setSelectedPresetId(preset.id);
+                      }}
+                      onCycleMode={() => {
+                        handleCyclePresetVoiceMode(preset).catch((error) => {
+                          useUiStore.getState().pushToast({
+                            title: `切换模式失败：${error?.message || "未知错误"}`,
+                            tone: "error",
+                          });
+                        });
+                      }}
                     />
                   ))}
                   {/* Add new card */}
@@ -1106,25 +1542,100 @@ export default function VoiceConfigPage() {
                 onClick={handleSyncPreviewToOtherBackend}
                 disabled={isSaving || (!previewAudioUrl && !previewAudioBlob)}
               >
-                {previewBackend === "voxcpm2" ? "同步到 OmniVoice" : "同步到 VoxCPM2"}
+                {previewBackend === "voxcpm2" ? "同步并保存为 OmniVoice Clone" : "同步并保存为 VoxCPM2 Clone"}
               </Button>
             </div>
             {previewAudioUrl && <AudioPlayer audioUrl={previewAudioUrl} audioBlob={previewAudioBlob} />}
           </GlassCard>
         )}
 
+        <GlassCard>
+          <h2 className="cardTitle">A/B 试听对比</h2>
+          <p className="cardSubtitle">选择两个预设并使用同一段文本对比试听。</p>
+          <textarea
+            className="textArea compactArea"
+            value={sampleText}
+            onChange={(e) => setSampleText(e.target.value)}
+          />
+          <div className="editorGrid">
+            <div className="listStack">
+              <strong>A 槽</strong>
+              <Select
+                value={slotAState.presetId || ""}
+                onValueChange={(value) => setPreviewSlotPreset("a", value)}
+                options={presetOptions}
+                placeholder="选择 A 槽预设"
+              />
+              <Select
+                value={slotAState.backend || "omnivoice"}
+                onValueChange={(value) => setPreviewSlotBackend("a", value)}
+                options={BACKEND_OPTIONS}
+              />
+              <Button variant="secondary" onClick={() => handlePreviewSlot("a")} disabled={isSaving || !slotAState.presetId}>
+                {isSaving ? "合成中..." : "试听 A"}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => syncFromPreviewSlot("a")}
+                disabled={isSaving || !slotAState.audioUrl}
+              >
+                A 同步并保存为另一后端 Clone
+              </Button>
+              {slotAState.audioUrl ? <AudioPlayer audioUrl={slotAState.audioUrl} audioBlob={slotAState.audioBlob} /> : null}
+            </div>
+            <div className="listStack">
+              <strong>B 槽</strong>
+              <Select
+                value={slotBState.presetId || ""}
+                onValueChange={(value) => setPreviewSlotPreset("b", value)}
+                options={presetOptions}
+                placeholder="选择 B 槽预设"
+              />
+              <Select
+                value={slotBState.backend || "omnivoice"}
+                onValueChange={(value) => setPreviewSlotBackend("b", value)}
+                options={BACKEND_OPTIONS}
+              />
+              <Button variant="secondary" onClick={() => handlePreviewSlot("b")} disabled={isSaving || !slotBState.presetId}>
+                {isSaving ? "合成中..." : "试听 B"}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => syncFromPreviewSlot("b")}
+                disabled={isSaving || !slotBState.audioUrl}
+              >
+                B 同步并保存为另一后端 Clone
+              </Button>
+              {slotBState.audioUrl ? <AudioPlayer audioUrl={slotBState.audioUrl} audioBlob={slotBState.audioBlob} /> : null}
+            </div>
+          </div>
+        </GlassCard>
+
         {/* Character assignment */}
         <GlassCard>
           <h2 className="cardTitle">角色分配</h2>
           <p className="cardSubtitle">为项目中每个角色选择对应的声音预设。</p>
+          <div className="controlRow" style={{ justifyContent: "space-between" }}>
+            <Button
+              variant="secondary"
+              icon={Sparkles}
+              disabled={!currentProject?.id || isLoading}
+              onClick={handleFetchRecommendations}
+            >
+              {isLoading ? "推荐中..." : "按角色描述推荐"}
+            </Button>
+            <span className="muted">推荐使用当前试听后端：{previewBackend === "voxcpm2" ? "VoxCPM2" : "OmniVoice"}</span>
+          </div>
 
           {characters.length ? (
             <div className="listStack">
               {characters.map((char) => (
-                <div key={char.name} className="statRow" style={{ gap: 12, flexWrap: "wrap" }}>
-                  <CharacterBadge name={char.name} />
-                  <span className="muted" style={{ marginRight: "auto" }}>出场 {char.appearance_count} 次</span>
-                  <div style={{ minWidth: 180 }}>
+                <div key={char.name} className="statRow" style={{ gap: 12, flexWrap: "wrap", alignItems: "stretch" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 220 }}>
+                    <CharacterBadge name={char.name} />
+                    <span className="muted">出场 {char.appearance_count} 次</span>
+                  </div>
+                  <div style={{ minWidth: 220, flex: 1 }}>
                     <Select
                       value={assignments[char.name] || ""}
                       onValueChange={(v) => assignVoice(char.name, v)}
@@ -1132,6 +1643,21 @@ export default function VoiceConfigPage() {
                       placeholder="未分配"
                     />
                   </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    {(recommendationMap?.[char.name] || []).slice(0, 3).map((item, index) => (
+                      <button
+                        key={`${char.name}-${item.preset_id}-${index}`}
+                        type="button"
+                        className="statRowButton"
+                        style={{ width: "auto", padding: "4px 8px", borderRadius: 10, fontSize: 12 }}
+                        onClick={() => assignVoice(char.name, item.preset_id)}
+                        title={(item.reasons || []).join(" / ")}
+                      >
+                        #{index + 1} {item.name} · {item.score}
+                      </button>
+                    ))}
+                  </div>
+                  {char.description ? <span className="muted" style={{ width: "100%" }}>角色描述：{char.description}</span> : null}
                 </div>
               ))}
               <div className="controlRow" style={{ justifyContent: "flex-end", marginTop: 4 }}>
