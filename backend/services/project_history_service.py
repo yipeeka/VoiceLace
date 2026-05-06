@@ -16,6 +16,9 @@ def _history_label_for_project_event(event_type: str) -> str:
         "script_reordered": "片段已重排",
         "voice_assignments_saved": "角色分配已保存",
         "snapshot_restored": "已回滚到快照",
+        "asr_project_created": "ASR 转项目完成",
+        "asr_chunk_failed": "分块转写失败",
+        "asr_parse_queued": "已排队自动解析",
     }
     return labels.get(event_type, event_type or "项目事件")
 

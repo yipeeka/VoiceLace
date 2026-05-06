@@ -1,18 +1,23 @@
-import { Languages, Mic, Square, Upload, WandSparkles } from "lucide-react";
+import { FolderPlus, Languages, Mic, Square, Upload, WandSparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import GlassCard from "../components/shared/GlassCard";
 import Button from "../components/ui/Button";
+import { useProjectStore } from "../stores/useProjectStore";
 import { useScriptStore } from "../stores/useScriptStore";
 import { useSpeechRecognitionStore } from "../stores/useSpeechRecognitionStore";
 import { useUiStore } from "../stores/useUiStore";
-import { API_BASE_URL } from "../utils/api";
+import { API_BASE_URL, getWsBaseUrl } from "../utils/api";
+import { runTaskChannel } from "../utils/taskChannel";
 import { appendSpeechText, replaceSpeechText } from "../utils/speechText";
 
 export default function SpeechRecognitionPage({ onNavigate }) {
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [pendingAudio, setPendingAudio] = useState(null);
+  const [projectName, setProjectName] = useState("");
+  const [projectTask, setProjectTask] = useState({ status: "", failedChunks: [], warnings: [], chunkProgress: null, parseTaskId: "" });
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
   const abortRef = useRef(null);
@@ -25,6 +30,11 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const setPlainText = useSpeechRecognitionStore((state) => state.setPlainText);
   const warnings = useSpeechRecognitionStore((state) => state.warnings);
   const setWarnings = useSpeechRecognitionStore((state) => state.setWarnings);
+  const alignments = useSpeechRecognitionStore((state) => state.alignments);
+  const setAlignments = useSpeechRecognitionStore((state) => state.setAlignments);
+  const speakerMap = useSpeechRecognitionStore((state) => state.speakerMap);
+  const setSpeakerMap = useSpeechRecognitionStore((state) => state.setSpeakerMap);
+  const updateSpeakerMapEntry = useSpeechRecognitionStore((state) => state.updateSpeakerMapEntry);
   const error = useSpeechRecognitionStore((state) => state.error);
   const setError = useSpeechRecognitionStore((state) => state.setError);
   const backendUsed = useSpeechRecognitionStore((state) => state.backendUsed);
@@ -45,13 +55,43 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const setTranslationEngineStatus = useSpeechRecognitionStore((state) => state.setTranslationEngineStatus);
   const clearTranslationResult = useSpeechRecognitionStore((state) => state.clearTranslationResult);
   const clearResult = useSpeechRecognitionStore((state) => state.clearResult);
+  const selectProject = useProjectStore((state) => state.selectProject);
+  const loadProjectScript = useScriptStore((state) => state.loadProjectScript);
+  const loadProjectParseQc = useProjectStore((state) => state.loadProjectParseQc);
   const sourceText = useScriptStore((state) => state.sourceText);
   const setSourceText = useScriptStore((state) => state.setSourceText);
   const [isLoadingTranslationEngine, setIsLoadingTranslationEngine] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
   const isTranslationEngineLoaded = Boolean(translationEngineStatus?.loaded);
 
-  const canInsert = useMemo(() => Boolean((speakerLabels ? transcript : plainText).trim()), [plainText, speakerLabels, transcript]);
+  const remappedAlignments = useMemo(() => {
+    if (!Array.isArray(alignments) || !alignments.length) return [];
+    return alignments.map((item) => {
+      const rawSpeaker = String(item?.speaker || "").trim();
+      const mapped = String(speakerMap?.[rawSpeaker] || rawSpeaker).trim() || rawSpeaker;
+      return {
+        ...item,
+        speaker: mapped,
+      };
+    });
+  }, [alignments, speakerMap]);
+
+  const mappedTranscript = useMemo(() => {
+    if (!speakerLabels) return transcript;
+    if (!remappedAlignments.length) return transcript;
+    return remappedAlignments
+      .map((item) => {
+        const text = String(item?.text || "").trim();
+        if (!text) return "";
+        const speaker = String(item?.speaker || "").trim();
+        return speaker ? `${speaker}：${text}` : text;
+      })
+      .filter(Boolean)
+      .join("\n");
+  }, [remappedAlignments, speakerLabels, transcript]);
+
+  const previewText = speakerLabels ? mappedTranscript : plainText;
+  const canInsert = useMemo(() => Boolean((previewText || "").trim()), [previewText]);
   const canInsertTranslation = useMemo(() => Boolean((translationResult || "").trim()), [translationResult]);
 
   async function readErrorMessage(response, fallback) {
@@ -130,11 +170,24 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       const payload = await response.json();
       const nextPlainText = String(payload?.text || "").trim();
       const nextLabeledText = String(payload?.labeled_text || "").trim();
+      const nextAlignments = Array.isArray(payload?.alignments) ? payload.alignments : [];
+      const mapped = payload?.speaker_map && typeof payload.speaker_map === "object" ? payload.speaker_map : {};
+      const fallbackSpeakerMap = {};
+      nextAlignments.forEach((item) => {
+        const speaker = String(item?.speaker || "").trim();
+        if (speaker && !fallbackSpeakerMap[speaker]) {
+          fallbackSpeakerMap[speaker] = speaker;
+        }
+      });
+      const nextSpeakerMap = Object.keys(mapped).length ? mapped : fallbackSpeakerMap;
       setPlainText(nextPlainText);
       setTranscript(nextLabeledText || nextPlainText);
+      setAlignments(nextAlignments);
+      setSpeakerMap(nextSpeakerMap);
       setWarnings(Array.isArray(payload?.warnings) ? payload.warnings : []);
       setBackendUsed(String(payload?.backend || "whisper"));
       setModelFiles(payload?.model_files || null);
+      setProjectTask({ status: "", failedChunks: [], warnings: [], chunkProgress: null, parseTaskId: "" });
       if (!nextPlainText && !nextLabeledText) {
         setError("识别结果为空，请重试。");
       } else {
@@ -164,6 +217,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       if (prev?.url) URL.revokeObjectURL(prev.url);
       return { blob: file, fileName: file.name || "upload.wav", url: nextUrl };
     });
+    setProjectTask({ status: "", failedChunks: [], warnings: [], chunkProgress: null, parseTaskId: "" });
     setError("");
   }
 
@@ -191,6 +245,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           if (prev?.url) URL.revokeObjectURL(prev.url);
           return { blob, fileName: "recording.webm", url: nextUrl };
         });
+        setProjectTask({ status: "", failedChunks: [], warnings: [], chunkProgress: null, parseTaskId: "" });
       };
       mediaRecorderRef.current = recorder;
       recorder.start();
@@ -307,7 +362,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       setTranslationError("请先加载翻译引擎。");
       return;
     }
-    const input = (speakerLabels ? transcript : plainText).trim();
+    const input = (previewText || "").trim();
     if (!input) {
       setTranslationError("请先完成语音识别，或在识别预览中输入文本。");
       return;
@@ -355,8 +410,196 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     translateAbortRef.current.abort();
   }
 
+  async function handleCreateProjectFromAudio() {
+    if (!pendingAudio?.blob) {
+      setError("请先上传或录制音频。");
+      return;
+    }
+    setIsCreatingProject(true);
+    setError("");
+    try {
+      const formData = new FormData();
+      formData.append("file", pendingAudio.blob, pendingAudio.fileName || "audio.wav");
+      formData.append("project_name", projectName.trim());
+      formData.append("speaker_labels", String(Boolean(speakerLabels)));
+      formData.append("parse_mode", "verified_five_step_pipeline");
+      formData.append("auto_parse", "true");
+      formData.append("speaker_map", JSON.stringify(speakerMap || {}));
+      const response = await fetch(`${API_BASE_URL}/asr/project-from-audio`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!response.ok) {
+        const message = await readErrorMessage(response, `HTTP ${response.status}`);
+        throw new Error(message);
+      }
+      const queued = await response.json();
+      const taskId = String(queued?.task_id || "");
+      if (!taskId) {
+        throw new Error("创建任务成功，但未返回任务 ID。");
+      }
+      setProjectTask({
+        status: "queued",
+        failedChunks: [],
+        warnings: [],
+        chunkProgress: { completed: 0, total: 0 },
+        parseTaskId: "",
+      });
+
+      const result = await runTaskChannel({
+        wsUrl: `${getWsBaseUrl()}/ws/asr-progress/${taskId}`,
+        timeoutMs: 40 * 60 * 1000,
+        maxReconnectRetries: 5,
+        baseDelayMs: 1000,
+        shouldReconnect: () => true,
+        onConnectionStatus: () => {},
+        onOpen: async () => {},
+        syncTaskState: async ({ done, fail }) => {
+          try {
+            const stateResp = await fetch(`${API_BASE_URL}/asr/project-from-audio/${taskId}`);
+            if (!stateResp.ok) return false;
+            const body = await stateResp.json();
+            if (body?.status === "done" && body?.result) {
+              done(body.result);
+              return true;
+            }
+            if (body?.status === "error") {
+              fail(new Error(String(body?.error || "ASR 任务失败")));
+              return true;
+            }
+            return false;
+          } catch {
+            return false;
+          }
+        },
+        onMessage: ({ msg, done, fail }) => {
+          if (!msg || typeof msg !== "object") return;
+          if (msg.type === "task_status") {
+            setProjectTask((prev) => ({ ...prev, status: String(msg.status || prev.status || "running") }));
+            return;
+          }
+          if (msg.type === "chunk_total") {
+            setProjectTask((prev) => ({
+              ...prev,
+              chunkProgress: { completed: Number(prev?.chunkProgress?.completed || 0), total: Number(msg.total || 0) },
+            }));
+            return;
+          }
+          if (msg.type === "chunk_progress") {
+            setProjectTask((prev) => ({
+              ...prev,
+              status: "running",
+              chunkProgress: { completed: Number(msg.completed || 0), total: Number(msg.total_chunks || 0) },
+            }));
+            return;
+          }
+          if (msg.type === "warning") {
+            setProjectTask((prev) => ({
+              ...prev,
+              warnings: [...(prev?.warnings || []), String(msg.message || "")].filter(Boolean),
+            }));
+            return;
+          }
+          if (msg.type === "chunk_failed") {
+            setProjectTask((prev) => ({
+              ...prev,
+              failedChunks: [...(prev?.failedChunks || []), msg.chunk].filter(Boolean),
+              chunkProgress: { completed: Number(msg.completed || 0), total: Number(msg.total_chunks || 0) },
+            }));
+            return;
+          }
+          if (msg.type === "parse_queued") {
+            setProjectTask((prev) => ({ ...prev, parseTaskId: String(msg.parse_task_id || "") }));
+            return;
+          }
+          if (msg.type === "complete") {
+            done(msg.data || null);
+            return;
+          }
+          if (msg.type === "error") {
+            fail(new Error(String(msg.message || "ASR 任务失败")));
+          }
+        },
+      });
+
+      const payload = result || {};
+      const nextProjectId = String(payload?.project_id || "");
+      const nextStatus = String(payload?.status || "asr_done");
+      const nextFailed = Array.isArray(payload?.failed_chunks) ? payload.failed_chunks : [];
+      const nextWarnings = Array.isArray(payload?.warnings) ? payload.warnings : [];
+      const nextChunkProgress = payload?.chunk_progress || null;
+      const nextParseTaskId = String(payload?.parse_task_id || "");
+      setProjectTask({
+        status: nextStatus,
+        failedChunks: nextFailed,
+        warnings: nextWarnings,
+        chunkProgress: nextChunkProgress,
+        parseTaskId: nextParseTaskId,
+      });
+
+      if (!nextProjectId) {
+        throw new Error("创建项目成功，但未返回项目 ID。");
+      }
+
+      await selectProject(nextProjectId, { suppressToast: true });
+      await loadProjectScript(nextProjectId);
+
+      let parseReady = !nextParseTaskId;
+      let parseFailed = false;
+      if (nextParseTaskId) {
+        for (let i = 0; i < 40; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          const statusResp = await fetch(`${API_BASE_URL}/llm/parse/${nextParseTaskId}`);
+          if (statusResp.status === 202) {
+            continue;
+          }
+          if (statusResp.status >= 400) {
+            parseFailed = true;
+            parseReady = false;
+          } else {
+            parseReady = true;
+          }
+          break;
+        }
+      }
+
+      let issueCount = 0;
+      if (parseReady) {
+        await loadProjectScript(nextProjectId);
+        try {
+          const report = await loadProjectParseQc(nextProjectId);
+          issueCount = Number(report?.summary?.issue_count || 0);
+        } catch {
+          issueCount = 0;
+        }
+      } else if (nextParseTaskId && !parseFailed) {
+        useUiStore.getState().pushToast({
+          title: "解析仍在进行中，先进入剧本页查看",
+          tone: "warning",
+        });
+      } else if (parseFailed) {
+        useUiStore.getState().pushToast({
+          title: "自动解析失败，请检查模型状态后重试解析",
+          tone: "warning",
+        });
+      }
+
+      useUiStore.getState().pushToast({
+        title: nextFailed.length ? `项目已创建（${nextFailed.length} 个分块失败）` : "项目创建完成",
+        tone: nextFailed.length ? "warning" : "success",
+      });
+      onNavigate?.(issueCount > 0 ? "qc" : "script");
+    } catch (err) {
+      const message = err?.message || "一键转项目失败";
+      setError(message);
+      useUiStore.getState().pushToast({ title: `一键转项目失败：${message}`, tone: "error" });
+    } finally {
+      setIsCreatingProject(false);
+    }
+  }
+
   function handleAppendToText() {
-    const toInsert = (speakerLabels ? transcript : plainText).trim();
+    const toInsert = (previewText || "").trim();
     if (!toInsert) {
       return;
     }
@@ -366,7 +609,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   }
 
   function handleReplaceText() {
-    const toInsert = (speakerLabels ? transcript : plainText).trim();
+    const toInsert = (previewText || "").trim();
     if (!toInsert) {
       return;
     }
@@ -377,6 +620,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
 
   function handleClearResult() {
     clearResult();
+    setProjectTask({ status: "", failedChunks: [], warnings: [], chunkProgress: null, parseTaskId: "" });
   }
 
   function handleAppendTranslationToText() {
@@ -411,28 +655,28 @@ export default function SpeechRecognitionPage({ onNavigate }) {
             type="checkbox"
             checked={speakerLabels}
             onChange={(event) => setSpeakerLabels(event.target.checked)}
-            disabled={isTranscribing || isRecording}
+            disabled={isTranscribing || isRecording || isCreatingProject}
             style={{ width: 14, height: 14 }}
           />
           <span style={{ fontSize: 13 }}>输出说话人标签（说话人1：文本）</span>
         </label>
 
         <div className="controlRow">
-          <Button variant={isRecording ? "danger" : "primary"} onClick={isRecording ? handleStopRecording : handleStartRecording} disabled={isTranscribing} icon={isRecording ? Square : Mic}>
+          <Button variant={isRecording ? "danger" : "primary"} onClick={isRecording ? handleStopRecording : handleStartRecording} disabled={isTranscribing || isCreatingProject} icon={isRecording ? Square : Mic}>
             {isRecording ? "停止录音" : "开始录音"}
           </Button>
-          <label className="btn btn-secondary" style={{ cursor: isTranscribing ? "not-allowed" : "pointer", opacity: isTranscribing ? 0.45 : 1 }}>
+          <label className="btn btn-secondary" style={{ cursor: isTranscribing || isCreatingProject ? "not-allowed" : "pointer", opacity: isTranscribing || isCreatingProject ? 0.45 : 1 }}>
             <Upload size={15} />
             上传音频
-            <input type="file" accept="audio/*" onChange={handleUpload} disabled={isTranscribing || isRecording} style={{ display: "none" }} />
+            <input type="file" accept="audio/*" onChange={handleUpload} disabled={isTranscribing || isRecording || isCreatingProject} style={{ display: "none" }} />
           </label>
-          <Button variant="primary" onClick={handleRecognize} disabled={isTranscribing || isRecording || !pendingAudio?.blob}>
+          <Button variant="primary" onClick={handleRecognize} disabled={isTranscribing || isRecording || isCreatingProject || !pendingAudio?.blob}>
             开始识别
           </Button>
           <Button variant="danger" onClick={handleAbortRecognize} disabled={!isTranscribing}>
             终止识别
           </Button>
-          <Button variant="secondary" onClick={handleUnloadAsr} disabled={isTranscribing || isRecording}>
+          <Button variant="secondary" onClick={handleUnloadAsr} disabled={isTranscribing || isRecording || isCreatingProject}>
             卸载 ASR
           </Button>
         </div>
@@ -441,7 +685,31 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           <audio controls preload="metadata" style={{ width: "100%" }} src={pendingAudio.url} />
         ) : null}
 
+        <div className="editorGrid two" style={{ marginTop: 8 }}>
+          <div className="formGroup">
+            <label className="formLabel">项目名称</label>
+            <input
+              className="textInput"
+              value={projectName}
+              onChange={(event) => setProjectName(event.target.value)}
+              placeholder="可留空，默认取音频文件名"
+              disabled={isTranscribing || isRecording || isCreatingProject}
+            />
+          </div>
+          <div className="formGroup" style={{ justifyContent: "flex-end", display: "flex", alignItems: "flex-end" }}>
+            <Button
+              variant="primary"
+              icon={FolderPlus}
+              onClick={handleCreateProjectFromAudio}
+              disabled={isTranscribing || isRecording || isCreatingProject || !pendingAudio?.blob}
+            >
+              {isCreatingProject ? "转项目中..." : "一键转项目"}
+            </Button>
+          </div>
+        </div>
+
         {isTranscribing ? <div className="statusBadge default">识别中...</div> : null}
+        {isCreatingProject ? <div className="statusBadge default">正在分块转写并创建项目...</div> : null}
         {backendUsed ? <div className="muted">实际后端：{backendUsed}</div> : null}
         {modelFiles?.main_model_path ? <div className="muted" title={modelFiles.main_model_path}>模型：{modelFiles.main_model_path}</div> : null}
         {error ? <div className="errorText">{error}</div> : null}
@@ -450,6 +718,21 @@ export default function SpeechRecognitionPage({ onNavigate }) {
             {warnings.join(" | ")}
           </div>
         ) : null}
+        {projectTask?.chunkProgress?.total ? (
+          <div className="muted">
+            分块进度：{Number(projectTask.chunkProgress.completed || 0)} / {Number(projectTask.chunkProgress.total || 0)}
+            {projectTask.status ? ` · 状态：${projectTask.status}` : ""}
+          </div>
+        ) : null}
+        {projectTask?.warnings?.length ? (
+          <div className="statusBadge warning" style={{ display: "block", textAlign: "left" }}>
+            {projectTask.warnings.join(" | ")}
+          </div>
+        ) : null}
+        {projectTask?.failedChunks?.length ? (
+          <div className="errorText">失败分块：{projectTask.failedChunks.map((item) => `#${item.index + 1}`).join(", ")}</div>
+        ) : null}
+        {projectTask?.parseTaskId ? <div className="muted">自动解析任务：{projectTask.parseTaskId}</div> : null}
       </GlassCard>
 
       <GlassCard>
@@ -460,9 +743,11 @@ export default function SpeechRecognitionPage({ onNavigate }) {
         <textarea
           className="textArea"
           style={{ minHeight: 260 }}
-          value={speakerLabels ? transcript : plainText}
+          value={previewText}
+          readOnly={speakerLabels && remappedAlignments.length > 0}
           onChange={(event) => {
             if (speakerLabels) {
+              if (remappedAlignments.length) return;
               setTranscript(event.target.value);
             } else {
               setPlainText(event.target.value);
@@ -470,6 +755,24 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           }}
           placeholder="识别结果将显示在这里。"
         />
+        {speakerLabels && Array.isArray(alignments) && alignments.length ? (
+          <div className="listStack" style={{ marginTop: 8 }}>
+            <div className="muted">说话人映射（空值会回退原标签，可重名用于合并）</div>
+            <div className="muted">当前预览由分段时间轴实时生成，可直接改右侧目标名。</div>
+            {Object.keys(speakerMap || {}).map((source) => (
+              <div key={source} className="editorGrid two">
+                <div className="muted">{source}</div>
+                <input
+                  className="textInput"
+                  value={speakerMap?.[source] ?? ""}
+                  onChange={(event) => updateSpeakerMapEntry(source, event.target.value)}
+                  placeholder={source}
+                  disabled={isTranscribing || isRecording || isCreatingProject}
+                />
+              </div>
+            ))}
+          </div>
+        ) : null}
         <div className="controlRow">
           <Button variant="primary" onClick={handleAppendToText} disabled={!canInsert}>
             追加到文本输入
@@ -493,7 +796,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
         <div className="editorGrid three">
           <div className="formGroup">
             <label className="formLabel">来源</label>
-            <select className="textInput" value={translationSource} onChange={(e) => setTranslationSource(e.target.value)} disabled={isLoadingTranslationEngine || isTranslating}>
+            <select className="textInput" value={translationSource} onChange={(e) => setTranslationSource(e.target.value)} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject}>
               <option value="primary_local">模型1（主模型）</option>
               <option value="secondary_local">模型2（小模型）</option>
               <option value="openai">OpenAI API</option>
@@ -502,14 +805,14 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           </div>
           <div className="formGroup">
             <label className="formLabel">模式</label>
-            <select className="textInput" value={translationMode} onChange={(e) => setTranslationMode(e.target.value)} disabled={isLoadingTranslationEngine || isTranslating}>
+            <select className="textInput" value={translationMode} onChange={(e) => setTranslationMode(e.target.value)} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject}>
               <option value="polish_only">仅润色</option>
               <option value="translate_polish">翻译+润色</option>
             </select>
           </div>
           <div className="formGroup">
             <label className="formLabel">目标语言</label>
-            <select className="textInput" value={translationTargetLanguage} onChange={(e) => setTranslationTargetLanguage(e.target.value)} disabled={translationMode !== "translate_polish" || isLoadingTranslationEngine || isTranslating}>
+            <select className="textInput" value={translationTargetLanguage} onChange={(e) => setTranslationTargetLanguage(e.target.value)} disabled={translationMode !== "translate_polish" || isLoadingTranslationEngine || isTranslating || isCreatingProject}>
               <option value="中文">中文</option>
               <option value="英文">英文</option>
               <option value="日文">日文</option>
@@ -518,16 +821,16 @@ export default function SpeechRecognitionPage({ onNavigate }) {
         </div>
 
         <div className="controlRow">
-          <Button variant="secondary" onClick={handleLoadTranslationEngine} disabled={isLoadingTranslationEngine || isTranslating}>
+          <Button variant="secondary" onClick={handleLoadTranslationEngine} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject}>
             加载翻译引擎
           </Button>
-          <Button variant="secondary" onClick={handleUnloadTranslationEngine} disabled={isLoadingTranslationEngine || isTranslating}>
+          <Button variant="secondary" onClick={handleUnloadTranslationEngine} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject}>
             卸载翻译引擎
           </Button>
           <Button
             variant="primary"
             onClick={handleTranslatePolish}
-            disabled={isLoadingTranslationEngine || isTranslating || !isTranslationEngineLoaded}
+            disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || !isTranslationEngineLoaded}
           >
             翻译润色
           </Button>

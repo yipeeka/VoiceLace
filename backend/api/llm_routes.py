@@ -397,8 +397,7 @@ async def _run_parse_task(task_id: str, payload: LlmParseRequest, state) -> None
         state.llm_task_handles.pop(task_id, None)
 
 
-@router.post("/parse")
-async def parse_text(payload: LlmParseRequest, state=Depends(get_app_state)):
+def enqueue_parse_task(state, payload: LlmParseRequest) -> str:
     task_id = str(uuid4())
     state.llm_tasks[task_id] = {
         "task_id": task_id,
@@ -415,6 +414,12 @@ async def parse_text(payload: LlmParseRequest, state=Depends(get_app_state)):
     }
     handle = asyncio.create_task(_run_parse_task(task_id, payload, state))
     state.llm_task_handles[task_id] = handle
+    return task_id
+
+
+@router.post("/parse")
+async def parse_text(payload: LlmParseRequest, state=Depends(get_app_state)):
+    task_id = enqueue_parse_task(state, payload)
     return {"task_id": task_id}
 
 

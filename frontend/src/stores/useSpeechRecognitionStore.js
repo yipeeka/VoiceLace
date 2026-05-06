@@ -5,6 +5,8 @@ export const useSpeechRecognitionStore = create((set) => ({
   transcript: "",
   plainText: "",
   warnings: [],
+  alignments: [],
+  speakerMap: {},
   error: "",
   backendUsed: "",
   modelFiles: null,
@@ -24,6 +26,15 @@ export const useSpeechRecognitionStore = create((set) => ({
   setTranscript: (transcript) => set({ transcript: String(transcript ?? "") }),
   setPlainText: (plainText) => set({ plainText: String(plainText ?? "") }),
   setWarnings: (warnings) => set({ warnings: Array.isArray(warnings) ? warnings : [] }),
+  setAlignments: (alignments) => set({ alignments: Array.isArray(alignments) ? alignments : [] }),
+  setSpeakerMap: (speakerMap) => set({ speakerMap: speakerMap && typeof speakerMap === "object" ? { ...speakerMap } : {} }),
+  updateSpeakerMapEntry: (source, target) =>
+    set((state) => ({
+      speakerMap: {
+        ...(state.speakerMap || {}),
+        [String(source || "")]: String(target || ""),
+      },
+    })),
   setError: (error) => set({ error: String(error ?? "") }),
   setBackendUsed: (backendUsed) => set({ backendUsed: String(backendUsed ?? "") }),
   setModelFiles: (modelFiles) => set({ modelFiles: modelFiles ?? null }),
@@ -52,6 +63,8 @@ export const useSpeechRecognitionStore = create((set) => ({
       transcript: "",
       plainText: "",
       warnings: [],
+      alignments: [],
+      speakerMap: {},
       error: "",
       backendUsed: "",
       modelFiles: null,

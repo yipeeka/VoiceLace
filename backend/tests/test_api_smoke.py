@@ -8,6 +8,7 @@ import io
 import zipfile
 
 from fastapi.testclient import TestClient
+from backend.api import asr_routes
 
 from backend.main import app
 from backend.models import Project, ProjectOrigin, VoicePreset
@@ -103,6 +104,55 @@ class ApiSmokeTest(unittest.TestCase):
             files={"file": ("sample.wav", b"RIFFdemo", "audio/wav")},
         )
         self.assertEqual(response.status_code, 400)
+
+    def test_asr_project_from_audio_endpoint_shape(self) -> None:
+        original_runner = asr_routes._run_project_from_audio_task
+
+        async def fake_runner(task_id, task_input, state):
+            task = state.asr_tasks[task_id]
+            task["status"] = "done"
+            task["result"] = {
+                "project_id": "project-1",
+                "status": "parse_queued",
+                "text": "你好",
+                "labeled_text": "旁白：你好",
+                "segments": [{"id": "s1", "start_ms": 0, "end_ms": 1000, "text": "你好", "speaker": "旁白"}],
+                "speaker_map": {"旁白": "旁白"},
+                "warnings": [],
+                "failed_chunks": [],
+                "parse_task_id": "parse-1",
+                "chunk_progress": {"completed": 1, "total": 1},
+            }
+            task["events"].append({"type": "complete", "data": task["result"]})
+
+        asr_routes._run_project_from_audio_task = fake_runner
+        try:
+            response = self.client.post(
+                "/api/v1/asr/project-from-audio",
+                data={
+                    "project_name": "音频项目",
+                    "speaker_labels": "true",
+                    "parse_mode": "verified_five_step_pipeline",
+                    "auto_parse": "true",
+                    "speaker_map": "{\"说话人1\":\"旁白\"}",
+                },
+                files={"file": ("sample.wav", b"RIFFdemo", "audio/wav")},
+            )
+            self.assertEqual(response.status_code, 200)
+            body = response.json()
+            self.assertTrue(body.get("task_id"))
+            task_id = body["task_id"]
+            task_state = self.client.get(f"/api/v1/asr/project-from-audio/{task_id}")
+            self.assertEqual(task_state.status_code, 200)
+            task_body = task_state.json()
+            self.assertEqual(task_body["status"], "done")
+            result = task_body["result"]
+            self.assertEqual(result["project_id"], "project-1")
+            self.assertEqual(result["status"], "parse_queued")
+            self.assertEqual(result["parse_task_id"], "parse-1")
+            self.assertEqual(result["speaker_map"], {"旁白": "旁白"})
+        finally:
+            asr_routes._run_project_from_audio_task = original_runner
 
     def test_translation_engine_status_endpoint_shape(self) -> None:
         response = self.client.get("/api/v1/llm/translation-engine/status")

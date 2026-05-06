@@ -6,6 +6,7 @@ from .project_file_service import (
 )
 from .project_file_open_service import import_project_file_bytes
 from .project_archive_import_service import import_project_archive_bytes
+from .asr_project_service import create_project_from_audio, parse_speaker_map_form
 from .project_cleanup_service import delete_project_with_outputs
 from .project_history_service import get_project_history
 from .project_core_service import (
@@ -84,6 +85,8 @@ __all__ = [
     "normalize_synthesis_config",
     "parse_project_file_payload",
     "import_project_archive_bytes",
+    "create_project_from_audio",
+    "parse_speaker_map_form",
     "delete_project_with_outputs",
     "get_project_history",
     "create_project_record",

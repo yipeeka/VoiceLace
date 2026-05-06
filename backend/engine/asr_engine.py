@@ -75,20 +75,44 @@ class ASREngine:
             raise RuntimeError("ASR returned empty transcript")
 
         warnings: list[str] = []
+        aligned_segments = [dict(segment or {}) for segment in (segments or [])]
+        speaker_map: dict[str, str] = {}
         if speaker_labels:
             turns = await self._run_diarization(target)
-            labeled_text = self._label_segments_with_turns(segments, raw_text, turns, warnings)
+            labeled_text, aligned_segments, speaker_map = self._label_segments_with_turns(segments, raw_text, turns, warnings)
             plain_text = self._strip_speaker_labels(labeled_text)
         else:
             labeled_text = raw_text
             plain_text = raw_text
+
+        alignments: list[dict[str, Any]] = []
+        for idx, seg in enumerate(aligned_segments, start=1):
+            text = str(seg.get("text", "")).strip()
+            if not text:
+                continue
+            start = seg.get("start")
+            end = seg.get("end")
+            start_ms = int(round(float(start) * 1000)) if isinstance(start, (int, float)) else 0
+            end_ms = int(round(float(end) * 1000)) if isinstance(end, (int, float)) else start_ms
+            if end_ms < start_ms:
+                end_ms = start_ms
+            alignments.append(
+                {
+                    "id": f"asr-seg-{idx}",
+                    "start_ms": start_ms,
+                    "end_ms": end_ms,
+                    "text": text,
+                    "speaker": str(seg.get("speaker", "") or ""),
+                }
+            )
 
         return {
             "text": plain_text,
             "labeled_text": labeled_text,
             "backend": backend_used,
             "speaker_labels": bool(speaker_labels),
-            "alignments": [],
+            "alignments": alignments,
+            "speaker_map": speaker_map,
             "warnings": warnings,
             "model_files": {},
         }
@@ -315,9 +339,10 @@ class ASREngine:
         full_text: str,
         turns: list[dict[str, Any]],
         warnings: list[str],
-    ) -> str:
+    ) -> tuple[str, list[dict[str, Any]], dict[str, str]]:
         if not segments:
-            return self._ensure_single_speaker_label(full_text)
+            fallback = self._ensure_single_speaker_label(full_text)
+            return fallback, [], {"说话人1": "说话人1"} if fallback else {}
 
         speaker_map: dict[str, str] = {}
         next_speaker_idx = 1
@@ -330,6 +355,7 @@ class ASREngine:
             return speaker_map[raw]
 
         labeled_lines: list[str] = []
+        labeled_segments: list[dict[str, Any]] = []
         fallback_count = 0
         for seg in segments:
             text = str(seg.get("text", "")).strip()
@@ -341,14 +367,22 @@ class ASREngine:
             if speaker_raw is None:
                 fallback_count += 1
                 speaker_raw = turns[0]["speaker"]
-            labeled_lines.append(f"{normalized_name(str(speaker_raw))}：{text}")
+            speaker_name = normalized_name(str(speaker_raw))
+            labeled_lines.append(f"{speaker_name}：{text}")
+            labeled_segments.append(
+                {
+                    **seg,
+                    "speaker": speaker_name,
+                }
+            )
 
         if fallback_count > 0:
             warnings.append(f"{fallback_count} 个片段未能精确匹配说话人，已回退到默认分配。")
 
         if not labeled_lines:
-            return self._ensure_single_speaker_label(full_text)
-        return "\n".join(labeled_lines)
+            fallback = self._ensure_single_speaker_label(full_text)
+            return fallback, [], {"说话人1": "说话人1"} if fallback else {}
+        return "\n".join(labeled_lines), labeled_segments, {value: value for value in speaker_map.values()}
 
     @staticmethod
     def _pick_best_speaker(start: float | None, end: float | None, turns: list[dict[str, Any]]) -> str | None:

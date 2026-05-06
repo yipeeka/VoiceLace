@@ -39,6 +39,21 @@ async def tts_progress_endpoint(websocket: WebSocket, task_id: str, state=Depend
         await state.realtime.unsubscribe("tts", task_id, websocket)
 
 
+@router.websocket("/asr-progress/{task_id}")
+async def asr_progress_endpoint(websocket: WebSocket, task_id: str, state=Depends(get_app_state)):
+    await websocket.accept()
+    await state.realtime.subscribe("asr", task_id, websocket)
+    task = state.asr_tasks.get(task_id)
+    if task:
+        for event in task.get("events", []):
+            await websocket.send_json(event)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        await state.realtime.unsubscribe("asr", task_id, websocket)
+
+
 @router.websocket("/system-events")
 async def system_events_endpoint(websocket: WebSocket, state=Depends(get_app_state)):
     await websocket.accept()
