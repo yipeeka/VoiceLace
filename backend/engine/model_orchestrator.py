@@ -18,6 +18,10 @@ class ModelState(str, Enum):
     TTS_READY = "tts_ready"
     TTS_WORKING = "tts_working"
     UNLOADING_TTS = "unloading_tts"
+    LOADING_MUSIC = "loading_music"
+    MUSIC_READY = "music_ready"
+    MUSIC_WORKING = "music_working"
+    UNLOADING_MUSIC = "unloading_music"
 
 
 @dataclass(slots=True)
@@ -57,6 +61,9 @@ class OrchestratorConfig:
     tts_model_path: str = settings.default_tts_model_path
     voxcpm_tts_model_path: str = settings.default_voxcpm_tts_model_path
     tts_device: str = settings.default_tts_device
+    music_enabled: bool = settings.default_music_enabled
+    music_model_dir: str = settings.default_music_model_dir
+    music_device_mode: str = settings.default_music_device_mode
     asr_model_path: str = settings.default_asr_model_path
     asr_device: str = settings.default_asr_device
     pyannote_model_id: str = settings.default_pyannote_model_id
@@ -77,9 +84,10 @@ Listener = Callable[[dict], Awaitable[None]]
 
 
 class ModelOrchestrator:
-    def __init__(self, llm_engine, tts_engine) -> None:
+    def __init__(self, llm_engine, tts_engine, music_engine=None) -> None:
         self._llm = llm_engine
         self._tts = tts_engine
+        self._music = music_engine
         self._state = ModelState.IDLE
         self._lock = asyncio.Lock()
         self._listeners: list[Listener] = []
@@ -140,6 +148,9 @@ class ModelOrchestrator:
 
     async def ensure_llm_ready(self) -> None:
         async with self._lock:
+            if self._music is not None and getattr(self._music, "is_loaded", False) and self._config.auto_serial:
+                await self._set_state(ModelState.UNLOADING_MUSIC, "music")
+                await self._music.unload_model()
             if self._tts.is_loaded and self._config.auto_serial:
                 await self._set_state(ModelState.UNLOADING_TTS, "tts")
                 await self._tts.unload_model()
@@ -170,6 +181,9 @@ class ModelOrchestrator:
 
     async def ensure_tts_ready(self, *, tts_backend: str = "omnivoice") -> None:
         async with self._lock:
+            if self._music is not None and getattr(self._music, "is_loaded", False) and self._config.auto_serial:
+                await self._set_state(ModelState.UNLOADING_MUSIC, "music")
+                await self._music.unload_model()
             if self._llm.is_loaded and self._config.auto_serial:
                 await self._set_state(ModelState.UNLOADING_LLM, "llm")
                 await self._llm.unload_model()
@@ -198,6 +212,38 @@ class ModelOrchestrator:
                 await self._tts.load_model(model_path, self._config.tts_device, backend=backend)
             await self._set_state(ModelState.TTS_READY, "tts")
 
+    async def ensure_music_ready(self) -> None:
+        if self._music is None:
+            raise RuntimeError("Music engine is not configured")
+        if not self._config.music_enabled:
+            raise RuntimeError("音乐生成功能未启用（music_enabled=false）")
+        async with self._lock:
+            if self._llm.is_loaded and self._config.auto_serial:
+                await self._set_state(ModelState.UNLOADING_LLM, "llm")
+                await self._llm.unload_model()
+            if self._tts.is_loaded and self._config.auto_serial:
+                await self._set_state(ModelState.UNLOADING_TTS, "tts")
+                await self._tts.unload_model()
+
+            need_reload = False
+            if getattr(self._music, "is_loaded", False) and hasattr(self._music, "needs_reload"):
+                need_reload = bool(
+                    self._music.needs_reload(
+                        model_dir=self._config.music_model_dir,
+                        device_mode=self._config.music_device_mode,
+                    )
+                )
+            if need_reload:
+                await self._set_state(ModelState.UNLOADING_MUSIC, "music")
+                await self._music.unload_model()
+            if not getattr(self._music, "is_loaded", False):
+                await self._set_state(ModelState.LOADING_MUSIC, "music")
+                await self._music.load_model(
+                    self._config.music_model_dir,
+                    self._config.music_device_mode,
+                )
+            await self._set_state(ModelState.MUSIC_READY, "music")
+
     async def unload_llm(self) -> None:
         async with self._lock:
             if self._llm.is_loaded:
@@ -212,15 +258,28 @@ class ModelOrchestrator:
             await self._tts.unload_model()
             await self._set_state(ModelState.IDLE, "tts")
 
+    async def unload_music(self) -> None:
+        if self._music is None:
+            return
+        async with self._lock:
+            if getattr(self._music, "is_loaded", False):
+                await self._set_state(ModelState.UNLOADING_MUSIC, "music")
+            await self._music.unload_model()
+            await self._set_state(ModelState.IDLE, "music")
+
     async def get_status(self) -> dict:
         llm_loaded = bool(self._llm.is_loaded)
         tts_loaded = bool(self._tts.is_loaded)
+        music_loaded = bool(getattr(self._music, "is_loaded", False)) if self._music is not None else False
         llm_error = getattr(self._llm, "last_error", "")
         tts_error = getattr(self._tts, "last_error", "")
+        music_error = getattr(self._music, "last_error", "") if self._music is not None else ""
         llm_backend = getattr(self._llm, "backend_name", "unknown")
         tts_backend = getattr(self._tts, "backend_name", "unknown")
+        music_backend = getattr(self._music, "backend_name", "unknown") if self._music is not None else "disabled"
         llm_status = "ready" if llm_loaded else ("error" if llm_error else "idle")
         tts_status = "ready" if tts_loaded else ("error" if tts_error else "idle")
+        music_status = "ready" if music_loaded else ("error" if music_error else "idle")
         llm_fallback_active = bool(
             llm_loaded
             and llm_backend == "mock"
@@ -236,12 +295,16 @@ class ModelOrchestrator:
             "auto_serial": self._config.auto_serial,
             "llm_loaded": llm_loaded,
             "tts_loaded": tts_loaded,
+            "music_loaded": music_loaded,
             "llm_status": llm_status,
             "tts_status": tts_status,
+            "music_status": music_status,
             "llm_backend": llm_backend,
             "tts_backend": tts_backend,
+            "music_backend": music_backend,
             "llm_error": llm_error,
             "tts_error": tts_error,
+            "music_error": music_error,
             "llm_fallback_active": llm_fallback_active,
             "llm_think_mode_effective": llm_think_mode_effective,
             "llm_think_mode_support": llm_think_mode_support,

@@ -7,7 +7,13 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 
 from backend.engine import OrchestratorConfig
-from backend.models import FileBrowseRequest, LoadLlmRequest, LoadTtsRequest, OrchestratorConfigPayload
+from backend.models import (
+    FileBrowseRequest,
+    LoadLlmRequest,
+    LoadMusicRequest,
+    LoadTtsRequest,
+    OrchestratorConfigPayload,
+)
 from backend.runtime_config import (
     load_runtime_default_config,
     save_runtime_config,
@@ -70,6 +76,8 @@ async def update_orchestrator_config(payload: OrchestratorConfigPayload, state=D
     old_pyannote_model_id = getattr(state.asr_engine, "pyannote_model_id", "")
     old_pyannote_auth_token = getattr(state.asr_engine, "pyannote_auth_token", "")
     old_pyannote_device = getattr(state.asr_engine, "pyannote_device", "")
+    old_music_model_dir = getattr(state.music_engine, "model_dir", "")
+    old_music_device_mode = getattr(state.music_engine, "device_mode", "")
     config = OrchestratorConfig(**payload.model_dump())
     saved = await state.orchestrator.update_config(config)
     save_runtime_config(state.settings.runtime_config_path, config)
@@ -90,6 +98,11 @@ async def update_orchestrator_config(payload: OrchestratorConfigPayload, state=D
         await state.translation_llm_engine.unload_model()
         state.translation_engine_source = ""
         state.translation_engine_error = ""
+    if state.music_engine.is_loaded and (
+        old_music_model_dir != str(Path(config.music_model_dir).expanduser().resolve())
+        or old_music_device_mode != config.music_device_mode
+    ):
+        await state.music_engine.unload_model()
     return saved
 
 
@@ -100,6 +113,8 @@ async def reset_orchestrator_config(state=Depends(get_app_state)):
     old_pyannote_model_id = getattr(state.asr_engine, "pyannote_model_id", "")
     old_pyannote_auth_token = getattr(state.asr_engine, "pyannote_auth_token", "")
     old_pyannote_device = getattr(state.asr_engine, "pyannote_device", "")
+    old_music_model_dir = getattr(state.music_engine, "model_dir", "")
+    old_music_device_mode = getattr(state.music_engine, "device_mode", "")
     config = load_runtime_default_config(state.settings.runtime_defaults_config_path) or OrchestratorConfig()
     saved = await state.orchestrator.update_config(config)
     save_runtime_config(state.settings.runtime_config_path, config)
@@ -120,6 +135,11 @@ async def reset_orchestrator_config(state=Depends(get_app_state)):
         await state.translation_llm_engine.unload_model()
         state.translation_engine_source = ""
         state.translation_engine_error = ""
+    if state.music_engine.is_loaded and (
+        old_music_model_dir != str(Path(config.music_model_dir).expanduser().resolve())
+        or old_music_device_mode != config.music_device_mode
+    ):
+        await state.music_engine.unload_model()
     return saved
 
 
@@ -178,6 +198,22 @@ async def load_tts(payload: LoadTtsRequest, state=Depends(get_app_state)):
 @router.post("/unload-tts")
 async def unload_tts(state=Depends(get_app_state)):
     await state.orchestrator.unload_tts()
+    return {"status": "ok"}
+
+
+@router.post("/load-music")
+async def load_music(payload: LoadMusicRequest, state=Depends(get_app_state)):
+    if payload.music_model_dir is not None:
+        state.orchestrator.config.music_model_dir = payload.music_model_dir
+    if payload.music_device_mode is not None:
+        state.orchestrator.config.music_device_mode = payload.music_device_mode
+    await state.orchestrator.ensure_music_ready()
+    return {"status": "ok", "backend": state.music_engine.backend_name, "error": state.music_engine.last_error}
+
+
+@router.post("/unload-music")
+async def unload_music(state=Depends(get_app_state)):
+    await state.orchestrator.unload_music()
     return {"status": "ok"}
 
 

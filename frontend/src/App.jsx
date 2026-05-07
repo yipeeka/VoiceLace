@@ -12,6 +12,7 @@ import SynthesisPage from "./pages/SynthesisPage";
 import ParseQcPage from "./pages/ParseQcPage";
 import TextInputPage from "./pages/TextInputPage";
 import VoiceConfigPage from "./pages/VoiceConfigPage";
+import MusicPage from "./pages/MusicPage";
 import { useProjectStore } from "./stores/useProjectStore";
 import { useScriptStore } from "./stores/useScriptStore";
 
@@ -22,6 +23,7 @@ const PAGE_COMPONENTS = {
   script:   ScriptEditorPage,
   voice:    VoiceConfigPage,
   synth:    SynthesisPage,
+  music:    MusicPage,
   settings: SettingsPage,
 };
 
@@ -64,7 +66,8 @@ export default function App() {
         if (e.key === "3") { e.preventDefault(); setActivePage("qc"); }
         if (e.key === "4") { e.preventDefault(); setActivePage("script"); }
         if (e.key === "5") { e.preventDefault(); setActivePage("voice"); }
-        if (e.key === "6") { e.preventDefault(); setActivePage("synth"); }
+        if (e.key === "6") { e.preventDefault(); setActivePage("music"); }
+        if (e.key === "7") { e.preventDefault(); setActivePage("synth"); }
         if (e.key === "b") { e.preventDefault(); setSidebarCollapsed((c) => !c); }
       }
     }

@@ -1,5 +1,5 @@
 import { FolderPlus, Languages, Mic, Square, Trash2, Upload, WandSparkles } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import GlassCard from "../components/shared/GlassCard";
 import ProjectToolbarCard from "../components/text/ProjectToolbarCard";
@@ -9,7 +9,7 @@ import { useScriptStore } from "../stores/useScriptStore";
 import { useSpeechRecognitionStore } from "../stores/useSpeechRecognitionStore";
 import { useUiStore } from "../stores/useUiStore";
 import { API_BASE_URL, getWsBaseUrl } from "../utils/api";
-import { openProjectFileWithPicker } from "../utils/projectFile";
+import { buildProjectFilePayload, openProjectFileWithPicker, saveProjectFile } from "../utils/projectFile";
 import {
   buildProjectOption,
   getProjectSourceTag,
@@ -69,7 +69,9 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const clearTranslationResult = useSpeechRecognitionStore((state) => state.clearTranslationResult);
   const clearResult = useSpeechRecognitionStore((state) => state.clearResult);
   const currentProject = useProjectStore((state) => state.currentProject);
+  const currentProjectFileHandle = useProjectStore((state) => state.currentProjectFileHandle);
   const currentProjectFileName = useProjectStore((state) => state.currentProjectFileName);
+  const bindCurrentProjectFile = useProjectStore((state) => state.bindCurrentProjectFile);
   const projects = useProjectStore((state) => state.projects);
   const projectSources = useProjectStore((state) => state.projectSources);
   const importWarnings = useProjectStore((state) => state.importWarnings);
@@ -81,9 +83,12 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const importProjectFile = useProjectStore((state) => state.importProjectFile);
   const loadProjects = useProjectStore((state) => state.loadProjects);
   const loadProjectScript = useScriptStore((state) => state.loadProjectScript);
+  const script = useScriptStore((state) => state.script);
   const loadProjectParseQc = useProjectStore((state) => state.loadProjectParseQc);
   const sourceText = useScriptStore((state) => state.sourceText);
   const setSourceText = useScriptStore((state) => state.setSourceText);
+  const setProjectSaveAction = useUiStore((state) => state.setProjectSaveAction);
+  const clearProjectSaveAction = useUiStore((state) => state.clearProjectSaveAction);
   const [isLoadingTranslationEngine, setIsLoadingTranslationEngine] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
   const isTranslationEngineLoaded = Boolean(translationEngineStatus?.loaded);
@@ -900,6 +905,57 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       });
     }
   }
+
+  const handleSaveProjectFile = useCallback(async (options = {}) => {
+    if (!currentProject) {
+      useUiStore.getState().pushToast({ title: "请先创建或选择项目", tone: "warning" });
+      return;
+    }
+    const forceSaveAs = Boolean(options?.forceSaveAs);
+    const effectiveScript =
+      script && Array.isArray(script.segments) && script.segments.length
+        ? script
+        : currentProject.script || {
+            title: "",
+            source_text: "",
+            segments: [],
+            characters: [],
+            metadata: {},
+          };
+    const payload = buildProjectFilePayload({
+      project: currentProject,
+      script: effectiveScript,
+      sourceText: sourceText || effectiveScript.source_text || "",
+    });
+    try {
+      const result = await saveProjectFile({
+        payload,
+        preferredName: currentProject.name,
+        existingHandle: currentProjectFileHandle || null,
+        forceSaveAs,
+      });
+      if (result?.handle) {
+        bindCurrentProjectFile({ handle: result.handle, fileName: result.fileName || "" });
+      }
+      useUiStore.getState().pushToast({
+        title: forceSaveAs ? "项目文件已另存" : result?.mode === "inplace" ? "项目文件已保存" : "项目文件已导出",
+        tone: "success",
+      });
+    } catch (saveError) {
+      if (saveError?.name === "AbortError") {
+        return;
+      }
+      useUiStore.getState().pushToast({
+        title: `保存项目失败：${saveError?.message || "未知错误"}`,
+        tone: "error",
+      });
+    }
+  }, [currentProject, script, sourceText, currentProjectFileHandle, bindCurrentProjectFile]);
+
+  useEffect(() => {
+    setProjectSaveAction(handleSaveProjectFile);
+    return () => clearProjectSaveAction();
+  }, [setProjectSaveAction, clearProjectSaveAction, handleSaveProjectFile]);
 
   const moreMenuItems = useMemo(() => [
     {

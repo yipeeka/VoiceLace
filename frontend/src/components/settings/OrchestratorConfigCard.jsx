@@ -86,6 +86,45 @@ export default function OrchestratorConfigCard({ form, isSaving, onSetField, onS
           </div>
 
           <div className="formGroup">
+            <label className="formLabel">Music 模型目录（ACE-Step Diffusers 本地目录）</label>
+            <input
+              className="textInput"
+              value={form.music_model_dir ?? ""}
+              onChange={(e) => onSetField("music_model_dir", e.target.value)}
+              placeholder="e.g. D:/AIModels/ACE-Step/acestep-v15-xl-turbo-diffusers"
+            />
+          </div>
+
+          <label
+            className="controlRow"
+            style={{ cursor: "pointer", padding: "10px 12px", background: "var(--bg-elevated)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-default)" }}
+          >
+            <input
+              type="checkbox"
+              checked={Boolean(form.music_enabled ?? false)}
+              onChange={(e) => onSetField("music_enabled", e.target.checked)}
+              style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
+            />
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontSize: 13.5, color: "var(--text-primary)", fontWeight: 500 }}>启用音乐生成</span>
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>关闭时禁止 music API 任务提交</span>
+            </div>
+          </label>
+
+          <div className="formGroup">
+            <label className="formLabel">Music 设备模式</label>
+            <select
+              className="textInput"
+              value={form.music_device_mode ?? "cpu_offload"}
+              onChange={(e) => onSetField("music_device_mode", e.target.value)}
+            >
+              <option value="cpu_offload">cpu_offload (推荐)</option>
+              <option value="cuda">cuda</option>
+              <option value="cpu">cpu</option>
+            </select>
+          </div>
+
+          <div className="formGroup">
             <label className="formLabel">ASR 模型目录/名称</label>
             <input
               className="textInput"

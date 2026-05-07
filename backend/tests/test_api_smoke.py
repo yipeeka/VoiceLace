@@ -51,6 +51,8 @@ class ApiSmokeTest(unittest.TestCase):
         body = response.json()
         self.assertIn("llm_backend", body)
         self.assertIn("tts_backend", body)
+        self.assertIn("music_backend", body)
+        self.assertIn("music_status", body)
         self.assertIn("llm_think_mode_effective", body)
         self.assertIn("llm_think_mode_support", body)
         self.assertIn("llm_load_mode", body)
@@ -62,6 +64,73 @@ class ApiSmokeTest(unittest.TestCase):
         self.assertIn("pyannote_loaded", body)
         self.assertIn("pyannote_error", body)
         self.assertIn("pyannote_available", body)
+        self.assertIn("music_enabled", body.get("config", {}))
+
+    def test_music_model_validate_endpoint_shape(self) -> None:
+        response = self.client.get("/api/v1/music/model/validate")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertIn("valid", body)
+        self.assertIn("model_dir", body)
+        self.assertIn("exists", body)
+        self.assertIn("missing", body)
+        self.assertIn("message", body)
+        self.assertIn("music_enabled", body)
+        self.assertIn("device_mode", body)
+        self.assertIsInstance(body.get("missing"), list)
+
+    def test_music_asset_audio_and_attach_flow(self) -> None:
+        project_id = ""
+        created_asset: Path | None = None
+        bound_relpath = ""
+        try:
+            music_dir = self.app_state.settings.output_dir / "music"
+            music_dir.mkdir(parents=True, exist_ok=True)
+            asset_name = f"smoke_music_{uuid.uuid4().hex[:8]}.wav"
+            created_asset = music_dir / asset_name
+            created_asset.write_bytes(b"RIFFdemo")
+
+            list_resp = self.client.get("/api/v1/music/assets")
+            self.assertEqual(list_resp.status_code, 200)
+            items = list_resp.json().get("items", [])
+            self.assertTrue(any(item.get("name") == asset_name for item in items))
+
+            audio_resp = self.client.get(f"/api/v1/music/assets/{asset_name}/audio")
+            self.assertEqual(audio_resp.status_code, 200)
+            self.assertEqual(audio_resp.headers.get("content-type"), "audio/wav")
+            self.assertEqual(audio_resp.content, b"RIFFdemo")
+
+            create_resp = self.client.post("/api/v1/projects", json={"name": f"music-attach-{uuid.uuid4().hex[:8]}"})
+            self.assertEqual(create_resp.status_code, 200)
+            project_id = create_resp.json()["id"]
+
+            attach_resp = self.client.post(
+                "/api/v1/music/assets/attach",
+                json={
+                    "project_id": project_id,
+                    "asset_name": asset_name,
+                    "target": "bgm",
+                },
+            )
+            self.assertEqual(attach_resp.status_code, 200)
+            attach_body = attach_resp.json()
+            self.assertEqual(attach_body.get("asset_type"), "bgm")
+            bound_relpath = str(attach_body.get("relpath") or "")
+            self.assertTrue(bound_relpath)
+
+            project_resp = self.client.get(f"/api/v1/projects/{project_id}")
+            self.assertEqual(project_resp.status_code, 200)
+            project = project_resp.json()
+            self.assertEqual(project["synthesis_config"]["bgm_track"]["relpath"], bound_relpath)
+
+            bound_path = self.app_state.settings.output_dir / bound_relpath
+            self.assertTrue(bound_path.exists())
+            self.assertTrue(bound_path.is_file())
+        finally:
+            if project_id:
+                self.client.delete(f"/api/v1/projects/{project_id}")
+            if created_asset and created_asset.exists():
+                created_asset.unlink(missing_ok=True)
 
     def test_asr_transcribe_file_endpoint_shape(self) -> None:
         asr = self.app_state.asr_engine

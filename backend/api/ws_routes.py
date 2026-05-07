@@ -54,6 +54,21 @@ async def asr_progress_endpoint(websocket: WebSocket, task_id: str, state=Depend
         await state.realtime.unsubscribe("asr", task_id, websocket)
 
 
+@router.websocket("/music-progress/{task_id}")
+async def music_progress_endpoint(websocket: WebSocket, task_id: str, state=Depends(get_app_state)):
+    await websocket.accept()
+    await state.realtime.subscribe("music", task_id, websocket)
+    task = state.music_tasks.get(task_id)
+    if task:
+        for event in task.get("events", []):
+            await websocket.send_json(event)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        await state.realtime.unsubscribe("music", task_id, websocket)
+
+
 @router.websocket("/system-events")
 async def system_events_endpoint(websocket: WebSocket, state=Depends(get_app_state)):
     await websocket.accept()

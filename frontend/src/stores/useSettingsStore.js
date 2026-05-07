@@ -44,6 +44,9 @@ function normalizeOrchestratorConfig(raw) {
     tts_model_path: raw.tts_model_path ?? "",
     voxcpm_tts_model_path: raw.voxcpm_tts_model_path ?? "openbmb/VoxCPM2",
     tts_device: raw.tts_device ?? "cuda:0",
+    music_enabled: Boolean(raw.music_enabled ?? false),
+    music_model_dir: raw.music_model_dir ?? "",
+    music_device_mode: raw.music_device_mode ?? "cpu_offload",
     asr_model_path: raw.asr_model_path ?? "base",
     asr_device: raw.asr_device ?? "cuda:0",
     pyannote_model_id: raw.pyannote_model_id ?? "pyannote/speaker-diarization-community-1",
@@ -90,6 +93,9 @@ function toOrchestratorPayload(config) {
     tts_model_path: config.tts_model_path ?? "",
     voxcpm_tts_model_path: config.voxcpm_tts_model_path ?? "openbmb/VoxCPM2",
     tts_device: config.tts_device ?? "cuda:0",
+    music_enabled: Boolean(config.music_enabled ?? false),
+    music_model_dir: config.music_model_dir ?? "",
+    music_device_mode: config.music_device_mode ?? "cpu_offload",
     asr_model_path: config.asr_model_path ?? "base",
     asr_device: config.asr_device ?? "cuda:0",
     pyannote_model_id: config.pyannote_model_id ?? "pyannote/speaker-diarization-community-1",
@@ -216,6 +222,19 @@ export const useSettingsStore = create((set, get) => ({
       const message = getErrorMessage(error, "卸载 ASR 失败");
       set({ settingsError: message });
       useUiStore.getState().pushToast({ title: formatError("卸载 ASR 失败", message), tone: "error" });
+    }
+  },
+
+  manualUnloadMusic: async () => {
+    try {
+      await api.post("/system/unload-music", {});
+      set({ settingsError: "" });
+      useUiStore.getState().pushToast({ title: "Music 模型已卸载", tone: "success" });
+      await get().refreshSystemStatus();
+    } catch (error) {
+      const message = getErrorMessage(error, "卸载 Music 模型失败");
+      set({ settingsError: message });
+      useUiStore.getState().pushToast({ title: formatError("卸载 Music 模型失败", message), tone: "error" });
     }
   },
 }));

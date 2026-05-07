@@ -27,6 +27,9 @@ class RuntimeConfigTest(unittest.TestCase):
                 secondary_llm_max_tokens=900,
                 tts_model_path="omnivoice",
                 voxcpm_tts_model_path="openbmb/VoxCPM2",
+                music_enabled=True,
+                music_model_dir="D:/AIModels/ACE-Step/acestep-v15-xl-turbo-diffusers",
+                music_device_mode="cpu_offload",
                 asr_model_path="faster-whisper-large-v3",
                 asr_device="cuda:1",
             )
@@ -35,6 +38,9 @@ class RuntimeConfigTest(unittest.TestCase):
             self.assertFalse(raw["enable_llama_cpp_think_mode"])
             self.assertEqual(raw["llm_backend"], "gemini")
             self.assertEqual(raw["voxcpm_tts_model_path"], "openbmb/VoxCPM2")
+            self.assertTrue(raw["music_enabled"])
+            self.assertEqual(raw["music_model_dir"], "D:/AIModels/ACE-Step/acestep-v15-xl-turbo-diffusers")
+            self.assertEqual(raw["music_device_mode"], "cpu_offload")
             self.assertEqual(raw["secondary_llm_model_path"], "E:/models/qwen2.5-1.5b.gguf")
             loaded = load_runtime_config(path)
             self.assertFalse(loaded.enable_llama_cpp_think_mode)
@@ -42,6 +48,9 @@ class RuntimeConfigTest(unittest.TestCase):
             self.assertEqual(loaded.asr_device, "cuda:1")
             self.assertEqual(loaded.llm_threads, 4)
             self.assertEqual(loaded.voxcpm_tts_model_path, "openbmb/VoxCPM2")
+            self.assertTrue(loaded.music_enabled)
+            self.assertEqual(loaded.music_model_dir, "D:/AIModels/ACE-Step/acestep-v15-xl-turbo-diffusers")
+            self.assertEqual(loaded.music_device_mode, "cpu_offload")
             self.assertEqual(loaded.secondary_llm_n_ctx, 3072)
             self.assertEqual(loaded.secondary_llm_max_tokens, 900)
         finally:

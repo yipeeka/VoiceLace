@@ -7,7 +7,7 @@ from typing import Any
 from starlette.requests import HTTPConnection
 
 from backend.config import settings as app_settings
-from backend.engine import ASREngine, LLMEngine, ModelOrchestrator, TTSEngine, VoiceManager
+from backend.engine import ASREngine, LLMEngine, ModelOrchestrator, MusicEngine, TTSEngine, VoiceManager
 from backend.realtime import RealtimeHub
 from backend.runtime_config import load_runtime_config
 
@@ -18,13 +18,16 @@ class AppState:
     llm_engine: LLMEngine = field(default_factory=LLMEngine)
     translation_llm_engine: LLMEngine = field(default_factory=LLMEngine)
     tts_engine: TTSEngine = field(default_factory=TTSEngine)
+    music_engine: MusicEngine = field(default_factory=MusicEngine)
     asr_engine: ASREngine = field(default_factory=ASREngine)
     llm_tasks: dict = field(default_factory=dict)
     tts_tasks: dict = field(default_factory=dict)
     asr_tasks: dict = field(default_factory=dict)
+    music_tasks: dict = field(default_factory=dict)
     llm_task_handles: dict[str, Any] = field(default_factory=dict)
     tts_task_handles: dict[str, Any] = field(default_factory=dict)
     asr_task_handles: dict[str, Any] = field(default_factory=dict)
+    music_task_handles: dict[str, Any] = field(default_factory=dict)
     tts_queue: list[str] = field(default_factory=list)
     tts_queue_worker: Any = None
     tts_queue_running_task_id: str | None = None
@@ -38,7 +41,7 @@ class AppState:
     def __post_init__(self) -> None:
         self.settings.ensure_directories()
         self.realtime = RealtimeHub()
-        self.orchestrator = ModelOrchestrator(self.llm_engine, self.tts_engine)
+        self.orchestrator = ModelOrchestrator(self.llm_engine, self.tts_engine, self.music_engine)
         loaded_config = load_runtime_config(self.settings.runtime_config_path)
         # Runtime config file has higher priority than .env defaults.
         self.orchestrator.set_config(loaded_config)

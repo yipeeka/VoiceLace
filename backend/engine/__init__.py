@@ -8,6 +8,7 @@ _SYMBOL_TO_MODULE = {
     "ASREngine": "backend.engine.asr_engine",
     "GpuInfo": "backend.engine.model_orchestrator",
     "LLMEngine": "backend.engine.llm_engine",
+    "MusicEngine": "backend.engine.music_engine",
     "ModelOrchestrator": "backend.engine.model_orchestrator",
     "ModelState": "backend.engine.model_orchestrator",
     "OrchestratorConfig": "backend.engine.model_orchestrator",

@@ -24,6 +24,7 @@ export default function SystemStatusCard({
   onRefresh,
   onUnloadLLM,
   onUnloadTTS,
+  onUnloadMusic,
   onUnloadASR,
 }) {
   const gpu = systemStatus?.gpu;
@@ -34,6 +35,10 @@ export default function SystemStatusCard({
     systemStatus?.tts_status ??
     (systemStatus?.tts_loaded ? "ready" : systemStatus?.tts_error ? "error" : "idle");
   const canUnloadTTS = ttsStatus === "ready" || ttsStatus === "error";
+  const musicStatus =
+    systemStatus?.music_status ??
+    (systemStatus?.music_loaded ? "ready" : systemStatus?.music_error ? "error" : "idle");
+  const canUnloadMusic = musicStatus === "ready" || musicStatus === "error";
   const llmBackend = systemStatus?.llm_backend ?? "unknown";
   const llmError = systemStatus?.llm_error ?? "";
   const llmFallbackActive = Boolean(systemStatus?.llm_fallback_active);
@@ -150,6 +155,32 @@ export default function SystemStatusCard({
             {ttsStatus}
           </strong>
         </div>
+        <div className="statRow">
+          <span>Music 状态</span>
+          <strong style={{ color: musicStatus === "ready" ? "var(--success)" : musicStatus === "error" ? "var(--danger)" : "var(--text-secondary)" }}>
+            {musicStatus}
+          </strong>
+        </div>
+        {systemStatus?.music_backend ? (
+          <div className="statRow">
+            <span>Music 后端</span>
+            <strong>{systemStatus.music_backend}</strong>
+          </div>
+        ) : null}
+        <div className="statRow">
+          <span>Music 启用</span>
+          <strong style={{ color: systemStatus?.config?.music_enabled ? "var(--success)" : "var(--text-secondary)" }}>
+            {systemStatus?.config?.music_enabled ? "yes" : "no"}
+          </strong>
+        </div>
+        {systemStatus?.music_error ? (
+          <div className="statRow">
+            <span>Music 错误</span>
+            <strong style={{ color: "var(--danger)", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {systemStatus.music_error}
+            </strong>
+          </div>
+        ) : null}
 
         <SectionTitle>ASR 状态</SectionTitle>
         <div className="statRow">
@@ -271,6 +302,15 @@ export default function SystemStatusCard({
           onClick={onUnloadTTS}
         >
           卸载 TTS
+        </Button>
+        <Button
+          variant="danger"
+          size="sm"
+          icon={Trash2}
+          disabled={!canUnloadMusic}
+          onClick={onUnloadMusic}
+        >
+          卸载 Music
         </Button>
         <Button
           variant="danger"

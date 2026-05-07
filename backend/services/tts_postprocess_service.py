@@ -249,6 +249,7 @@ def bind_postprocess_asset_to_project(
     project_id: str,
     asset_type: str,
     source_path: Path,
+    delete_source: bool = True,
 ) -> dict:
     project = load_project(projects_dir, project_id)
     normalized_type = (asset_type or "").strip().lower()
@@ -261,7 +262,8 @@ def bind_postprocess_asset_to_project(
     filename = f"{normalized_type}_{uuid4().hex[:10]}{suffix}"
     target_path = assets_dir / filename
     shutil.copyfile(source_path, target_path)
-    source_path.unlink(missing_ok=True)
+    if delete_source:
+        source_path.unlink(missing_ok=True)
 
     relpath = to_output_relpath(output_dir=output_dir, path=target_path)
     if normalized_type == "bgm":

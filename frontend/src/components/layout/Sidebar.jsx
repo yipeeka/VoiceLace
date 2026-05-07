@@ -6,6 +6,7 @@ import {
   FolderOpen,
   ShieldCheck,
   Mic,
+  Music,
   Save,
   Settings,
   SlidersHorizontal,
@@ -22,12 +23,13 @@ const NAV_ITEMS = [
   { id: "qc",      label: "解析质检",  icon: ShieldCheck,       step: 3 },
   { id: "script",  label: "剧本编辑",  icon: SlidersHorizontal, step: 4 },
   { id: "voice",   label: "声音配置",  icon: Users,             step: 5 },
-  { id: "synth",   label: "合成导出",  icon: Volume2,           step: 6 },
+  { id: "music",   label: "音乐生成",  icon: Music,             step: 6 },
+  { id: "synth",   label: "合成导出",  icon: Volume2,           step: 7 },
 ];
 
 export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCollapse, completedPages = [] }) {
   const projectSaveAction = useUiStore((state) => state.projectSaveAction);
-  const canShowProjectSave = ["text", "script", "voice"].includes(activePage);
+  const canShowProjectSave = ["speech", "text", "script", "voice", "music"].includes(activePage);
   const canSaveProject = typeof projectSaveAction === "function";
 
   return (

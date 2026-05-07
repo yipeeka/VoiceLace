@@ -43,6 +43,30 @@ class _FakeTtsEngine:
         self.unload_called = True
 
 
+class _FakeMusicEngine:
+    def __init__(self) -> None:
+        self.is_loaded = False
+        self.last_error = ""
+        self.backend_name = "unloaded"
+        self.model_dir = ""
+        self.device_mode = "cpu_offload"
+        self.loaded_args = None
+        self.unload_called = False
+
+    def needs_reload(self, **kwargs) -> bool:
+        return False
+
+    async def load_model(self, *args, **kwargs) -> None:
+        self.is_loaded = True
+        self.backend_name = "acestep_diffusers"
+        self.loaded_args = (args, kwargs)
+
+    async def unload_model(self) -> None:
+        self.is_loaded = False
+        self.backend_name = "unloaded"
+        self.unload_called = True
+
+
 class ModelOrchestratorTest(unittest.IsolatedAsyncioTestCase):
     async def test_status_marks_llm_fallback_active(self) -> None:
         llm = _FakeLlmEngine()
@@ -101,6 +125,34 @@ class ModelOrchestratorTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(tts.unload_called)
         _args, kwargs = llm.loaded_args
         self.assertEqual(kwargs.get("clip_model_path"), "E:/models/test.mmproj")
+
+    async def test_ensure_tts_ready_unloads_music_when_auto_serial_enabled(self) -> None:
+        llm = _FakeLlmEngine()
+        tts = _FakeTtsEngine()
+        music = _FakeMusicEngine()
+        music.is_loaded = True
+        music.backend_name = "acestep_diffusers"
+
+        orch = ModelOrchestrator(llm, tts, music)
+        orch.set_config(OrchestratorConfig(auto_serial=True, tts_model_path="E:/models/omnivoice"))
+
+        await orch.ensure_tts_ready()
+        self.assertTrue(tts.is_loaded)
+        self.assertTrue(music.unload_called)
+
+    async def test_get_status_exposes_music_fields(self) -> None:
+        llm = _FakeLlmEngine()
+        tts = _FakeTtsEngine()
+        music = _FakeMusicEngine()
+        music.is_loaded = True
+        music.backend_name = "acestep_diffusers"
+
+        orch = ModelOrchestrator(llm, tts, music)
+        status = await orch.get_status()
+        self.assertIn("music_loaded", status)
+        self.assertIn("music_status", status)
+        self.assertIn("music_backend", status)
+        self.assertTrue(status["music_loaded"])
 
     async def test_unload_tts_runs_when_engine_only_has_error(self) -> None:
         llm = _FakeLlmEngine()
