@@ -3,6 +3,9 @@ from __future__ import annotations
 import uuid
 import unittest
 import json
+import asyncio
+import time
+import threading
 from pathlib import Path
 import io
 import zipfile
@@ -415,6 +418,97 @@ class ApiSmokeTest(unittest.TestCase):
             engine.is_loaded = original_is_loaded
             engine.backend_name = original_backend_name
             engine.model_name = original_model_name
+
+    def test_music_generate_cancel_and_conflict_flow(self) -> None:
+        state = self.app_state
+        original_music_enabled = state.orchestrator.config.music_enabled
+        original_music_model_dir = state.orchestrator.config.music_model_dir
+        original_ensure_music_ready = state.orchestrator.ensure_music_ready
+        original_generate_to_file = state.music_engine.generate_to_file
+
+        state.music_tasks.clear()
+        state.music_task_handles.clear()
+
+        release_event = threading.Event()
+        try:
+            state.orchestrator.config.music_enabled = True
+            state.orchestrator.config.music_model_dir = str(state.settings.output_dir)
+
+            async def fake_ensure_music_ready():
+                return None
+
+            async def fake_generate_to_file(**kwargs):
+                await asyncio.to_thread(release_event.wait, 2.0)
+                return {
+                    "sample_rate": 48000,
+                    "channels": 2,
+                    "frames": 48000,
+                    "duration_seconds": 1.0,
+                    "seed": 0,
+                    "output_path": str(kwargs["output_path"]),
+                }
+
+            state.orchestrator.ensure_music_ready = fake_ensure_music_ready
+            state.music_engine.generate_to_file = fake_generate_to_file
+
+            first_resp = self.client.post(
+                "/api/v1/music/generate",
+                json={
+                    "prompt": "cinematic piano underscore",
+                    "audio_duration": 12,
+                    "vocal_language": "unknown",
+                    "num_inference_steps": 8,
+                },
+            )
+            self.assertEqual(first_resp.status_code, 200)
+            task_id = first_resp.json()["task_id"]
+
+            running_seen = False
+            for _ in range(30):
+                task_resp = self.client.get(f"/api/v1/music/tasks/{task_id}")
+                self.assertEqual(task_resp.status_code, 200)
+                status = task_resp.json().get("status")
+                if status == "running":
+                    running_seen = True
+                    break
+                time.sleep(0.05)
+            self.assertTrue(running_seen)
+
+            conflict_resp = self.client.post(
+                "/api/v1/music/generate",
+                json={
+                    "prompt": "another music request",
+                    "audio_duration": 8,
+                    "vocal_language": "unknown",
+                    "num_inference_steps": 8,
+                },
+            )
+            self.assertEqual(conflict_resp.status_code, 409)
+
+            cancel_resp = self.client.post(f"/api/v1/music/tasks/{task_id}/cancel", json={})
+            self.assertEqual(cancel_resp.status_code, 200)
+            self.assertEqual(cancel_resp.json().get("status"), "cancel_requested")
+
+            release_event.set()
+
+            canceled_seen = False
+            for _ in range(40):
+                task_resp = self.client.get(f"/api/v1/music/tasks/{task_id}")
+                self.assertEqual(task_resp.status_code, 200)
+                task_payload = task_resp.json()
+                status = task_payload.get("status")
+                if status == "canceled":
+                    self.assertTrue(task_payload.get("cancel_message"))
+                    canceled_seen = True
+                    break
+                time.sleep(0.05)
+            self.assertTrue(canceled_seen)
+        finally:
+            release_event.set()
+            state.orchestrator.config.music_enabled = original_music_enabled
+            state.orchestrator.config.music_model_dir = original_music_model_dir
+            state.orchestrator.ensure_music_ready = original_ensure_music_ready
+            state.music_engine.generate_to_file = original_generate_to_file
 
     def test_unload_asr_endpoint_clears_asr_runtime_state(self) -> None:
         asr = self.app_state.asr_engine

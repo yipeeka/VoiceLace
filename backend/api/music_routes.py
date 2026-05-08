@@ -71,8 +71,17 @@ def _public_music_task(task: dict) -> dict:
         "started_at": task.get("started_at", ""),
         "finished_at": task.get("finished_at", ""),
         "error": task.get("error", ""),
+        "cancel_message": task.get("cancel_message", ""),
         "result": task.get("result"),
     }
+
+
+async def _mark_music_task_canceled(state, task: dict, task_id: str, *, message: str) -> None:
+    task["status"] = "canceled"
+    task["finished_at"] = _now_iso()
+    task["cancel_message"] = message
+    await _emit_music_event(state, task, task_id, {"type": "task_status", "status": "canceled"})
+    await _emit_music_event(state, task, task_id, {"type": "canceled", "message": message})
 
 
 def _resolve_music_asset_path(state, asset_name: str) -> Path:
@@ -328,58 +337,86 @@ def _normalize_music_assist_result(payload: dict[str, Any], fallback_form: dict[
 
 async def _run_music_task(task_id: str, payload: MusicGenerateRequest, state) -> None:
     task = state.music_tasks[task_id]
-    task["status"] = "running"
-    task["started_at"] = _now_iso()
-    await _emit_music_event(state, task, task_id, {"type": "task_status", "status": "running"})
+    output_path: Path | None = None
     try:
-        if not bool(state.orchestrator.config.music_enabled):
-            raise RuntimeError("音乐生成功能未启用（music_enabled=false）")
-        if not state.orchestrator.config.music_model_dir.strip():
-            raise RuntimeError("未配置音乐模型目录（music_model_dir）")
+        if task.get("status") == "canceled":
+            return
+        async with state.music_task_lock:
+            if task.get("status") == "canceled":
+                return
+            task["status"] = "running"
+            task["started_at"] = _now_iso()
+            await _emit_music_event(state, task, task_id, {"type": "task_status", "status": "running"})
 
-        if state.music_assist_llm_engine.is_loaded:
-            await state.music_assist_llm_engine.unload_model()
-            state.music_assist_engine_source = ""
-            state.music_assist_engine_error = ""
+            if not bool(state.orchestrator.config.music_enabled):
+                raise RuntimeError("音乐生成功能未启用（music_enabled=false）")
+            if not state.orchestrator.config.music_model_dir.strip():
+                raise RuntimeError("未配置音乐模型目录（music_model_dir）")
 
-        await _emit_music_event(state, task, task_id, {"type": "task_stage", "stage": "loading_model"})
-        await state.orchestrator.ensure_music_ready()
+            async with state.music_assist_lock:
+                if state.music_assist_llm_engine.is_loaded:
+                    await state.music_assist_llm_engine.unload_model()
+                    state.music_assist_engine_source = ""
+                    state.music_assist_engine_error = ""
 
-        music_output_dir = state.settings.output_dir / "music"
-        output_path = music_output_dir / f"{task_id}.wav"
-        await _emit_music_event(state, task, task_id, {"type": "task_stage", "stage": "generating"})
-        result = await state.music_engine.generate_to_file(
-            prompt=payload.prompt,
-            output_path=output_path,
-            lyrics=payload.lyrics,
-            audio_duration=payload.audio_duration,
-            vocal_language=payload.vocal_language,
-            num_inference_steps=payload.num_inference_steps,
-            seed=payload.seed,
-            bpm=payload.bpm,
-            keyscale=payload.keyscale,
-            timesignature=payload.timesignature,
-        )
+            if task.get("status") == "cancel_requested":
+                await _mark_music_task_canceled(state, task, task_id, message="音乐生成任务已取消（生成前）")
+                return
 
-        task["status"] = "done"
-        task["finished_at"] = _now_iso()
-        task["result"] = {
-            **result,
-            "audio_url": f"/api/v1/music/tasks/{task_id}/audio",
-            "model_dir": state.orchestrator.config.music_model_dir,
-            "device_mode": state.orchestrator.config.music_device_mode,
-        }
-        await _emit_music_event(state, task, task_id, {"type": "task_status", "status": "done"})
-        await _emit_music_event(state, task, task_id, {"type": "complete", "data": task["result"]})
+            await _emit_music_event(state, task, task_id, {"type": "task_stage", "stage": "loading_model"})
+            await state.orchestrator.ensure_music_ready()
+
+            if task.get("status") == "cancel_requested":
+                await _mark_music_task_canceled(state, task, task_id, message="音乐生成任务已取消（模型加载后）")
+                return
+
+            music_output_dir = state.settings.output_dir / "music"
+            output_path = music_output_dir / f"{task_id}.wav"
+            await _emit_music_event(state, task, task_id, {"type": "task_stage", "stage": "generating"})
+            result = await state.music_engine.generate_to_file(
+                prompt=payload.prompt,
+                output_path=output_path,
+                lyrics=payload.lyrics,
+                audio_duration=payload.audio_duration,
+                vocal_language=payload.vocal_language,
+                num_inference_steps=payload.num_inference_steps,
+                seed=payload.seed,
+                bpm=payload.bpm,
+                keyscale=payload.keyscale,
+                timesignature=payload.timesignature,
+            )
+
+            if task.get("status") == "cancel_requested":
+                if output_path is not None:
+                    output_path.unlink(missing_ok=True)
+                task["result"] = None
+                await _mark_music_task_canceled(state, task, task_id, message="已请求取消，生成结果已丢弃")
+                return
+
+            task["status"] = "done"
+            task["finished_at"] = _now_iso()
+            task["cancel_message"] = ""
+            task["result"] = {
+                **result,
+                "audio_url": f"/api/v1/music/tasks/{task_id}/audio",
+                "model_dir": state.orchestrator.config.music_model_dir,
+                "device_mode": state.orchestrator.config.music_device_mode,
+            }
+            await _emit_music_event(state, task, task_id, {"type": "task_status", "status": "done"})
+            await _emit_music_event(state, task, task_id, {"type": "complete", "data": task["result"]})
     except asyncio.CancelledError:
-        task["status"] = "canceled"
-        task["finished_at"] = _now_iso()
-        await _emit_music_event(state, task, task_id, {"type": "task_status", "status": "canceled"})
-        await _emit_music_event(state, task, task_id, {"type": "canceled", "message": "音乐生成任务已取消"})
+        if task.get("status") not in {"done", "error", "canceled"}:
+            await _mark_music_task_canceled(state, task, task_id, message="音乐生成任务已取消")
     except Exception as exc:
+        if task.get("status") == "cancel_requested":
+            if output_path is not None:
+                output_path.unlink(missing_ok=True)
+            await _mark_music_task_canceled(state, task, task_id, message="音乐生成任务已取消")
+            return
         task["status"] = "error"
         task["error"] = str(exc)
         task["finished_at"] = _now_iso()
+        task["cancel_message"] = ""
         await _emit_music_event(state, task, task_id, {"type": "task_status", "status": "error"})
         await _emit_music_event(state, task, task_id, {"type": "error", "message": str(exc)})
     finally:
@@ -390,6 +427,9 @@ async def _run_music_task(task_id: str, payload: MusicGenerateRequest, state) ->
 async def generate_music(payload: MusicGenerateRequest, state=Depends(get_app_state)):
     if not bool(state.orchestrator.config.music_enabled):
         raise HTTPException(status_code=400, detail="音乐生成功能未启用（music_enabled=false）")
+    for item in state.music_tasks.values():
+        if item.get("status") in {"queued", "running", "cancel_requested"}:
+            raise HTTPException(status_code=409, detail="已有音乐任务正在进行，请等待当前任务结束")
     task_id = str(uuid4())
     task = {
         "task_id": task_id,
@@ -399,6 +439,7 @@ async def generate_music(payload: MusicGenerateRequest, state=Depends(get_app_st
         "started_at": "",
         "finished_at": "",
         "error": "",
+        "cancel_message": "",
         "result": None,
         "events": [{"type": "task_status", "status": "queued"}],
     }
@@ -421,100 +462,105 @@ async def validate_music_model_dir(state=Depends(get_app_state)):
 
 @router.get("/assist/status")
 async def get_music_assist_status(state=Depends(get_app_state)):
-    engine = state.music_assist_llm_engine
-    return {
-        "loaded": bool(engine.is_loaded),
-        "source": state.music_assist_engine_source or "",
-        "backend": engine.backend_name,
-        "model_name": engine.model_name,
-        "error": state.music_assist_engine_error or engine.last_error or "",
-    }
+    async with state.music_assist_lock:
+        engine = state.music_assist_llm_engine
+        return {
+            "loaded": bool(engine.is_loaded),
+            "source": state.music_assist_engine_source or "",
+            "backend": engine.backend_name,
+            "model_name": engine.model_name,
+            "error": state.music_assist_engine_error or engine.last_error or "",
+        }
 
 
 @router.post("/assist/load")
 async def load_music_assist(payload: MusicAssistLoadRequest, state=Depends(get_app_state)):
-    return await _load_music_assist_engine(state, payload.source)
+    async with state.music_assist_lock:
+        return await _load_music_assist_engine(state, payload.source)
 
 
 @router.post("/assist/unload")
 async def unload_music_assist(state=Depends(get_app_state)):
-    engine = state.music_assist_llm_engine
-    if engine.is_loaded:
-        await engine.unload_model()
-    state.music_assist_engine_source = ""
-    state.music_assist_engine_error = ""
-    return {"status": "ok"}
+    async with state.music_assist_lock:
+        engine = state.music_assist_llm_engine
+        if engine.is_loaded:
+            await engine.unload_model()
+        state.music_assist_engine_source = ""
+        state.music_assist_engine_error = ""
+        return {"status": "ok"}
 
 
 @router.post("/assist/chat")
 async def chat_music_assist(payload: MusicAssistChatRequest, state=Depends(get_app_state)):
-    source = (payload.source or "").strip().lower()
-    if source not in ALLOWED_ASSIST_SOURCES:
-        raise HTTPException(status_code=400, detail=f"Unsupported music assist source: {payload.source}")
-    if not state.music_assist_llm_engine.is_loaded or state.music_assist_engine_source != source:
-        raise HTTPException(status_code=400, detail="Music assist engine source mismatch or not loaded. Please load engine first.")
+    async with state.music_assist_lock:
+        source = (payload.source or "").strip().lower()
+        if source not in ALLOWED_ASSIST_SOURCES:
+            raise HTTPException(status_code=400, detail=f"Unsupported music assist source: {payload.source}")
+        if not state.music_assist_llm_engine.is_loaded or state.music_assist_engine_source != source:
+            raise HTTPException(status_code=400, detail="Music assist engine source mismatch or not loaded. Please load engine first.")
 
-    transcript = _conversation_to_text(payload.messages)
-    if not transcript:
-        raise HTTPException(status_code=400, detail="messages is required")
+        transcript = _conversation_to_text(payload.messages)
+        if not transcript:
+            raise HTTPException(status_code=400, detail="messages is required")
 
-    form_snapshot = _build_assist_form_snapshot(payload)
-    project_context = _build_project_text_context(state, payload)
-    config = _build_music_assist_config(state, source)
-    system_prompt = build_music_assist_chat_prompt(current_form=form_snapshot, project_context=project_context)
-    try:
-        reply = await state.music_assist_llm_engine.generate_text(
-            text=transcript,
-            system_prompt=system_prompt,
-            llm_options=config["options"],
-        )
-    except Exception as exc:
-        state.music_assist_engine_error = str(exc)
-        raise HTTPException(status_code=503, detail=f"Music assist unavailable: {exc}") from exc
+        form_snapshot = _build_assist_form_snapshot(payload)
+        project_context = _build_project_text_context(state, payload)
+        config = _build_music_assist_config(state, source)
+        system_prompt = build_music_assist_chat_prompt(current_form=form_snapshot, project_context=project_context)
+        try:
+            reply = await state.music_assist_llm_engine.generate_text(
+                text=transcript,
+                system_prompt=system_prompt,
+                llm_options=config["options"],
+            )
+        except Exception as exc:
+            state.music_assist_engine_error = str(exc)
+            raise HTTPException(status_code=503, detail=f"Music assist unavailable: {exc}") from exc
 
-    state.music_assist_engine_error = ""
-    return {
-        "reply": reply.strip(),
-        "source": source,
-        "backend": state.music_assist_llm_engine.backend_name,
-        "warnings": [],
-    }
+        state.music_assist_engine_error = ""
+        return {
+            "reply": reply.strip(),
+            "source": source,
+            "backend": state.music_assist_llm_engine.backend_name,
+            "warnings": [],
+        }
 
 
 @router.post("/assist/finalize")
 async def finalize_music_assist(payload: MusicAssistFinalizeRequest, state=Depends(get_app_state)):
-    source = (payload.source or "").strip().lower()
-    if source not in ALLOWED_ASSIST_SOURCES:
-        raise HTTPException(status_code=400, detail=f"Unsupported music assist source: {payload.source}")
-    if not state.music_assist_llm_engine.is_loaded or state.music_assist_engine_source != source:
-        raise HTTPException(status_code=400, detail="Music assist engine source mismatch or not loaded. Please load engine first.")
+    async with state.music_assist_lock:
+        source = (payload.source or "").strip().lower()
+        if source not in ALLOWED_ASSIST_SOURCES:
+            raise HTTPException(status_code=400, detail=f"Unsupported music assist source: {payload.source}")
+        if not state.music_assist_llm_engine.is_loaded or state.music_assist_engine_source != source:
+            raise HTTPException(status_code=400, detail="Music assist engine source mismatch or not loaded. Please load engine first.")
 
-    transcript = _conversation_to_text(payload.messages)
-    if not transcript:
-        raise HTTPException(status_code=400, detail="messages is required")
+        transcript = _conversation_to_text(payload.messages)
+        if not transcript:
+            raise HTTPException(status_code=400, detail="messages is required")
 
-    form_snapshot = _build_assist_form_snapshot(payload)
-    project_context = _build_project_text_context(state, payload)
-    config = _build_music_assist_config(state, source)
-    system_prompt = build_music_assist_finalize_prompt(current_form=form_snapshot, project_context=project_context)
-    try:
-        output = await state.music_assist_llm_engine.generate_text(
-            text=transcript,
-            system_prompt=system_prompt,
-            llm_options=config["options"],
-        )
-        parsed = _decode_assist_json(output)
-        normalized = _normalize_music_assist_result(parsed, form_snapshot)
-    except Exception as exc:
-        state.music_assist_engine_error = str(exc)
-        raise HTTPException(status_code=503, detail=f"Music assist finalize failed: {exc}") from exc
+        form_snapshot = _build_assist_form_snapshot(payload)
+        project_context = _build_project_text_context(state, payload)
+        config = _build_music_assist_config(state, source)
+        system_prompt = build_music_assist_finalize_prompt(current_form=form_snapshot, project_context=project_context)
+        try:
+            output = await state.music_assist_llm_engine.generate_text(
+                text=transcript,
+                system_prompt=system_prompt,
+                llm_options=config["options"],
+            )
+            parsed = _decode_assist_json(output)
+            normalized = _normalize_music_assist_result(parsed, form_snapshot)
+        except Exception as exc:
+            state.music_assist_engine_error = str(exc)
+            raise HTTPException(status_code=503, detail=f"Music assist finalize failed: {exc}") from exc
 
-    state.music_assist_engine_error = ""
-    return {
-        **normalized,
-        "source": source,
-        "backend": state.music_assist_llm_engine.backend_name,
-    }
+        state.music_assist_engine_error = ""
+        return {
+            **normalized,
+            "source": source,
+            "backend": state.music_assist_llm_engine.backend_name,
+        }
 
 
 @router.get("/tasks/{task_id}")
@@ -536,16 +582,13 @@ async def cancel_music_task(task_id: str, state=Depends(get_app_state)):
         raise HTTPException(status_code=404, detail="Music task not found")
     if task["status"] in {"done", "error", "canceled"}:
         return {"task_id": task_id, "status": task["status"]}
-    handle = state.music_task_handles.get(task_id)
-    if handle is not None:
-        handle.cancel()
+    if task["status"] == "queued":
+        await _mark_music_task_canceled(state, task, task_id, message="音乐生成任务已取消（排队中）")
+        return {"task_id": task_id, "status": "canceled"}
+    if task["status"] != "cancel_requested":
         task["status"] = "cancel_requested"
         await _emit_music_event(state, task, task_id, {"type": "cancel_requested", "message": "正在取消音乐生成任务..."})
-        return {"task_id": task_id, "status": "cancel_requested"}
-    task["status"] = "canceled"
-    task["finished_at"] = _now_iso()
-    await _emit_music_event(state, task, task_id, {"type": "task_status", "status": "canceled"})
-    return {"task_id": task_id, "status": "canceled"}
+    return {"task_id": task_id, "status": "cancel_requested"}
 
 
 @router.get("/tasks/{task_id}/audio")

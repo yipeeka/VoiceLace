@@ -33,6 +33,8 @@ class AppState:
     tts_queue_worker: Any = None
     tts_queue_running_task_id: str | None = None
     tts_queue_lock: Any = field(init=False)
+    music_task_lock: Any = field(init=False)
+    music_assist_lock: Any = field(init=False)
     orchestrator: ModelOrchestrator = field(init=False)
     voice_manager: VoiceManager = field(init=False)
     realtime: RealtimeHub = field(init=False)
@@ -55,6 +57,8 @@ class AppState:
         self.asr_engine.pyannote_device = loaded_config.pyannote_device
         self.voice_manager = VoiceManager(self.settings.voices_dir)
         self.tts_queue_lock = asyncio.Lock()
+        self.music_task_lock = asyncio.Lock()
+        self.music_assist_lock = asyncio.Lock()
 
         async def _broadcast_system_event(event: dict) -> None:
             await self.realtime.publish("system", "events", event)

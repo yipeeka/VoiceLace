@@ -1,5 +1,5 @@
-import { Bot, Download, LoaderCircle, Music, Pause, Play, RefreshCw, Save, SendHorizontal, Sparkles, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Bot, ChevronDown, ChevronUp, Download, LoaderCircle, Music, Pause, Play, RefreshCw, Save, SendHorizontal, Sparkles, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import AudioPlayer from "../components/shared/AudioPlayer";
 import GlassCard from "../components/shared/GlassCard";
@@ -172,6 +172,9 @@ export default function MusicPage({ onNavigate }) {
   const [taskStatus, setTaskStatus] = useState("idle");
   const [taskStage, setTaskStage] = useState("");
   const [taskError, setTaskError] = useState("");
+  const [taskCancelMessage, setTaskCancelMessage] = useState("");
+  const [cancelDetailOpen, setCancelDetailOpen] = useState(false);
+  const [showConflictHint, setShowConflictHint] = useState(false);
   const [taskResult, setTaskResult] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
@@ -197,6 +200,7 @@ export default function MusicPage({ onNavigate }) {
   const [isAssistChatting, setIsAssistChatting] = useState(false);
   const [isAssistFinalizing, setIsAssistFinalizing] = useState(false);
   const [deletingAssetName, setDeletingAssetName] = useState("");
+  const statusCardRef = useRef(null);
 
   const statusMeta = STATUS_META[taskStatus] || STATUS_META.idle;
   const musicEnabled = systemStatus?.config?.music_enabled !== false;
@@ -324,10 +328,14 @@ export default function MusicPage({ onNavigate }) {
       }
       if (msg.type === "cancel_requested") {
         setTaskStatus("cancel_requested");
+        setTaskCancelMessage("正在取消任务，当前生成阶段结束后会停止。");
         return;
       }
       if (msg.type === "canceled") {
         setTaskStatus("canceled");
+        setTaskStage("");
+        setTaskCancelMessage(msg.message || "任务已取消");
+        setCancelDetailOpen(false);
         setIsCancelling(false);
         return;
       }
@@ -335,6 +343,9 @@ export default function MusicPage({ onNavigate }) {
         setTaskStatus("done");
         setTaskStage("");
         setTaskError("");
+        setTaskCancelMessage("");
+        setCancelDetailOpen(false);
+        setShowConflictHint(false);
         setTaskResult(msg.data || null);
         setIsCancelling(false);
         refreshAssets();
@@ -343,6 +354,8 @@ export default function MusicPage({ onNavigate }) {
       if (msg.type === "error") {
         setTaskStatus("error");
         setTaskStage("");
+        setTaskCancelMessage("");
+        setCancelDetailOpen(false);
         setTaskError(msg.message || "音乐生成失败");
         setIsCancelling(false);
       }
@@ -366,19 +379,29 @@ export default function MusicPage({ onNavigate }) {
           setTaskStage("");
           setTaskResult(state.result || null);
           setTaskError("");
+          setTaskCancelMessage("");
+          setCancelDetailOpen(false);
+          setShowConflictHint(false);
           setIsCancelling(false);
           refreshAssets();
         } else if (state.status === "canceled") {
           setTaskStatus("canceled");
           setTaskStage("");
+          setTaskCancelMessage(state.cancel_message || "任务已取消");
+          setCancelDetailOpen(false);
           setIsCancelling(false);
         } else {
           setTaskStatus(state.status || "running");
+          if (state.status === "cancel_requested") {
+            setTaskCancelMessage("正在取消任务，当前生成阶段结束后会停止。");
+          }
         }
       } catch (error) {
         const message = getErrorMessage(error, "任务状态同步失败");
         setTaskStatus("error");
         setTaskStage("");
+        setTaskCancelMessage("");
+        setCancelDetailOpen(false);
         setTaskError(message);
         setIsCancelling(false);
       }
@@ -425,6 +448,10 @@ export default function MusicPage({ onNavigate }) {
     document.body.appendChild(anchor);
     anchor.click();
     document.body.removeChild(anchor);
+  }
+
+  function focusStatusCard() {
+    statusCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   async function handleAssistLoad() {
@@ -526,6 +553,9 @@ export default function MusicPage({ onNavigate }) {
     setIsSubmitting(true);
     setTaskError("");
     setTaskStage("");
+    setTaskCancelMessage("");
+    setCancelDetailOpen(false);
+    setShowConflictHint(false);
     setTaskResult(null);
     try {
       const payload = {
@@ -547,6 +577,12 @@ export default function MusicPage({ onNavigate }) {
       refreshSystemStatus();
       refreshAssistStatus();
     } catch (error) {
+      if (error?.status === 409) {
+        setTaskError("已有音乐任务正在进行，请等待当前任务结束后再提交。");
+        setShowConflictHint(true);
+        pushToast({ title: "已有任务正在执行，请稍后再试", tone: "warning" });
+        return;
+      }
       setTaskStatus("error");
       setTaskError(getErrorMessage(error, "音乐生成任务提交失败"));
       pushToast({ title: `任务提交失败：${getErrorMessage(error)}`, tone: "error" });
@@ -564,7 +600,11 @@ export default function MusicPage({ onNavigate }) {
       const result = await api.post(`/music/tasks/${taskId}/cancel`, {});
       const nextStatus = result?.status || "cancel_requested";
       setTaskStatus(nextStatus);
+      if (nextStatus === "cancel_requested") {
+        setTaskCancelMessage("正在取消任务，当前生成阶段结束后会停止。");
+      }
       if (nextStatus === "canceled") {
+        setTaskCancelMessage("任务已取消");
         setIsCancelling(false);
       }
       pushToast({ title: nextStatus === "canceled" ? "任务已取消" : "已请求取消任务", tone: "default" });
@@ -959,6 +999,30 @@ export default function MusicPage({ onNavigate }) {
             {taskError ? (
               <div className="errorText">{taskError}</div>
             ) : null}
+            {showConflictHint && taskId ? (
+              <div className="controlRow">
+                <Button variant="ghost" size="sm" onClick={focusStatusCard}>
+                  定位当前任务
+                </Button>
+              </div>
+            ) : null}
+            {taskStatus === "canceled" && taskCancelMessage ? (
+              <div className="listStack" style={{ marginTop: 8, gap: 6 }}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={cancelDetailOpen ? ChevronUp : ChevronDown}
+                  onClick={() => setCancelDetailOpen((prev) => !prev)}
+                >
+                  取消详情
+                </Button>
+                {cancelDetailOpen ? (
+                  <div className="statusBadge warning" style={{ display: "block", textAlign: "left" }}>
+                    {taskCancelMessage}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           {previewAudioUrl ? (
@@ -1011,8 +1075,9 @@ export default function MusicPage({ onNavigate }) {
         </GlassCard>
       </div>
 
-      <GlassCard>
-        <div className="sectionHeader">
+        <GlassCard>
+          <div ref={statusCardRef} />
+          <div className="sectionHeader">
           <h2 className="cardTitle">音乐资产库</h2>
           <div className="secondary">{isLoadingAssets ? "刷新中..." : `共 ${assets.length} 条`}</div>
         </div>
