@@ -1,4 +1,4 @@
-import { Music, RefreshCw, Save } from "lucide-react";
+import { Bot, Download, LoaderCircle, Music, Pause, Play, RefreshCw, Save, SendHorizontal, Sparkles, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import AudioPlayer from "../components/shared/AudioPlayer";
@@ -98,6 +98,13 @@ const TIMESIGNATURE_OPTIONS = [
   { value: "7/8", label: "7/8" },
 ];
 
+const ASSIST_SOURCE_OPTIONS = [
+  { value: "secondary_local", label: "小模型（本地）" },
+  { value: "primary_local", label: "主模型（本地）" },
+  { value: "openai", label: "OpenAI API" },
+  { value: "gemini", label: "Gemini API" },
+];
+
 function toNumberOrNull(value) {
   if (value === "" || value === null || value === undefined) {
     return null;
@@ -174,11 +181,27 @@ export default function MusicPage({ onNavigate }) {
   const [validation, setValidation] = useState(null);
   const [systemStatus, setSystemStatus] = useState(null);
   const [previewAssetName, setPreviewAssetName] = useState("");
+  const [previewAutoPlaySignal, setPreviewAutoPlaySignal] = useState(0);
+  const [previewPauseSignal, setPreviewPauseSignal] = useState(0);
+  const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
   const [attachingKey, setAttachingKey] = useState("");
   const [isProjectSaving, setIsProjectSaving] = useState(false);
+  const [assistSource, setAssistSource] = useState("secondary_local");
+  const [assistStatus, setAssistStatus] = useState(null);
+  const [assistInput, setAssistInput] = useState("");
+  const [assistMessages, setAssistMessages] = useState([
+    { role: "assistant", content: "告诉我你想要的音乐风格、情绪和用途，或根据项目文本生成音乐，我们先对齐方向。你也可以直接输入：根据项目文本生成音乐。" },
+  ]);
+  const [isAssistLoading, setIsAssistLoading] = useState(false);
+  const [isAssistUnloading, setIsAssistUnloading] = useState(false);
+  const [isAssistChatting, setIsAssistChatting] = useState(false);
+  const [isAssistFinalizing, setIsAssistFinalizing] = useState(false);
+  const [deletingAssetName, setDeletingAssetName] = useState("");
 
   const statusMeta = STATUS_META[taskStatus] || STATUS_META.idle;
   const musicEnabled = systemStatus?.config?.music_enabled !== false;
+  const isMusicTaskActive = ACTIVE_STATUSES.has(taskStatus);
+  const isAssistBusy = isAssistLoading || isAssistUnloading || isAssistChatting || isAssistFinalizing;
   const wsUrl = taskId && ACTIVE_STATUSES.has(taskStatus)
     ? `${getWsBaseUrl()}/ws/music-progress/${taskId}`
     : "";
@@ -197,6 +220,11 @@ export default function MusicPage({ onNavigate }) {
     ? `${API_ORIGIN}/api/v1/music/assets/${encodeURIComponent(previewAssetName)}/audio?v=${encodeURIComponent(assetByName[previewAssetName]?.updated_at || "")}`
     : "";
 
+  function buildAssetAudioUrl(assetName) {
+    if (!assetName) return "";
+    return `${API_ORIGIN}/api/v1/music/assets/${encodeURIComponent(assetName)}/audio`;
+  }
+
   const currentResultAssetName = inferAssetNameFromResult(taskResult);
 
   async function refreshSystemStatus() {
@@ -205,6 +233,15 @@ export default function MusicPage({ onNavigate }) {
       setSystemStatus(status || null);
     } catch {
       setSystemStatus(null);
+    }
+  }
+
+  async function refreshAssistStatus() {
+    try {
+      const status = await api.get("/music/assist/status");
+      setAssistStatus(status || null);
+    } catch {
+      setAssistStatus(null);
     }
   }
 
@@ -243,6 +280,7 @@ export default function MusicPage({ onNavigate }) {
 
   useEffect(() => {
     refreshSystemStatus();
+    refreshAssistStatus();
     refreshValidation();
     refreshAssets();
   }, []);
@@ -258,6 +296,7 @@ export default function MusicPage({ onNavigate }) {
     let timer = null;
     async function tick() {
       await refreshSystemStatus();
+      await refreshAssistStatus();
       timer = window.setTimeout(tick, 8000);
     }
     timer = window.setTimeout(tick, 8000);
@@ -351,6 +390,134 @@ export default function MusicPage({ onNavigate }) {
     };
   }, [taskId, taskStatus]);
 
+  function buildAssistPayload(messages) {
+    const sourceA = String(sourceText || "").trim();
+    const sourceB = String(script?.source_text || "").trim();
+    const sourceC = String(currentProject?.script?.source_text || "").trim();
+    const contextText = sourceA || sourceB || sourceC || "";
+    return {
+      source: assistSource,
+      messages,
+      project_id: currentProject?.id || null,
+      prompt: form.prompt || "",
+      lyrics: form.lyrics || "",
+      audio_duration: Number(form.audio_duration) || 30,
+      vocal_language: form.vocal_language || "unknown",
+      bpm: toNumberOrNull(form.bpm),
+      keyscale: form.keyscale || null,
+      timesignature: form.timesignature || null,
+      context_text: contextText,
+    };
+  }
+
+  function handleClearAssistConversation() {
+    setAssistMessages([
+      { role: "assistant", content: "对话已清空。告诉我新的音乐方向。你也可以直接输入：根据项目文本生成音乐。" },
+    ]);
+    setAssistInput("");
+  }
+
+  function downloadAudioUrl(audioUrl, fileName) {
+    if (!audioUrl) return;
+    const anchor = document.createElement("a");
+    anchor.href = audioUrl;
+    anchor.download = fileName || "music.wav";
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+  }
+
+  async function handleAssistLoad() {
+    setIsAssistLoading(true);
+    try {
+      await api.post("/music/assist/load", { source: assistSource });
+      await refreshAssistStatus();
+      pushToast({ title: "音乐助手模型已加载", tone: "success" });
+    } catch (error) {
+      pushToast({ title: `加载音乐助手失败：${getErrorMessage(error)}`, tone: "error" });
+    } finally {
+      setIsAssistLoading(false);
+    }
+  }
+
+  async function handleAssistUnload() {
+    setIsAssistUnloading(true);
+    try {
+      await api.post("/music/assist/unload", {});
+      await refreshAssistStatus();
+      pushToast({ title: "音乐助手模型已卸载", tone: "success" });
+    } catch (error) {
+      pushToast({ title: `卸载音乐助手失败：${getErrorMessage(error)}`, tone: "error" });
+    } finally {
+      setIsAssistUnloading(false);
+    }
+  }
+
+  async function handleAssistSend() {
+    const text = assistInput.trim();
+    if (!text) {
+      return;
+    }
+    const nextMessages = [...assistMessages, { role: "user", content: text }];
+    setAssistMessages(nextMessages);
+    setAssistInput("");
+    setIsAssistChatting(true);
+    try {
+      const result = await api.post("/music/assist/chat", buildAssistPayload(nextMessages));
+      const reply = String(result?.reply || "").trim() || "我记录下来了，我们可以继续细化。";
+      setAssistMessages([...nextMessages, { role: "assistant", content: reply }]);
+      await refreshAssistStatus();
+    } catch (error) {
+      pushToast({ title: `音乐助手对话失败：${getErrorMessage(error)}`, tone: "error" });
+      setAssistMessages([...nextMessages, { role: "assistant", content: `对话失败：${getErrorMessage(error)}` }]);
+      await refreshAssistStatus();
+    } finally {
+      setIsAssistChatting(false);
+    }
+  }
+
+  async function handleAssistFinalize() {
+    if (assistMessages.length === 0) {
+      pushToast({ title: "请先和音乐助手对话后再生成填入", tone: "warning" });
+      return;
+    }
+    setIsAssistFinalizing(true);
+    try {
+      const result = await api.post("/music/assist/finalize", buildAssistPayload(assistMessages));
+      setForm((prev) => ({
+        ...prev,
+        prompt: String(result?.prompt || prev.prompt || ""),
+        lyrics: String(result?.lyrics || ""),
+        audio_duration: Number(result?.audio_duration || prev.audio_duration || 30),
+        vocal_language: String(result?.vocal_language || prev.vocal_language || "unknown"),
+        bpm: result?.bpm === null || result?.bpm === undefined ? "" : String(result.bpm),
+        keyscale: result?.keyscale || "",
+        timesignature: result?.timesignature || "",
+      }));
+      const helperLines = [];
+      if (result?.notes) {
+        helperLines.push(String(result.notes));
+      }
+      if (Array.isArray(result?.warnings)) {
+        for (const item of result.warnings) {
+          if (String(item || "").trim()) {
+            helperLines.push(`提示：${String(item).trim()}`);
+          }
+        }
+      }
+      if (helperLines.length > 0) {
+        setAssistMessages((prev) => [...prev, { role: "assistant", content: helperLines.join("\n") }]);
+      }
+      pushToast({ title: "已生成并填入音乐表单", tone: "success" });
+      await refreshAssistStatus();
+    } catch (error) {
+      pushToast({ title: `生成并填入失败：${getErrorMessage(error)}`, tone: "error" });
+      await refreshAssistStatus();
+    } finally {
+      setIsAssistFinalizing(false);
+    }
+  }
+
   async function handleGenerate() {
     if (!form.prompt.trim()) {
       pushToast({ title: "请输入音乐描述", tone: "warning" });
@@ -378,6 +545,7 @@ export default function MusicPage({ onNavigate }) {
       setTaskStatus("queued");
       pushToast({ title: "音乐生成任务已提交", tone: "success" });
       refreshSystemStatus();
+      refreshAssistStatus();
     } catch (error) {
       setTaskStatus("error");
       setTaskError(getErrorMessage(error, "音乐生成任务提交失败"));
@@ -429,6 +597,45 @@ export default function MusicPage({ onNavigate }) {
     } finally {
       setAttachingKey("");
     }
+  }
+
+  async function handleDeleteAsset(assetName) {
+    if (!assetName) {
+      return;
+    }
+    const confirmed = window.confirm(`确认删除音乐资产 ${assetName} 吗？`);
+    if (!confirmed) {
+      return;
+    }
+    setDeletingAssetName(assetName);
+    try {
+      await api.delete(`/music/assets/${encodeURIComponent(assetName)}`);
+      if (previewAssetName === assetName) {
+        setPreviewAssetName("");
+      }
+      await refreshAssets();
+      pushToast({ title: "音乐资产已删除", tone: "success" });
+    } catch (error) {
+      pushToast({ title: `删除资产失败：${getErrorMessage(error)}`, tone: "error" });
+    } finally {
+      setDeletingAssetName("");
+    }
+  }
+
+  function playAssetPreview(assetName) {
+    if (!assetName) return;
+    setPreviewAssetName(assetName);
+    setPreviewAutoPlaySignal((prev) => prev + 1);
+  }
+
+  function toggleAssetPreview(assetName) {
+    if (!assetName) return;
+    if (previewAssetName === assetName && isPreviewPlaying) {
+      setPreviewPauseSignal((prev) => prev + 1);
+      return;
+    }
+    setPreviewAssetName(assetName);
+    setPreviewAutoPlaySignal((prev) => prev + 1);
   }
 
   const handleSaveProjectFile = useCallback(async (options = {}) => {
@@ -499,6 +706,88 @@ export default function MusicPage({ onNavigate }) {
           <p className="cardSubtitle">
             使用已配置的 ACE-Step Diffusers 本地模型生成音乐，不自动下载模型。
           </p>
+
+          <div className="musicAssistPanel">
+            <div className="sectionHeader" style={{ marginBottom: 8 }}>
+              <h3 className="cardTitle" style={{ fontSize: 14 }}>
+                <Bot size={16} /> AI 音乐助手（对话模式）
+              </h3>
+              <div className="secondary">
+                {assistStatus?.loaded ? `已加载：${assistStatus?.source || "-"}` : "未加载"}
+              </div>
+            </div>
+            <div className="editorGrid three" style={{ marginBottom: 8 }}>
+              <div className="formGroup" style={{ gridColumn: "span 2" }}>
+                <label className="formLabel">LLM 来源</label>
+                <Select value={assistSource} onValueChange={setAssistSource} options={ASSIST_SOURCE_OPTIONS} />
+              </div>
+              <div className="formGroup">
+                <label className="formLabel">助手状态</label>
+                <div className="secondary" style={{ paddingTop: 9 }}>
+                  {assistStatus?.backend || "-"}
+                </div>
+              </div>
+            </div>
+            <div className="controlRow" style={{ marginBottom: 10 }}>
+              <Button
+                variant="secondary"
+                disabled={isAssistBusy || isMusicTaskActive}
+                onClick={handleAssistLoad}
+              >
+                {isAssistLoading ? <><LoaderCircle size={14} className="spin" /> 加载中...</> : "加载模型"}
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={isAssistBusy || isMusicTaskActive || !assistStatus?.loaded}
+                onClick={handleAssistUnload}
+              >
+                {isAssistUnloading ? <><LoaderCircle size={14} className="spin" /> 卸载中...</> : "卸载模型"}
+              </Button>
+              <Button
+                variant="primary"
+                icon={Sparkles}
+                disabled={isAssistBusy || isMusicTaskActive || !assistStatus?.loaded || assistMessages.length === 0}
+                onClick={handleAssistFinalize}
+              >
+                {isAssistFinalizing ? "填入中..." : "生成并填入"}
+              </Button>
+              <Button
+                variant="ghost"
+                icon={Trash2}
+                disabled={isAssistBusy || isMusicTaskActive}
+                onClick={handleClearAssistConversation}
+              >
+                删除对话
+              </Button>
+            </div>
+            <div className="musicAssistMessages">
+              {assistMessages.map((item, index) => (
+                <div key={`${item.role}-${index}`} className={`musicAssistMessage ${item.role}`}>
+                  <div className="musicAssistRole">{item.role === "assistant" ? "助手" : "你"}</div>
+                  <div className="musicAssistContent">{item.content}</div>
+                </div>
+              ))}
+            </div>
+            <div className="musicAssistComposer">
+              <textarea
+                className="textArea compactArea"
+                value={assistInput}
+                onChange={(event) => setAssistInput(event.target.value)}
+                placeholder="例如：我要做温暖电影感钢琴配乐，30秒，适合女性旁白开场"
+              />
+              <Button
+                variant="secondary"
+                icon={SendHorizontal}
+                disabled={isAssistBusy || isMusicTaskActive || !assistStatus?.loaded || !assistInput.trim()}
+                onClick={handleAssistSend}
+              >
+                {isAssistChatting ? "发送中..." : "发送"}
+              </Button>
+            </div>
+            {assistStatus?.error ? (
+              <div className="errorText">{assistStatus.error}</div>
+            ) : null}
+          </div>
 
           <div className="formGroup">
             <label className="formLabel">音乐描述（必填）</label>
@@ -675,9 +964,22 @@ export default function MusicPage({ onNavigate }) {
           {previewAudioUrl ? (
             <div className="listStack">
               <div className="formLabel">试听</div>
-              <AudioPlayer audioUrl={previewAudioUrl} compact />
+              <AudioPlayer
+                audioUrl={previewAudioUrl}
+                compact
+                autoPlaySignal={previewAutoPlaySignal}
+                pauseSignal={previewPauseSignal}
+                onPlayStateChange={setIsPreviewPlaying}
+              />
               {currentResultAssetName ? (
                 <div className="controlRow">
+                  <Button
+                    variant="ghost"
+                    icon={Download}
+                    onClick={() => downloadAudioUrl(buildAssetAudioUrl(currentResultAssetName), currentResultAssetName)}
+                  >
+                    下载当前结果
+                  </Button>
                   <Button
                     variant="secondary"
                     icon={Save}
@@ -734,6 +1036,31 @@ export default function MusicPage({ onNavigate }) {
                   </div>
                 </button>
                 <div className="controlRow" style={{ justifyContent: "flex-end" }}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={previewAssetName === item.name && isPreviewPlaying ? Pause : Play}
+                    onClick={() => toggleAssetPreview(item.name)}
+                  >
+                    {previewAssetName === item.name && isPreviewPlaying ? "暂停" : "播放"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={Download}
+                    onClick={() => downloadAudioUrl(buildAssetAudioUrl(item.name), item.name)}
+                  >
+                    下载
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    icon={Trash2}
+                    disabled={deletingAssetName === item.name}
+                    onClick={() => handleDeleteAsset(item.name)}
+                  >
+                    {deletingAssetName === item.name ? "删除中..." : "删除"}
+                  </Button>
                   <Button
                     variant="secondary"
                     size="sm"

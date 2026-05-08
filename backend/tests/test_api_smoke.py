@@ -100,6 +100,15 @@ class ApiSmokeTest(unittest.TestCase):
             self.assertEqual(audio_resp.headers.get("content-type"), "audio/wav")
             self.assertEqual(audio_resp.content, b"RIFFdemo")
 
+            delete_resp = self.client.delete(f"/api/v1/music/assets/{asset_name}")
+            self.assertEqual(delete_resp.status_code, 200)
+            self.assertEqual(delete_resp.json().get("status"), "deleted")
+
+            missing_resp = self.client.get(f"/api/v1/music/assets/{asset_name}/audio")
+            self.assertEqual(missing_resp.status_code, 404)
+
+            created_asset.write_bytes(b"RIFFdemo")
+
             create_resp = self.client.post("/api/v1/projects", json={"name": f"music-attach-{uuid.uuid4().hex[:8]}"})
             self.assertEqual(create_resp.status_code, 200)
             project_id = create_resp.json()["id"]
@@ -302,6 +311,107 @@ class ApiSmokeTest(unittest.TestCase):
             engine.generate_text = original_generate_text
             state.translation_engine_source = original_source
             state.translation_engine_error = original_error
+            engine.is_loaded = original_is_loaded
+            engine.backend_name = original_backend_name
+            engine.model_name = original_model_name
+
+    def test_music_assist_load_chat_finalize_unload_flow(self) -> None:
+        state = self.app_state
+        engine = state.music_assist_llm_engine
+        original_load_model = engine.load_model
+        original_unload_model = engine.unload_model
+        original_generate_text = engine.generate_text
+        original_source = state.music_assist_engine_source
+        original_error = state.music_assist_engine_error
+        original_is_loaded = engine.is_loaded
+        original_backend_name = engine.backend_name
+        original_model_name = engine.model_name
+        try:
+            async def fake_load_model(*args, **kwargs):
+                engine.is_loaded = True
+                engine.backend_name = "mock"
+                engine.model_name = "music-assist-mock"
+                engine.last_error = ""
+
+            async def fake_unload_model():
+                engine.is_loaded = False
+                engine.backend_name = "unloaded"
+                engine.model_name = ""
+
+            async def fake_generate_text(*, text: str, system_prompt: str, llm_options: dict | None = None):
+                self.assertTrue(text)
+                if "只输出一个 JSON 对象" in system_prompt:
+                    return json.dumps(
+                        {
+                            "prompt": "warm cinematic piano, soft strings, hopeful ending",
+                            "lyrics": "[Instrumental]",
+                            "audio_duration": 30,
+                            "vocal_language": "unknown",
+                            "bpm": 120,
+                            "keyscale": "C major",
+                            "timesignature": "4/4",
+                            "notes": "节奏平稳，适合旁白",
+                            "warnings": [],
+                        },
+                        ensure_ascii=False,
+                    )
+                return "可以先确定情绪和配器，再决定歌词是否留空。"
+
+            engine.load_model = fake_load_model
+            engine.unload_model = fake_unload_model
+            engine.generate_text = fake_generate_text
+
+            load_resp = self.client.post("/api/v1/music/assist/load", json={"source": "secondary_local"})
+            self.assertEqual(load_resp.status_code, 200)
+            self.assertEqual(load_resp.json().get("source"), "secondary_local")
+
+            status_resp = self.client.get("/api/v1/music/assist/status")
+            self.assertEqual(status_resp.status_code, 200)
+            self.assertTrue(status_resp.json().get("loaded"))
+
+            chat_resp = self.client.post(
+                "/api/v1/music/assist/chat",
+                json={
+                    "source": "secondary_local",
+                    "messages": [
+                        {"role": "assistant", "content": "你想做什么风格？"},
+                        {"role": "user", "content": "电影感钢琴配乐，30秒"},
+                    ],
+                    "audio_duration": 30,
+                    "vocal_language": "unknown",
+                },
+            )
+            self.assertEqual(chat_resp.status_code, 200)
+            self.assertTrue(chat_resp.json().get("reply"))
+
+            finalize_resp = self.client.post(
+                "/api/v1/music/assist/finalize",
+                json={
+                    "source": "secondary_local",
+                    "messages": [
+                        {"role": "assistant", "content": "你想做什么风格？"},
+                        {"role": "user", "content": "电影感钢琴配乐，30秒"},
+                    ],
+                    "audio_duration": 30,
+                    "vocal_language": "unknown",
+                },
+            )
+            self.assertEqual(finalize_resp.status_code, 200)
+            body = finalize_resp.json()
+            self.assertEqual(body.get("prompt"), "warm cinematic piano, soft strings, hopeful ending")
+            self.assertEqual(body.get("lyrics"), "[Instrumental]")
+            self.assertEqual(body.get("bpm"), 120)
+            self.assertEqual(body.get("keyscale"), "C major")
+            self.assertEqual(body.get("timesignature"), "4/4")
+
+            unload_resp = self.client.post("/api/v1/music/assist/unload", json={})
+            self.assertEqual(unload_resp.status_code, 200)
+        finally:
+            engine.load_model = original_load_model
+            engine.unload_model = original_unload_model
+            engine.generate_text = original_generate_text
+            state.music_assist_engine_source = original_source
+            state.music_assist_engine_error = original_error
             engine.is_loaded = original_is_loaded
             engine.backend_name = original_backend_name
             engine.model_name = original_model_name

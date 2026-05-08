@@ -799,6 +799,25 @@ export default function SynthesisPage() {
     }
   }
 
+  function handleClearPostprocessAsset(assetType) {
+    if (assetType === "bgm") {
+      setConfig({
+        bgm_track: {
+          ...(config.bgm_track || {}),
+          relpath: "",
+        },
+      });
+    } else {
+      setConfig({
+        ambience_track: {
+          ...(config.ambience_track || {}),
+          relpath: "",
+        },
+      });
+    }
+    pushToast({ title: `${assetType === "bgm" ? "背景音乐" : "环境音"}已移除`, tone: "success" });
+  }
+
   async function handleSingleSegmentSynthesis(segmentId) {
     if (guardUnsavedChanges("重新生成")) {
       return;
@@ -857,6 +876,7 @@ export default function SynthesisPage() {
             onSetConfig={setConfig}
             onStartPostprocess={handleStartPostprocess}
             onUploadPostprocessAsset={handleUploadPostprocessAsset}
+            onClearPostprocessAsset={handleClearPostprocessAsset}
           />
         </div>
         <SynthesisTaskStatusCard

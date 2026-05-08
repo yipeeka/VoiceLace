@@ -1587,8 +1587,73 @@ select.textInput option {
   font-size: 12px;
 }
 
+.musicAssistPanel {
+  margin-bottom: 14px;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.musicAssistMessages {
+  max-height: 240px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 2px;
+}
+
+.musicAssistMessage {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+}
+
+.musicAssistMessage.user {
+  border-color: color-mix(in srgb, var(--accent-primary) 45%, var(--border-default));
+}
+
+.musicAssistRole {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.musicAssistContent {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.musicAssistComposer {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.spin {
+  animation: icon-spin 1s linear infinite;
+}
+
+@keyframes icon-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 @media (max-width: 980px) {
   .musicAssetRow {
+    grid-template-columns: 1fr;
+  }
+  .musicAssistComposer {
     grid-template-columns: 1fr;
   }
 }

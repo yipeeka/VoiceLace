@@ -98,6 +98,10 @@ async def update_orchestrator_config(payload: OrchestratorConfigPayload, state=D
         await state.translation_llm_engine.unload_model()
         state.translation_engine_source = ""
         state.translation_engine_error = ""
+    if state.music_assist_llm_engine.is_loaded:
+        await state.music_assist_llm_engine.unload_model()
+        state.music_assist_engine_source = ""
+        state.music_assist_engine_error = ""
     if state.music_engine.is_loaded and (
         old_music_model_dir != str(Path(config.music_model_dir).expanduser().resolve())
         or old_music_device_mode != config.music_device_mode
@@ -135,6 +139,10 @@ async def reset_orchestrator_config(state=Depends(get_app_state)):
         await state.translation_llm_engine.unload_model()
         state.translation_engine_source = ""
         state.translation_engine_error = ""
+    if state.music_assist_llm_engine.is_loaded:
+        await state.music_assist_llm_engine.unload_model()
+        state.music_assist_engine_source = ""
+        state.music_assist_engine_error = ""
     if state.music_engine.is_loaded and (
         old_music_model_dir != str(Path(config.music_model_dir).expanduser().resolve())
         or old_music_device_mode != config.music_device_mode

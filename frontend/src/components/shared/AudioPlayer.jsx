@@ -116,9 +116,20 @@ async function buildPeaksFromAudioBlob(audioBlob, bins = 320) {
   return buildPeaksFromArrayBuffer(arrayBuffer, bins);
 }
 
-export default function AudioPlayer({ audioUrl, audioBlob = null, peaks = null, peaksUrl = null, height = 60, compact = false }) {
+export default function AudioPlayer({
+  audioUrl,
+  audioBlob = null,
+  peaks = null,
+  peaksUrl = null,
+  height = 60,
+  compact = false,
+  autoPlaySignal = 0,
+  pauseSignal = 0,
+  onPlayStateChange = null,
+}) {
   const audioRef = useRef(null);
   const canvasRef = useRef(null);
+  const pendingAutoPlayRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -143,6 +154,13 @@ export default function AudioPlayer({ audioUrl, audioBlob = null, peaks = null, 
     };
     const onCanPlay = () => {
       setIsReady(true);
+      if (pendingAutoPlayRef.current) {
+        pendingAutoPlayRef.current = false;
+        audio.play().then(
+          () => setIsPlaying(true),
+          () => setIsPlaying(false),
+        );
+      }
     };
     const onTimeUpdate = () => {
       setCurrentTime(audio.currentTime || 0);
@@ -169,6 +187,43 @@ export default function AudioPlayer({ audioUrl, audioBlob = null, peaks = null, 
       setDuration(0);
     };
   }, [audioUrl]);
+
+  useEffect(() => {
+    onPlayStateChange?.(isPlaying);
+  }, [isPlaying, onPlayStateChange]);
+
+  useEffect(() => {
+    if (!audioUrl || !autoPlaySignal) {
+      return;
+    }
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+    pendingAutoPlayRef.current = true;
+    if (isReady) {
+      audio.play().then(
+        () => {
+          pendingAutoPlayRef.current = false;
+          setIsPlaying(true);
+        },
+        () => setIsPlaying(false),
+      );
+    }
+  }, [autoPlaySignal, audioUrl, isReady]);
+
+  useEffect(() => {
+    if (!audioUrl || !pauseSignal) {
+      return;
+    }
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+    audio.pause();
+    pendingAutoPlayRef.current = false;
+    setIsPlaying(false);
+  }, [pauseSignal, audioUrl]);
 
   useEffect(() => {
     let canceled = false;

@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Play, SlidersHorizontal, Square, Upload, Wand2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Play, SlidersHorizontal, Square, Trash2, Upload, Wand2 } from "lucide-react";
 import { useRef } from "react";
 
 import GlassCard from "../shared/GlassCard";
@@ -263,6 +263,7 @@ export function SynthesisPostprocessCard({
   onSetConfig,
   onStartPostprocess,
   onUploadPostprocessAsset,
+  onClearPostprocessAsset,
 }) {
   const bgmInputRef = useRef(null);
   const ambienceInputRef = useRef(null);
@@ -455,6 +456,15 @@ export function SynthesisPostprocessCard({
                 >
                   {isUploadingPostAsset ? "上传中..." : "上传 BGM"}
                 </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={Trash2}
+                  onClick={() => onClearPostprocessAsset?.("bgm")}
+                  disabled={isUploadingPostAsset || !config.bgm_track?.relpath}
+                >
+                  删除
+                </Button>
                 <span className="muted" style={{ fontSize: 12 }}>{config.bgm_track?.relpath || "未绑定"}</span>
               </div>
               <input
@@ -519,6 +529,15 @@ export function SynthesisPostprocessCard({
                   disabled={isUploadingPostAsset}
                 >
                   {isUploadingPostAsset ? "上传中..." : "上传环境音"}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={Trash2}
+                  onClick={() => onClearPostprocessAsset?.("ambience")}
+                  disabled={isUploadingPostAsset || !config.ambience_track?.relpath}
+                >
+                  删除
                 </Button>
                 <span className="muted" style={{ fontSize: 12 }}>{config.ambience_track?.relpath || "未绑定"}</span>
               </div>

@@ -17,6 +17,7 @@ class AppState:
     settings: Any = field(default_factory=lambda: app_settings)
     llm_engine: LLMEngine = field(default_factory=LLMEngine)
     translation_llm_engine: LLMEngine = field(default_factory=LLMEngine)
+    music_assist_llm_engine: LLMEngine = field(default_factory=LLMEngine)
     tts_engine: TTSEngine = field(default_factory=TTSEngine)
     music_engine: MusicEngine = field(default_factory=MusicEngine)
     asr_engine: ASREngine = field(default_factory=ASREngine)
@@ -37,6 +38,8 @@ class AppState:
     realtime: RealtimeHub = field(init=False)
     translation_engine_source: str = ""
     translation_engine_error: str = ""
+    music_assist_engine_source: str = ""
+    music_assist_engine_error: str = ""
 
     def __post_init__(self) -> None:
         self.settings.ensure_directories()
