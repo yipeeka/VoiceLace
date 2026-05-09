@@ -144,6 +144,41 @@ class ApiSmokeTest(unittest.TestCase):
             if created_asset and created_asset.exists():
                 created_asset.unlink(missing_ok=True)
 
+    def test_tts_postprocess_asset_preview_endpoint(self) -> None:
+        project_id = ""
+        try:
+            create_resp = self.client.post("/api/v1/projects", json={"name": f"tts-post-preview-{uuid.uuid4().hex[:8]}"})
+            self.assertEqual(create_resp.status_code, 200)
+            project_id = create_resp.json()["id"]
+
+            upload_resp = self.client.post(
+                f"/api/v1/tts/projects/{project_id}/postprocess/assets?type=bgm",
+                files={"file": ("demo.wav", b"RIFFdemo", "audio/wav")},
+            )
+            self.assertEqual(upload_resp.status_code, 200)
+            relpath = str(upload_resp.json().get("relpath") or "")
+            self.assertTrue(relpath)
+
+            preview_resp = self.client.get(
+                f"/api/v1/tts/projects/{project_id}/postprocess/assets/preview?type=bgm"
+            )
+            self.assertEqual(preview_resp.status_code, 200)
+            self.assertTrue((preview_resp.headers.get("content-type") or "").startswith("audio/"))
+            self.assertEqual(preview_resp.content, b"RIFFdemo")
+
+            missing_resp = self.client.get(
+                f"/api/v1/tts/projects/{project_id}/postprocess/assets/preview?type=ambience"
+            )
+            self.assertEqual(missing_resp.status_code, 404)
+
+            bad_type_resp = self.client.get(
+                f"/api/v1/tts/projects/{project_id}/postprocess/assets/preview?type=bad"
+            )
+            self.assertEqual(bad_type_resp.status_code, 400)
+        finally:
+            if project_id:
+                self.client.delete(f"/api/v1/projects/{project_id}")
+
     def test_asr_transcribe_file_endpoint_shape(self) -> None:
         asr = self.app_state.asr_engine
         original_transcribe = asr.transcribe

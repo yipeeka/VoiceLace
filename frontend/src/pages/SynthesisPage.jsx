@@ -232,8 +232,9 @@ export default function SynthesisPage() {
       return;
     }
     const format = config.output_format || "wav";
-    const rawUrl = `${API_ORIGIN}/api/v1/tts/export?project_id=${currentProject.id}&format=${format}&variant=raw`;
-    const processedUrl = `${API_ORIGIN}/api/v1/tts/export?project_id=${currentProject.id}&format=${format}&variant=processed`;
+    const versionKey = encodeURIComponent(currentProject.updated_at || "");
+    const rawUrl = `${API_ORIGIN}/api/v1/tts/export?project_id=${currentProject.id}&format=${format}&variant=raw&v=${versionKey}`;
+    const processedUrl = `${API_ORIGIN}/api/v1/tts/export?project_id=${currentProject.id}&format=${format}&variant=processed&v=${versionKey}`;
     const hasProcessed =
       Boolean(currentProject.audio_assets?.processed?.full_wav_relpath) ||
       Boolean(currentProject.audio_assets?.processed?.full_mp3_relpath);
@@ -528,6 +529,12 @@ export default function SynthesisPage() {
 
   const totalSegments = draftScript?.segments?.length ?? 0;
   const progressPct = totalSegments > 0 ? Math.round((progress.current / totalSegments) * 100) : 0;
+  const bgmPreviewUrl = currentProject?.id && config.bgm_track?.relpath
+    ? `${API_ORIGIN}/api/v1/tts/projects/${currentProject.id}/postprocess/assets/preview?type=bgm&v=${encodeURIComponent(`${currentProject.updated_at || ""}:${config.bgm_track.relpath}`)}`
+    : null;
+  const ambiencePreviewUrl = currentProject?.id && config.ambience_track?.relpath
+    ? `${API_ORIGIN}/api/v1/tts/projects/${currentProject.id}/postprocess/assets/preview?type=ambience&v=${encodeURIComponent(`${currentProject.updated_at || ""}:${config.ambience_track.relpath}`)}`
+    : null;
 
   const {
     handleStart: startSynthesisTask,
@@ -750,7 +757,7 @@ export default function SynthesisPage() {
   }
 
   async function handleStartPostprocess() {
-    if (guardUnsavedChanges("开始后处理")) {
+    if (guardUnsavedChanges("开始后期处理")) {
       return;
     }
     if (!currentProject?.id || isRunning) {
@@ -873,6 +880,8 @@ export default function SynthesisPage() {
             currentProject={currentProject}
             isRunning={isRunning}
             isUploadingPostAsset={isUploadingPostAsset}
+            bgmPreviewUrl={bgmPreviewUrl}
+            ambiencePreviewUrl={ambiencePreviewUrl}
             onSetConfig={setConfig}
             onStartPostprocess={handleStartPostprocess}
             onUploadPostprocessAsset={handleUploadPostprocessAsset}

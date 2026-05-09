@@ -19,6 +19,13 @@ const buildSegmentResult = (msg) => ({
   peaks: msg.peaks || null,
 });
 
+const appendVersionParam = (url, versionKey) => {
+  if (!url) return url;
+  const normalizedKey = String(versionKey || Date.now());
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}v=${encodeURIComponent(normalizedKey)}`;
+};
+
 const runSynthesisFlow = async ({
   set,
   projectId,
@@ -76,7 +83,8 @@ const runSynthesisFlow = async ({
         result.processed_export_url ||
         result.export_url ||
         `/api/v1/tts/export?project_id=${projectId}&format=${config.output_format || "wav"}&variant=raw`;
-      const resolvedAudioUrl = `${API_ORIGIN}${exportPath}`;
+      const resolvedVersionKey = result.finished_at || result.task_id || taskId || Date.now();
+      const resolvedAudioUrl = appendVersionParam(`${API_ORIGIN}${exportPath}`, resolvedVersionKey);
       set((state) => ({
         isRunning: false,
         taskKind: resolvedKind,
@@ -229,7 +237,7 @@ const runSynthesisFlow = async ({
           case "postprocess_stage":
             set({
               status: "running",
-              modelStatus: msg.message || "后处理进行中",
+              modelStatus: msg.message || "后期处理进行中",
             });
             break;
           case "segment_start":
@@ -454,15 +462,15 @@ export const useSynthesisStore = create((set) => ({
       resetSegmentResults: false,
       mergeSegmentResults: true,
       resetAudioUrls: false,
-      queueMessage: "后处理任务已创建，等待执行",
-      segmentVerb: "后处理",
-      exhaustedMessage: "后处理连接已关闭（重连失败）",
-      timeoutMessage: "后处理任务等待超时",
-      syncErrorMessage: "后处理状态同步失败",
-      cancelRequestedMessage: "正在取消后处理任务...",
-      canceledMessage: "后处理任务已取消",
-      failureMessage: "后处理失败",
-      completeToastTitle: () => "后处理完成",
+      queueMessage: "后期处理任务已创建，等待执行",
+      segmentVerb: "后期处理",
+      exhaustedMessage: "后期处理连接已关闭（重连失败）",
+      timeoutMessage: "后期处理任务等待超时",
+      syncErrorMessage: "后期处理状态同步失败",
+      cancelRequestedMessage: "正在取消后期处理任务...",
+      canceledMessage: "后期处理任务已取消",
+      failureMessage: "后期处理失败",
+      completeToastTitle: () => "后期处理完成",
     });
   },
   startRetryFailed: async ({ projectId, config }) => {
@@ -525,7 +533,7 @@ export const useSynthesisStore = create((set) => ({
   cancelSynthesis: async () => {
     const taskId = useSynthesisStore.getState().taskId;
     const taskKind = useSynthesisStore.getState().taskKind || "synthesis";
-    const taskLabel = taskKind === "postprocess" ? "后处理任务" : "合成任务";
+    const taskLabel = taskKind === "postprocess" ? "后期处理任务" : "合成任务";
     if (!taskId) {
       return { status: "idle" };
     }

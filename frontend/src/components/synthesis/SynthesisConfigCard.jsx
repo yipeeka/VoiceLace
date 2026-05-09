@@ -1,5 +1,5 @@
-import { ChevronDown, ChevronUp, Play, SlidersHorizontal, Square, Trash2, Upload, Wand2 } from "lucide-react";
-import { useRef } from "react";
+import { ChevronDown, ChevronUp, Pause, Play, SlidersHorizontal, Square, Trash2, Upload, Wand2 } from "lucide-react";
+import { useRef, useState } from "react";
 
 import GlassCard from "../shared/GlassCard";
 import Button from "../ui/Button";
@@ -260,6 +260,8 @@ export function SynthesisPostprocessCard({
   currentProject,
   isRunning,
   isUploadingPostAsset,
+  bgmPreviewUrl,
+  ambiencePreviewUrl,
   onSetConfig,
   onStartPostprocess,
   onUploadPostprocessAsset,
@@ -267,6 +269,9 @@ export function SynthesisPostprocessCard({
 }) {
   const bgmInputRef = useRef(null);
   const ambienceInputRef = useRef(null);
+  const bgmAudioRef = useRef(null);
+  const ambienceAudioRef = useRef(null);
+  const [previewPlayingType, setPreviewPlayingType] = useState("");
   const chapterMarkers = Array.isArray(config.chapter_markers) ? config.chapter_markers : [];
   const hasRawFullAudio =
     Boolean(currentProject?.audio_assets?.full_wav_relpath) ||
@@ -297,13 +302,41 @@ export function SynthesisPostprocessCard({
     onSetConfig({ chapter_markers: chapterMarkers.filter((item) => item.id !== markerId) });
   }
 
+  async function togglePreview(type) {
+    const isBgm = type === "bgm";
+    const audioRef = isBgm ? bgmAudioRef : ambienceAudioRef;
+    const otherRef = isBgm ? ambienceAudioRef : bgmAudioRef;
+    const audio = audioRef.current;
+    const otherAudio = otherRef.current;
+    if (!audio) return;
+
+    if (!audio.paused) {
+      audio.pause();
+      setPreviewPlayingType((current) => (current === type ? "" : current));
+      return;
+    }
+
+    if (otherAudio && !otherAudio.paused) {
+      otherAudio.pause();
+    }
+    if (otherAudio) {
+      otherAudio.currentTime = 0;
+    }
+    try {
+      await audio.play();
+      setPreviewPlayingType(type);
+    } catch {
+      setPreviewPlayingType("");
+    }
+  }
+
   return (
     <GlassCard>
       <CollapsibleHeader
         expanded={expanded}
         onToggle={onToggle}
-        title="后处理参数"
-        subtitle={expanded ? "对已合成整轨执行后处理和章节导出。" : "已收起，点击展开。"}
+        title="后期处理参数"
+        subtitle={expanded ? "对已合成整轨执行后期处理和章节导出。" : "已收起，点击展开。"}
         icon={Wand2}
       />
       {!expanded ? (
@@ -312,7 +345,7 @@ export function SynthesisPostprocessCard({
         <>
           <div className="editorGrid">
             <div className="formGroup">
-              <label className="formLabel">启用后处理</label>
+              <label className="formLabel">启用后期处理</label>
               <label className="controlRow" style={{ cursor: "pointer" }}>
                 <input
                   type="checkbox"
@@ -320,7 +353,7 @@ export function SynthesisPostprocessCard({
                   onChange={(e) => onSetConfig({ postprocess_enabled: e.target.checked })}
                   style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
                 />
-                <span style={{ fontSize: 13.5, color: "var(--text-secondary)" }}>完成合成后可执行后处理</span>
+                <span style={{ fontSize: 13.5, color: "var(--text-secondary)" }}>完成合成后可执行后期处理</span>
               </label>
             </div>
             <div className="formGroup">
@@ -465,6 +498,15 @@ export function SynthesisPostprocessCard({
                 >
                   删除
                 </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={previewPlayingType === "bgm" ? Pause : Play}
+                  onClick={() => togglePreview("bgm")}
+                  disabled={isUploadingPostAsset || !config.bgm_track?.relpath || !bgmPreviewUrl}
+                >
+                  {previewPlayingType === "bgm" ? "暂停" : "播放"}
+                </Button>
                 <span className="muted" style={{ fontSize: 12 }}>{config.bgm_track?.relpath || "未绑定"}</span>
               </div>
               <input
@@ -477,6 +519,13 @@ export function SynthesisPostprocessCard({
                   event.target.value = "";
                   if (file) onUploadPostprocessAsset?.("bgm", file);
                 }}
+              />
+              <audio
+                ref={bgmAudioRef}
+                src={bgmPreviewUrl || ""}
+                preload="metadata"
+                onEnded={() => setPreviewPlayingType((current) => (current === "bgm" ? "" : current))}
+                style={{ display: "none" }}
               />
               <Slider
                 label="BGM 增益 (dB)"
@@ -539,6 +588,15 @@ export function SynthesisPostprocessCard({
                 >
                   删除
                 </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={previewPlayingType === "ambience" ? Pause : Play}
+                  onClick={() => togglePreview("ambience")}
+                  disabled={isUploadingPostAsset || !config.ambience_track?.relpath || !ambiencePreviewUrl}
+                >
+                  {previewPlayingType === "ambience" ? "暂停" : "播放"}
+                </Button>
                 <span className="muted" style={{ fontSize: 12 }}>{config.ambience_track?.relpath || "未绑定"}</span>
               </div>
               <input
@@ -551,6 +609,13 @@ export function SynthesisPostprocessCard({
                   event.target.value = "";
                   if (file) onUploadPostprocessAsset?.("ambience", file);
                 }}
+              />
+              <audio
+                ref={ambienceAudioRef}
+                src={ambiencePreviewUrl || ""}
+                preload="metadata"
+                onEnded={() => setPreviewPlayingType((current) => (current === "ambience" ? "" : current))}
+                style={{ display: "none" }}
               />
               <Slider
                 label="环境音增益 (dB)"
@@ -582,7 +647,7 @@ export function SynthesisPostprocessCard({
             >
               开始后期
             </Button>
-            {!hasRawFullAudio ? <span className="muted" style={{ fontSize: 12 }}>需先完成一次整本合成后才能后处理</span> : null}
+            {!hasRawFullAudio ? <span className="muted" style={{ fontSize: 12 }}>需先完成一次整本合成后才能后期处理</span> : null}
           </div>
         </>
       )}

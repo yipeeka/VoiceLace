@@ -136,7 +136,7 @@ export default function SynthesisTaskStatusCard({
           ) : null}
           {processedAudioUrl ? (
             <a className="downloadLink" href={processedAudioUrl} target="_blank" rel="noreferrer">
-              下载后处理音频
+              下载后期处理音频
             </a>
           ) : null}
           {subtitleSrtUrl ? (
@@ -199,7 +199,7 @@ export default function SynthesisTaskStatusCard({
           disabled={!processedAudioUrl}
           onClick={() => onAudioVariantChange?.("processed")}
         >
-          播放后处理
+          播放后期处理
         </Button>
       </div>
       {normalizedChapterExports.length ? (

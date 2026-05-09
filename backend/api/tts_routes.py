@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 import logging
+import mimetypes
 from pathlib import Path
 import tempfile
 from uuid import uuid4
@@ -25,6 +26,7 @@ from backend.services import (
     load_project_segment_peaks_payload,
     load_project_waveform_payload,
     load_project_waveform_payload_for_variant,
+    from_output_relpath,
     normalize_segment_tts_overrides,
     public_task,
     resolve_export_audio_path,
@@ -251,6 +253,42 @@ async def upload_postprocess_asset(
         project_id=project_id,
         asset_type=type,
         source_path=tmp_path,
+    )
+
+
+@router.get("/projects/{project_id}/postprocess/assets/preview")
+async def preview_postprocess_asset(
+    project_id: str,
+    type: str = Query(..., description="bgm|ambience"),
+    state=Depends(get_app_state),
+):
+    normalized_type = (type or "").strip().lower()
+    if normalized_type not in {"bgm", "ambience"}:
+        raise HTTPException(status_code=400, detail="asset type 必须为 bgm 或 ambience")
+
+    project = load_project(state.settings.projects_dir, project_id)
+    relpath = (
+        project.synthesis_config.bgm_track.relpath
+        if normalized_type == "bgm"
+        else project.synthesis_config.ambience_track.relpath
+    )
+    asset_path = from_output_relpath(state.settings.output_dir, relpath)
+    if asset_path is None:
+        raise HTTPException(status_code=404, detail="Postprocess asset not found")
+    try:
+        resolved_asset_path = asset_path.resolve(strict=True)
+        resolved_output_dir = state.settings.output_dir.resolve()
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Postprocess asset not found")
+
+    if resolved_output_dir not in resolved_asset_path.parents:
+        raise HTTPException(status_code=404, detail="Postprocess asset not found")
+
+    media_type, _ = mimetypes.guess_type(resolved_asset_path.name)
+    return FileResponse(
+        resolved_asset_path,
+        media_type=media_type or "application/octet-stream",
+        filename=resolved_asset_path.name,
     )
 
 
