@@ -68,6 +68,9 @@ class ApiSmokeTest(unittest.TestCase):
         self.assertIn("pyannote_error", body)
         self.assertIn("pyannote_available", body)
         self.assertIn("music_enabled", body.get("config", {}))
+        self.assertIn("music_turbo_model_dir", body.get("config", {}))
+        self.assertIn("music_base_model_dir", body.get("config", {}))
+        self.assertIn("music_model_variant", body.get("config", {}))
 
     def test_music_model_validate_endpoint_shape(self) -> None:
         response = self.client.get("/api/v1/music/model/validate")
@@ -78,9 +81,16 @@ class ApiSmokeTest(unittest.TestCase):
         self.assertIn("exists", body)
         self.assertIn("missing", body)
         self.assertIn("message", body)
+        self.assertIn("is_turbo", body)
+        self.assertIn("supports_lego_complete", body)
+        self.assertIn("model_variant", body)
+        self.assertIn("music_turbo_model_dir", body)
+        self.assertIn("music_base_model_dir", body)
+        self.assertIn("supported_task_types", body)
         self.assertIn("music_enabled", body)
         self.assertIn("device_mode", body)
         self.assertIsInstance(body.get("missing"), list)
+        self.assertIsInstance(body.get("supported_task_types"), list)
 
     def test_music_asset_audio_and_attach_flow(self) -> None:
         project_id = ""
@@ -143,6 +153,168 @@ class ApiSmokeTest(unittest.TestCase):
                 self.client.delete(f"/api/v1/projects/{project_id}")
             if created_asset and created_asset.exists():
                 created_asset.unlink(missing_ok=True)
+
+    def test_music_asset_upload_endpoint(self) -> None:
+        uploaded_name = ""
+        try:
+            upload_resp = self.client.post(
+                "/api/v1/music/assets/upload",
+                files={"file": ("upload_demo.mp3", b"ID3demo", "audio/mpeg")},
+            )
+            self.assertEqual(upload_resp.status_code, 200)
+            body = upload_resp.json()
+            uploaded_name = str(body.get("name") or "")
+            self.assertTrue(uploaded_name.endswith(".mp3"))
+
+            list_resp = self.client.get("/api/v1/music/assets")
+            self.assertEqual(list_resp.status_code, 200)
+            items = list_resp.json().get("items", [])
+            self.assertTrue(any(item.get("name") == uploaded_name for item in items))
+        finally:
+            if uploaded_name:
+                self.client.delete(f"/api/v1/music/assets/{uploaded_name}")
+
+    def test_music_asset_rename_endpoint(self) -> None:
+        source_name = ""
+        renamed_name = ""
+        try:
+            upload_resp = self.client.post(
+                "/api/v1/music/assets/upload",
+                files={"file": ("rename_demo.wav", b"RIFFrename", "audio/wav")},
+            )
+            self.assertEqual(upload_resp.status_code, 200)
+            source_name = str(upload_resp.json().get("name") or "")
+            self.assertTrue(source_name.endswith(".wav"))
+
+            rename_resp = self.client.post(
+                f"/api/v1/music/assets/{source_name}/rename",
+                json={"new_name": "renamed_asset.wav"},
+            )
+            self.assertEqual(rename_resp.status_code, 200)
+            body = rename_resp.json()
+            self.assertEqual(body.get("status"), "renamed")
+            self.assertEqual(body.get("old_name"), source_name)
+            renamed_name = str(body.get("name") or "")
+            self.assertEqual(renamed_name, "renamed_asset.wav")
+
+            list_resp = self.client.get("/api/v1/music/assets")
+            self.assertEqual(list_resp.status_code, 200)
+            items = list_resp.json().get("items", [])
+            self.assertTrue(any(item.get("name") == renamed_name for item in items))
+            self.assertFalse(any(item.get("name") == source_name for item in items))
+        finally:
+            if source_name:
+                self.client.delete(f"/api/v1/music/assets/{source_name}")
+            if renamed_name:
+                self.client.delete(f"/api/v1/music/assets/{renamed_name}")
+
+    def test_music_generate_cover_requires_source_asset(self) -> None:
+        state = self.app_state
+        original_music_enabled = state.orchestrator.config.music_enabled
+        try:
+            state.orchestrator.config.music_enabled = True
+            response = self.client.post(
+                "/api/v1/music/generate",
+                json={
+                    "task_type": "cover",
+                    "prompt": "cover style track",
+                    "audio_duration": 10,
+                    "vocal_language": "unknown",
+                    "num_inference_steps": 8,
+                },
+            )
+            self.assertEqual(response.status_code, 400)
+        finally:
+            state.orchestrator.config.music_enabled = original_music_enabled
+
+    def test_music_generate_base_only_tasks_rejected_on_turbo_model(self) -> None:
+        from backend.engine.music_engine import MusicEngine
+
+        state = self.app_state
+        original_music_enabled = state.orchestrator.config.music_enabled
+        original_validator = MusicEngine.validate_model_dir
+        source_name = f"turbo_mode_src_{uuid.uuid4().hex[:8]}.wav"
+        source_path = state.settings.output_dir / "music" / source_name
+        try:
+            state.orchestrator.config.music_enabled = True
+            source_path.parent.mkdir(parents=True, exist_ok=True)
+            source_path.write_bytes(b"RIFFturbo")
+
+            def fake_validate_model_dir(_model_dir: str) -> dict:
+                return {
+                    "valid": True,
+                    "model_dir": "D:/fake/turbo",
+                    "exists": True,
+                    "missing": [],
+                    "message": "",
+                    "is_turbo": True,
+                    "supports_lego_complete": False,
+                }
+
+            MusicEngine.validate_model_dir = staticmethod(fake_validate_model_dir)
+
+            for task_type in ("lego", "extract", "complete"):
+                with self.subTest(task_type=task_type):
+                    payload = {
+                        "task_type": task_type,
+                        "prompt": f"{task_type} test",
+                        "audio_duration": 10,
+                        "vocal_language": "unknown",
+                        "num_inference_steps": 8,
+                        "source_asset_name": source_name,
+                    }
+                    if task_type in {"lego", "extract"}:
+                        payload["track_name"] = "drums"
+                    response = self.client.post("/api/v1/music/generate", json=payload)
+                    self.assertEqual(response.status_code, 400)
+        finally:
+            state.orchestrator.config.music_enabled = original_music_enabled
+            MusicEngine.validate_model_dir = original_validator
+            source_path.unlink(missing_ok=True)
+
+    def test_music_model_validate_supported_task_types_for_turbo(self) -> None:
+        from backend.engine.music_engine import MusicEngine
+
+        original_validator = MusicEngine.validate_model_dir
+        try:
+            def fake_validate_model_dir(_model_dir: str) -> dict:
+                return {
+                    "valid": True,
+                    "model_dir": "D:/fake/turbo",
+                    "exists": True,
+                    "missing": [],
+                    "message": "",
+                    "is_turbo": True,
+                    "supports_lego_complete": False,
+                }
+
+            MusicEngine.validate_model_dir = staticmethod(fake_validate_model_dir)
+            response = self.client.get("/api/v1/music/model/validate")
+            self.assertEqual(response.status_code, 200)
+            body = response.json()
+            supported = body.get("supported_task_types", [])
+            self.assertIn("text2music", supported)
+            self.assertIn("cover", supported)
+            self.assertIn("repaint", supported)
+            self.assertNotIn("extract", supported)
+            self.assertNotIn("lego", supported)
+            self.assertNotIn("complete", supported)
+        finally:
+            MusicEngine.validate_model_dir = original_validator
+
+    def test_music_model_select_updates_variant(self) -> None:
+        state = self.app_state
+        original_variant = state.orchestrator.config.music_model_variant
+        try:
+            response = self.client.post("/api/v1/music/model/select", json={"model_variant": "base"})
+            self.assertEqual(response.status_code, 200)
+            body = response.json()
+            self.assertEqual(body.get("status"), "ok")
+            self.assertEqual(body.get("model_variant"), "base")
+            self.assertIn("supported_task_types", body)
+            self.assertEqual(state.orchestrator.config.music_model_variant, "base")
+        finally:
+            state.orchestrator.config.music_model_variant = original_variant
 
     def test_tts_postprocess_asset_preview_endpoint(self) -> None:
         project_id = ""
@@ -544,6 +716,288 @@ class ApiSmokeTest(unittest.TestCase):
             state.orchestrator.config.music_model_dir = original_music_model_dir
             state.orchestrator.ensure_music_ready = original_ensure_music_ready
             state.music_engine.generate_to_file = original_generate_to_file
+
+    def test_music_generate_task_type_parameter_mapping(self) -> None:
+        state = self.app_state
+        original_music_enabled = state.orchestrator.config.music_enabled
+        original_music_model_dir = state.orchestrator.config.music_model_dir
+        original_music_model_variant = state.orchestrator.config.music_model_variant
+        original_ensure_music_ready = state.orchestrator.ensure_music_ready
+        original_generate_to_file = state.music_engine.generate_to_file
+
+        state.music_tasks.clear()
+        state.music_task_handles.clear()
+
+        source_name = f"mode_src_{uuid.uuid4().hex[:8]}.wav"
+        reference_name = f"mode_ref_{uuid.uuid4().hex[:8]}.wav"
+        source_path = state.settings.output_dir / "music" / source_name
+        reference_path = state.settings.output_dir / "music" / reference_name
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_bytes(b"RIFFsrc")
+        reference_path.write_bytes(b"RIFFref")
+
+        captured_kwargs: list[dict] = []
+        try:
+            state.orchestrator.config.music_enabled = True
+            state.orchestrator.config.music_model_dir = str(state.settings.output_dir)
+            state.orchestrator.config.music_model_variant = "base"
+
+            async def fake_ensure_music_ready():
+                return None
+
+            async def fake_generate_to_file(**kwargs):
+                captured_kwargs.append(dict(kwargs))
+                return {
+                    "sample_rate": 48000,
+                    "channels": 2,
+                    "frames": 48000,
+                    "duration_seconds": 1.0,
+                    "seed": int(kwargs.get("seed") or 0),
+                    "output_path": str(kwargs["output_path"]),
+                }
+
+            state.orchestrator.ensure_music_ready = fake_ensure_music_ready
+            state.music_engine.generate_to_file = fake_generate_to_file
+
+            mode_cases = [
+                {
+                    "task_type": "text2music",
+                    "payload": {"prompt": "text2music prompt"},
+                    "assertions": lambda kw: (
+                        self.assertEqual(kw.get("task_type"), "text2music"),
+                        self.assertIsNone(kw.get("source_audio_path")),
+                        self.assertIsNone(kw.get("reference_audio_path")),
+                    ),
+                },
+                {
+                    "task_type": "cover",
+                    "payload": {
+                        "prompt": "cover prompt",
+                        "source_asset_name": source_name,
+                        "reference_asset_name": reference_name,
+                        "audio_cover_strength": 0.4,
+                    },
+                    "assertions": lambda kw: (
+                        self.assertEqual(kw.get("task_type"), "cover"),
+                        self.assertEqual(Path(str(kw.get("source_audio_path"))).name, source_name),
+                        self.assertEqual(Path(str(kw.get("reference_audio_path"))).name, reference_name),
+                        self.assertAlmostEqual(float(kw.get("audio_cover_strength")), 0.4, places=4),
+                    ),
+                },
+                {
+                    "task_type": "repaint",
+                    "payload": {
+                        "prompt": "repaint prompt",
+                        "source_asset_name": source_name,
+                        "repainting_start": 2.0,
+                        "repainting_end": 8.5,
+                    },
+                    "assertions": lambda kw: (
+                        self.assertEqual(kw.get("task_type"), "repaint"),
+                        self.assertEqual(Path(str(kw.get("source_audio_path"))).name, source_name),
+                        self.assertAlmostEqual(float(kw.get("repainting_start")), 2.0, places=4),
+                        self.assertAlmostEqual(float(kw.get("repainting_end")), 8.5, places=4),
+                    ),
+                },
+                {
+                    "task_type": "lego",
+                    "payload": {
+                        "prompt": "lego prompt",
+                        "source_asset_name": source_name,
+                        "track_name": "drums",
+                        "repainting_start": 1.5,
+                        "repainting_end": 6.0,
+                    },
+                    "assertions": lambda kw: (
+                        self.assertEqual(kw.get("task_type"), "lego"),
+                        self.assertEqual(Path(str(kw.get("source_audio_path"))).name, source_name),
+                        self.assertEqual(kw.get("track_name"), "drums"),
+                        self.assertAlmostEqual(float(kw.get("repainting_start")), 1.5, places=4),
+                        self.assertAlmostEqual(float(kw.get("repainting_end")), 6.0, places=4),
+                    ),
+                },
+                {
+                    "task_type": "extract",
+                    "payload": {
+                        "prompt": "extract prompt",
+                        "source_asset_name": source_name,
+                        "track_name": "vocals",
+                    },
+                    "assertions": lambda kw: (
+                        self.assertEqual(kw.get("task_type"), "extract"),
+                        self.assertEqual(Path(str(kw.get("source_audio_path"))).name, source_name),
+                        self.assertEqual(kw.get("track_name"), "vocals"),
+                    ),
+                },
+                {
+                    "task_type": "complete",
+                    "payload": {
+                        "prompt": "complete prompt",
+                        "source_asset_name": source_name,
+                        "complete_track_classes": ["vocals", "drums"],
+                    },
+                    "assertions": lambda kw: (
+                        self.assertEqual(kw.get("task_type"), "complete"),
+                        self.assertEqual(Path(str(kw.get("source_audio_path"))).name, source_name),
+                        self.assertEqual(kw.get("complete_track_classes"), ["vocals", "drums"]),
+                    ),
+                },
+            ]
+
+            for case in mode_cases:
+                with self.subTest(task_type=case["task_type"]):
+                    request_payload = {
+                        "task_type": case["task_type"],
+                        "audio_duration": 12,
+                        "vocal_language": "unknown",
+                        "num_inference_steps": 50,
+                        "seed": 123,
+                        "guidance_scale": 6.5,
+                        "shift": 2.8,
+                        **case["payload"],
+                    }
+                    before = len(captured_kwargs)
+                    create_resp = self.client.post("/api/v1/music/generate", json=request_payload)
+                    self.assertEqual(create_resp.status_code, 200)
+                    task_id = create_resp.json()["task_id"]
+
+                    done = False
+                    for _ in range(50):
+                        status_resp = self.client.get(f"/api/v1/music/tasks/{task_id}")
+                        self.assertEqual(status_resp.status_code, 200)
+                        status_payload = status_resp.json()
+                        if status_payload.get("status") == "done":
+                            done = True
+                            break
+                        time.sleep(0.03)
+                    self.assertTrue(done)
+
+                    self.assertGreater(len(captured_kwargs), before)
+                    kwargs = captured_kwargs[-1]
+                    self.assertEqual(kwargs.get("seed"), 123)
+                    self.assertAlmostEqual(float(kwargs.get("guidance_scale")), 6.5, places=4)
+                    self.assertAlmostEqual(float(kwargs.get("shift")), 2.8, places=4)
+                    case["assertions"](kwargs)
+        finally:
+            state.orchestrator.config.music_enabled = original_music_enabled
+            state.orchestrator.config.music_model_dir = original_music_model_dir
+            state.orchestrator.config.music_model_variant = original_music_model_variant
+            state.orchestrator.ensure_music_ready = original_ensure_music_ready
+            state.music_engine.generate_to_file = original_generate_to_file
+            source_path.unlink(missing_ok=True)
+            reference_path.unlink(missing_ok=True)
+
+    def test_music_generate_base_requires_32_to_100_inference_steps(self) -> None:
+        state = self.app_state
+        original_music_enabled = state.orchestrator.config.music_enabled
+        original_music_model_variant = state.orchestrator.config.music_model_variant
+        try:
+            state.orchestrator.config.music_enabled = True
+            state.orchestrator.config.music_model_variant = "base"
+            response = self.client.post(
+                "/api/v1/music/generate",
+                json={
+                    "task_type": "text2music",
+                    "prompt": "base step check",
+                    "audio_duration": 10,
+                    "vocal_language": "unknown",
+                    "num_inference_steps": 8,
+                },
+            )
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("32 - 100", str(response.json().get("message") or response.json().get("detail") or ""))
+        finally:
+            state.orchestrator.config.music_enabled = original_music_enabled
+            state.orchestrator.config.music_model_variant = original_music_model_variant
+
+    def test_music_generate_turbo_forces_zero_guidance_scale(self) -> None:
+        state = self.app_state
+        original_music_enabled = state.orchestrator.config.music_enabled
+        original_music_model_dir = state.orchestrator.config.music_model_dir
+        original_music_model_variant = state.orchestrator.config.music_model_variant
+        original_ensure_music_ready = state.orchestrator.ensure_music_ready
+        original_generate_to_file = state.music_engine.generate_to_file
+        captured_kwargs: list[dict] = []
+
+        try:
+            state.orchestrator.config.music_enabled = True
+            state.orchestrator.config.music_model_dir = str(state.settings.output_dir)
+            state.orchestrator.config.music_model_variant = "turbo"
+
+            async def fake_ensure_music_ready():
+                return None
+
+            async def fake_generate_to_file(**kwargs):
+                captured_kwargs.append(dict(kwargs))
+                return {
+                    "sample_rate": 48000,
+                    "channels": 2,
+                    "frames": 48000,
+                    "duration_seconds": 1.0,
+                    "seed": int(kwargs.get("seed") or 0),
+                    "output_path": str(kwargs["output_path"]),
+                }
+
+            state.orchestrator.ensure_music_ready = fake_ensure_music_ready
+            state.music_engine.generate_to_file = fake_generate_to_file
+
+            create_resp = self.client.post(
+                "/api/v1/music/generate",
+                json={
+                    "task_type": "text2music",
+                    "prompt": "turbo cfg check",
+                    "audio_duration": 10,
+                    "vocal_language": "unknown",
+                    "num_inference_steps": 8,
+                    "guidance_scale": 9.5,
+                },
+            )
+            self.assertEqual(create_resp.status_code, 200)
+            task_id = create_resp.json()["task_id"]
+
+            done = False
+            for _ in range(50):
+                status_resp = self.client.get(f"/api/v1/music/tasks/{task_id}")
+                self.assertEqual(status_resp.status_code, 200)
+                if status_resp.json().get("status") == "done":
+                    done = True
+                    break
+                time.sleep(0.03)
+            self.assertTrue(done)
+            self.assertGreater(len(captured_kwargs), 0)
+            self.assertAlmostEqual(float(captured_kwargs[-1].get("guidance_scale")), 0.0, places=6)
+        finally:
+            state.orchestrator.config.music_enabled = original_music_enabled
+            state.orchestrator.config.music_model_dir = original_music_model_dir
+            state.orchestrator.config.music_model_variant = original_music_model_variant
+            state.orchestrator.ensure_music_ready = original_ensure_music_ready
+            state.music_engine.generate_to_file = original_generate_to_file
+
+    def test_music_generate_turbo_rejects_unsupported_shift(self) -> None:
+        state = self.app_state
+        original_music_enabled = state.orchestrator.config.music_enabled
+        original_music_model_variant = state.orchestrator.config.music_model_variant
+        try:
+            state.orchestrator.config.music_enabled = True
+            state.orchestrator.config.music_model_variant = "turbo"
+            for shift in (2.8, 4.0):
+                with self.subTest(shift=shift):
+                    response = self.client.post(
+                        "/api/v1/music/generate",
+                        json={
+                            "task_type": "text2music",
+                            "prompt": "turbo shift check",
+                            "audio_duration": 10,
+                            "vocal_language": "unknown",
+                            "num_inference_steps": 8,
+                            "shift": shift,
+                        },
+                    )
+                    self.assertEqual(response.status_code, 400)
+                    self.assertIn("shift", str(response.json().get("message") or response.json().get("detail") or ""))
+        finally:
+            state.orchestrator.config.music_enabled = original_music_enabled
+            state.orchestrator.config.music_model_variant = original_music_model_variant
 
     def test_unload_asr_endpoint_clears_asr_runtime_state(self) -> None:
         asr = self.app_state.asr_engine

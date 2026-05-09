@@ -29,7 +29,7 @@ const NAV_ITEMS = [
 
 export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCollapse, completedPages = [] }) {
   const projectSaveAction = useUiStore((state) => state.projectSaveAction);
-  const canShowProjectSave = ["speech", "text", "script", "voice", "music"].includes(activePage);
+  const canShowProjectSave = ["speech", "text", "script", "voice", "music", "synth"].includes(activePage);
   const canSaveProject = typeof projectSaveAction === "function";
 
   return (

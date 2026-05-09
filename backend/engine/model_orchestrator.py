@@ -62,6 +62,9 @@ class OrchestratorConfig:
     voxcpm_tts_model_path: str = settings.default_voxcpm_tts_model_path
     tts_device: str = settings.default_tts_device
     music_enabled: bool = settings.default_music_enabled
+    music_turbo_model_dir: str = settings.default_music_turbo_model_dir
+    music_base_model_dir: str = settings.default_music_base_model_dir
+    music_model_variant: str = settings.default_music_model_variant
     music_model_dir: str = settings.default_music_model_dir
     music_device_mode: str = settings.default_music_device_mode
     asr_model_path: str = settings.default_asr_model_path
@@ -101,8 +104,37 @@ class ModelOrchestrator:
     def config(self) -> OrchestratorConfig:
         return self._config
 
+    @staticmethod
+    def _normalize_music_config(config: OrchestratorConfig) -> OrchestratorConfig:
+        variant = str(getattr(config, "music_model_variant", "turbo") or "turbo").strip().lower()
+        if variant not in {"turbo", "base"}:
+            variant = "turbo"
+        config.music_model_variant = variant
+
+        legacy_dir = str(getattr(config, "music_model_dir", "") or "").strip()
+        turbo_dir = str(getattr(config, "music_turbo_model_dir", "") or "").strip()
+        base_dir = str(getattr(config, "music_base_model_dir", "") or "").strip()
+        if not turbo_dir and legacy_dir:
+            turbo_dir = legacy_dir
+        if not base_dir and legacy_dir:
+            base_dir = legacy_dir
+        config.music_turbo_model_dir = turbo_dir
+        config.music_base_model_dir = base_dir
+
+        if variant == "base":
+            active_dir = base_dir or turbo_dir or legacy_dir
+        else:
+            active_dir = turbo_dir or base_dir or legacy_dir
+        config.music_model_dir = active_dir
+        return config
+
+    @classmethod
+    def get_active_music_model_dir(cls, config: OrchestratorConfig) -> str:
+        normalized = cls._normalize_music_config(config)
+        return str(normalized.music_model_dir or "")
+
     def set_config(self, config: OrchestratorConfig) -> None:
-        self._config = config
+        self._config = self._normalize_music_config(config)
         if hasattr(self._llm, "enable_llama_cpp_think_mode"):
             self._llm.enable_llama_cpp_think_mode = config.enable_llama_cpp_think_mode
 
@@ -118,7 +150,7 @@ class ModelOrchestrator:
         await self._emit({"type": "model_state_changed", "engine": engine, "state": state.value, "vram": self.get_gpu_info()})
 
     async def update_config(self, payload: OrchestratorConfig) -> dict:
-        self._config = payload
+        self._config = self._normalize_music_config(payload)
         if hasattr(self._llm, "enable_llama_cpp_think_mode"):
             self._llm.enable_llama_cpp_think_mode = payload.enable_llama_cpp_think_mode
         return asdict(self._config)
@@ -217,6 +249,8 @@ class ModelOrchestrator:
             raise RuntimeError("Music engine is not configured")
         if not self._config.music_enabled:
             raise RuntimeError("音乐生成功能未启用（music_enabled=false）")
+        self._config = self._normalize_music_config(self._config)
+        active_model_dir = self.get_active_music_model_dir(self._config)
         async with self._lock:
             if self._llm.is_loaded and self._config.auto_serial:
                 await self._set_state(ModelState.UNLOADING_LLM, "llm")
@@ -229,7 +263,7 @@ class ModelOrchestrator:
             if getattr(self._music, "is_loaded", False) and hasattr(self._music, "needs_reload"):
                 need_reload = bool(
                     self._music.needs_reload(
-                        model_dir=self._config.music_model_dir,
+                        model_dir=active_model_dir,
                         device_mode=self._config.music_device_mode,
                     )
                 )
@@ -239,7 +273,7 @@ class ModelOrchestrator:
             if not getattr(self._music, "is_loaded", False):
                 await self._set_state(ModelState.LOADING_MUSIC, "music")
                 await self._music.load_model(
-                    self._config.music_model_dir,
+                    active_model_dir,
                     self._config.music_device_mode,
                 )
             await self._set_state(ModelState.MUSIC_READY, "music")
@@ -268,6 +302,7 @@ class ModelOrchestrator:
             await self._set_state(ModelState.IDLE, "music")
 
     async def get_status(self) -> dict:
+        self._config = self._normalize_music_config(self._config)
         llm_loaded = bool(self._llm.is_loaded)
         tts_loaded = bool(self._tts.is_loaded)
         music_loaded = bool(getattr(self._music, "is_loaded", False)) if self._music is not None else False

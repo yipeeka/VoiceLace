@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import json
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,10 @@ class MusicEngine:
             "vae",
             "scheduler",
         ]
+        report_base = {
+            "is_turbo": False,
+            "supports_lego_complete": True,
+        }
         if not str(model_dir or "").strip():
             return {
                 "valid": False,
@@ -45,6 +50,7 @@ class MusicEngine:
                 "exists": False,
                 "missing": required_entries,
                 "message": "音乐模型目录未配置",
+                **report_base,
             }
         if not resolved_model_dir.exists() or not resolved_model_dir.is_dir():
             return {
@@ -53,18 +59,31 @@ class MusicEngine:
                 "exists": False,
                 "missing": required_entries,
                 "message": f"音乐模型目录不存在: {resolved_model_dir}",
+                **report_base,
             }
 
         missing: list[str] = []
         for entry in required_entries:
             if not (resolved_model_dir / entry).exists():
                 missing.append(entry)
+        transformer_config_path = resolved_model_dir / "transformer" / "config.json"
+        is_turbo = False
+        try:
+            if transformer_config_path.exists():
+                transformer_cfg = json.loads(transformer_config_path.read_text(encoding="utf-8"))
+                is_turbo = bool(transformer_cfg.get("is_turbo")) or str(transformer_cfg.get("model_version", "")).strip().lower() == "turbo"
+        except Exception:
+            is_turbo = "turbo" in str(resolved_model_dir).lower()
+        supports_lego_complete = not is_turbo
+
         return {
             "valid": len(missing) == 0,
             "model_dir": str(resolved_model_dir),
             "exists": True,
             "missing": missing,
             "message": "" if len(missing) == 0 else f"模型目录缺少必要文件/目录: {', '.join(missing)}",
+            "is_turbo": is_turbo,
+            "supports_lego_complete": supports_lego_complete,
         }
 
     async def load_model(self, model_dir: str, device_mode: str = "cpu_offload") -> None:
@@ -140,6 +159,7 @@ class MusicEngine:
     async def generate_to_file(
         self,
         *,
+        task_type: str = "text2music",
         prompt: str,
         output_path: Path,
         lyrics: str = "",
@@ -147,12 +167,22 @@ class MusicEngine:
         vocal_language: str = "en",
         num_inference_steps: int = 8,
         seed: int | None = None,
+        source_audio_path: Path | None = None,
+        reference_audio_path: Path | None = None,
         bpm: int | None = None,
         keyscale: str | None = None,
         timesignature: str | None = None,
+        track_name: str | None = None,
+        complete_track_classes: list[str] | None = None,
+        repainting_start: float | None = None,
+        repainting_end: float | None = None,
+        audio_cover_strength: float = 1.0,
+        guidance_scale: float = 7.0,
+        shift: float = 3.0,
     ) -> dict[str, Any]:
         return await asyncio.to_thread(
             self._generate_to_file_sync,
+            task_type,
             prompt,
             output_path,
             lyrics,
@@ -160,13 +190,31 @@ class MusicEngine:
             vocal_language,
             num_inference_steps,
             seed,
+            source_audio_path,
+            reference_audio_path,
             bpm,
             keyscale,
             timesignature,
+            track_name,
+            complete_track_classes,
+            repainting_start,
+            repainting_end,
+            audio_cover_strength,
+            guidance_scale,
+            shift,
         )
+
+    def _load_audio_tensor(self, path: Path, torch_module):
+        import librosa
+
+        audio_np, _ = librosa.load(str(path), sr=self.sample_rate, mono=False)
+        if getattr(audio_np, "ndim", 0) == 1:
+            audio_np = audio_np[None, :]
+        return torch_module.from_numpy(audio_np).to(dtype=torch_module.float32)
 
     def _generate_to_file_sync(
         self,
+        task_type: str,
         prompt: str,
         output_path: Path,
         lyrics: str,
@@ -174,9 +222,18 @@ class MusicEngine:
         vocal_language: str,
         num_inference_steps: int,
         seed: int | None,
+        source_audio_path: Path | None,
+        reference_audio_path: Path | None,
         bpm: int | None,
         keyscale: str | None,
         timesignature: str | None,
+        track_name: str | None,
+        complete_track_classes: list[str] | None,
+        repainting_start: float | None,
+        repainting_end: float | None,
+        audio_cover_strength: float,
+        guidance_scale: float,
+        shift: float,
     ) -> dict[str, Any]:
         if self._pipeline is None or not self.is_loaded:
             raise RuntimeError("音乐模型未加载")
@@ -196,11 +253,15 @@ class MusicEngine:
 
         kwargs: dict[str, Any] = {
             "prompt": prompt,
+            "task_type": (task_type or "text2music").strip().lower(),
             "lyrics": lyrics or "",
             "audio_duration": float(audio_duration),
             "vocal_language": vocal_language or "en",
             "num_inference_steps": int(num_inference_steps),
             "generator": generator,
+            "guidance_scale": float(guidance_scale),
+            "shift": float(shift),
+            "audio_cover_strength": float(audio_cover_strength),
             "output_type": "pt",
         }
         if bpm is not None:
@@ -209,6 +270,18 @@ class MusicEngine:
             kwargs["keyscale"] = keyscale
         if timesignature:
             kwargs["timesignature"] = timesignature
+        if track_name:
+            kwargs["track_name"] = track_name
+        if complete_track_classes:
+            kwargs["complete_track_classes"] = [str(item).strip() for item in complete_track_classes if str(item).strip()]
+        if repainting_start is not None:
+            kwargs["repainting_start"] = float(repainting_start)
+        if repainting_end is not None:
+            kwargs["repainting_end"] = float(repainting_end)
+        if source_audio_path is not None:
+            kwargs["src_audio"] = self._load_audio_tensor(source_audio_path, torch_module)
+        if reference_audio_path is not None:
+            kwargs["reference_audio"] = self._load_audio_tensor(reference_audio_path, torch_module)
 
         try:
             result = self._pipeline(**kwargs)
@@ -223,6 +296,7 @@ class MusicEngine:
                 "frames": int(audio_np.shape[0]) if audio_np.ndim >= 1 else 0,
                 "duration_seconds": float(audio_np.shape[0] / self.sample_rate) if audio_np.ndim >= 1 else 0.0,
                 "seed": int(resolved_seed),
+                "task_type": kwargs["task_type"],
                 "output_path": str(output_path),
             }
         except Exception as exc:

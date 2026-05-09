@@ -1,4 +1,4 @@
-import { Bot, ChevronDown, ChevronUp, Download, LoaderCircle, Music, Pause, Play, RefreshCw, Save, SendHorizontal, Sparkles, Trash2 } from "lucide-react";
+import { Bot, ChevronDown, ChevronUp, Download, LoaderCircle, Music, Pause, Pencil, Play, RefreshCw, Save, SendHorizontal, Sparkles, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import AudioPlayer from "../components/shared/AudioPlayer";
@@ -15,15 +15,25 @@ import { buildProjectFilePayload, saveProjectFile } from "../utils/projectFile";
 import { getErrorMessage } from "../utils/errors";
 
 const DEFAULT_FORM = {
+  task_type: "text2music",
   prompt: "",
   lyrics: "",
   audio_duration: 30,
   vocal_language: "unknown",
-  num_inference_steps: 8,
+  num_inference_steps: 50,
   seed: "",
+  source_asset_name: "",
+  reference_asset_name: "",
   bpm: "",
   keyscale: "",
   timesignature: "",
+  track_name: "",
+  complete_track_classes: "",
+  repainting_start: "",
+  repainting_end: "",
+  audio_cover_strength: "1.0",
+  guidance_scale: "7.0",
+  shift: "3.0",
 };
 
 const ACTIVE_STATUSES = new Set(["queued", "running", "cancel_requested"]);
@@ -45,6 +55,14 @@ const LANGUAGE_OPTIONS = [
   { value: "ja", label: "日文 (ja)" },
   { value: "ko", label: "韩文 (ko)" },
 ];
+
+const TURBO_SHIFT_OPTIONS = [
+  { value: "1.0", label: "1.0 - 细节更多" },
+  { value: "2.0", label: "2.0 - 平衡" },
+  { value: "3.0", label: "3.0 - 结构更清晰" },
+];
+const BASE_MIN_INFERENCE_STEPS = 32;
+const BASE_MAX_INFERENCE_STEPS = 100;
 
 const BPM_OPTIONS = [
   { value: "", label: "不指定" },
@@ -103,6 +121,31 @@ const ASSIST_SOURCE_OPTIONS = [
   { value: "primary_local", label: "主模型（本地）" },
   { value: "openai", label: "OpenAI API" },
   { value: "gemini", label: "Gemini API" },
+];
+
+const TASK_TYPE_OPTIONS = [
+  { value: "text2music", label: "Text2Music" },
+  { value: "cover", label: "Cover" },
+  { value: "repaint", label: "Repaint" },
+  { value: "lego", label: "Lego" },
+  { value: "extract", label: "Extract" },
+  { value: "complete", label: "Complete" },
+];
+
+const MUSIC_MODEL_VARIANT_OPTIONS = [
+  { value: "turbo", label: "Turbo" },
+  { value: "base", label: "Base" },
+];
+
+const TRACK_NAME_OPTIONS = [
+  { value: "", label: "选择轨道" },
+  { value: "vocals", label: "vocals" },
+  { value: "drums", label: "drums" },
+  { value: "bass", label: "bass" },
+  { value: "guitar", label: "guitar" },
+  { value: "piano", label: "piano" },
+  { value: "strings", label: "strings" },
+  { value: "other", label: "other" },
 ];
 
 function toNumberOrNull(value) {
@@ -189,6 +232,7 @@ export default function MusicPage({ onNavigate }) {
   const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
   const [attachingKey, setAttachingKey] = useState("");
   const [isProjectSaving, setIsProjectSaving] = useState(false);
+  const [isUploadingMusicAsset, setIsUploadingMusicAsset] = useState(false);
   const [assistSource, setAssistSource] = useState("secondary_local");
   const [assistStatus, setAssistStatus] = useState(null);
   const [assistInput, setAssistInput] = useState("");
@@ -200,12 +244,36 @@ export default function MusicPage({ onNavigate }) {
   const [isAssistChatting, setIsAssistChatting] = useState(false);
   const [isAssistFinalizing, setIsAssistFinalizing] = useState(false);
   const [deletingAssetName, setDeletingAssetName] = useState("");
+  const [renamingAssetName, setRenamingAssetName] = useState("");
+  const [renameAssetValue, setRenameAssetValue] = useState("");
+  const [renamingBusyAssetName, setRenamingBusyAssetName] = useState("");
   const statusCardRef = useRef(null);
+  const uploadInputRef = useRef(null);
+  const autoRefreshedTaskIdRef = useRef("");
 
   const statusMeta = STATUS_META[taskStatus] || STATUS_META.idle;
   const musicEnabled = systemStatus?.config?.music_enabled !== false;
   const isMusicTaskActive = ACTIVE_STATUSES.has(taskStatus);
   const isAssistBusy = isAssistLoading || isAssistUnloading || isAssistChatting || isAssistFinalizing;
+  const taskType = (form.task_type || "text2music").toLowerCase();
+  const needsSourceAsset = ["cover", "repaint", "lego", "extract", "complete"].includes(taskType);
+  const needsTrackName = ["extract", "lego"].includes(taskType);
+  const needsRepaintRange = ["repaint", "lego"].includes(taskType);
+  const needsReferenceAsset = taskType === "cover";
+  const hideTextMusicInputs = taskType === "extract";
+  const selectedModelVariant = String(validation?.model_variant || systemStatus?.config?.music_model_variant || "turbo").toLowerCase();
+  const isTurboModel = selectedModelVariant === "turbo";
+  const supportedTaskTypes = useMemo(
+    () => (Array.isArray(validation?.supported_task_types) ? validation.supported_task_types : null),
+    [validation],
+  );
+  const taskTypeOptions = useMemo(
+    () => TASK_TYPE_OPTIONS.filter((item) => !supportedTaskTypes || supportedTaskTypes.includes(item.value)),
+    [supportedTaskTypes],
+  );
+  const selectedTaskSupported = !supportedTaskTypes || supportedTaskTypes.includes(taskType);
+  const shiftMin = 1.0;
+  const shiftMax = isTurboModel ? 3.0 : 5.0;
   const wsUrl = taskId && ACTIVE_STATUSES.has(taskStatus)
     ? `${getWsBaseUrl()}/ws/music-progress/${taskId}`
     : "";
@@ -219,6 +287,11 @@ export default function MusicPage({ onNavigate }) {
     }
     return map;
   }, [assets]);
+
+  const assetOptions = useMemo(
+    () => [{ value: "", label: "请选择" }, ...assets.map((item) => ({ value: item.name, label: item.name }))],
+    [assets],
+  );
 
   const previewAudioUrl = previewAssetName
     ? `${API_ORIGIN}/api/v1/music/assets/${encodeURIComponent(previewAssetName)}/audio?v=${encodeURIComponent(assetByName[previewAssetName]?.updated_at || "")}`
@@ -254,6 +327,7 @@ export default function MusicPage({ onNavigate }) {
     try {
       const report = await api.get("/music/model/validate");
       setValidation(report || null);
+      return report || null;
     } catch (error) {
       setValidation({
         valid: false,
@@ -261,6 +335,26 @@ export default function MusicPage({ onNavigate }) {
         missing: [],
         message: getErrorMessage(error, "模型目录校验失败"),
       });
+      return null;
+    } finally {
+      setIsValidating(false);
+    }
+  }
+
+  async function handleSelectModelVariant(value) {
+    const nextVariant = String(value || "turbo").toLowerCase();
+    if (!nextVariant || nextVariant === selectedModelVariant) {
+      return;
+    }
+    setIsValidating(true);
+    try {
+      await api.post("/music/model/select", { model_variant: nextVariant });
+      const report = await api.get("/music/model/validate");
+      setValidation(report || null);
+      await refreshSystemStatus();
+      pushToast({ title: `已切换到 ${nextVariant === "base" ? "Base" : "Turbo"} 模型`, tone: "success" });
+    } catch (error) {
+      pushToast({ title: `切换模型失败：${getErrorMessage(error)}`, tone: "error" });
     } finally {
       setIsValidating(false);
     }
@@ -282,6 +376,74 @@ export default function MusicPage({ onNavigate }) {
     }
   }
 
+  async function handleUploadMusicAsset(file) {
+    if (!file) {
+      return;
+    }
+    setIsUploadingMusicAsset(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const uploaded = await api.uploadForm("/music/assets/upload", formData);
+      await refreshAssets();
+      if (uploaded?.name) {
+        setPreviewAssetName(uploaded.name);
+        setForm((prev) => ({
+          ...prev,
+          source_asset_name: prev.source_asset_name || uploaded.name,
+          reference_asset_name: taskType === "cover" && !prev.reference_asset_name ? uploaded.name : prev.reference_asset_name,
+        }));
+      }
+      pushToast({ title: "音乐资产上传成功", tone: "success" });
+    } catch (error) {
+      pushToast({ title: `上传资产失败：${getErrorMessage(error)}`, tone: "error" });
+    } finally {
+      setIsUploadingMusicAsset(false);
+    }
+  }
+
+  function validateGenerateForm() {
+    if (!selectedTaskSupported) {
+      return "当前任务模式不受所选模型支持，请切换模型或任务模式";
+    }
+    if (taskType !== "extract" && !form.prompt.trim()) {
+      return "请输入音乐描述";
+    }
+    if (needsSourceAsset && !form.source_asset_name) {
+      return "当前模式需要选择源音频";
+    }
+    if (needsReferenceAsset && !form.reference_asset_name) {
+      return "当前模式需要选择参考音频";
+    }
+    if (needsTrackName && !form.track_name.trim()) {
+      return "当前模式需要填写轨道名称";
+    }
+    if (
+      selectedModelVariant === "base"
+      && (Number(form.num_inference_steps || 0) < BASE_MIN_INFERENCE_STEPS
+        || Number(form.num_inference_steps || 0) > BASE_MAX_INFERENCE_STEPS)
+    ) {
+      return "Base 模型推理步数需要 32 - 100";
+    }
+    {
+      const shiftValue = Number(form.shift || 0);
+      if (!Number.isFinite(shiftValue) || shiftValue < shiftMin || shiftValue > shiftMax) {
+        return isTurboModel ? "Turbo 模型建议 shift 在 1.0 - 3.0" : "Base 模型建议 shift 在 1.0 - 5.0";
+      }
+      if (isTurboModel && !["1.0", "2.0", "3.0"].includes(String(shiftValue.toFixed(1)))) {
+        return "Turbo 模型只支持 shift 1.0 / 2.0 / 3.0";
+      }
+    }
+    if (needsRepaintRange) {
+      const start = toNumberOrNull(form.repainting_start);
+      const end = toNumberOrNull(form.repainting_end);
+      if (start !== null && end !== null && end > 0 && start >= end) {
+        return "重绘起点必须小于终点";
+      }
+    }
+    return "";
+  }
+
   useEffect(() => {
     refreshSystemStatus();
     refreshAssistStatus();
@@ -290,11 +452,47 @@ export default function MusicPage({ onNavigate }) {
   }, []);
 
   useEffect(() => {
+    if (!supportedTaskTypes || supportedTaskTypes.length === 0) {
+      return;
+    }
+    if (supportedTaskTypes.includes(taskType)) {
+      return;
+    }
+    setForm((prev) => ({ ...prev, task_type: supportedTaskTypes[0] || "text2music" }));
+  }, [supportedTaskTypes, taskType]);
+
+  useEffect(() => {
+    if (selectedModelVariant !== "base") {
+      return;
+    }
+    const current = Number(form.num_inference_steps || 0);
+    if (current >= BASE_MIN_INFERENCE_STEPS && current <= BASE_MAX_INFERENCE_STEPS) {
+      return;
+    }
+    setForm((prev) => ({ ...prev, num_inference_steps: 50 }));
+  }, [selectedModelVariant, form.num_inference_steps]);
+
+  useEffect(() => {
     if (!currentResultAssetName) {
       return;
     }
     setPreviewAssetName(currentResultAssetName);
   }, [currentResultAssetName]);
+
+  useEffect(() => {
+    if (taskStatus !== "done" || !taskId) {
+      return;
+    }
+    if (autoRefreshedTaskIdRef.current === taskId) {
+      return;
+    }
+    autoRefreshedTaskIdRef.current = taskId;
+    void refreshAssets();
+    const timer = window.setTimeout(() => {
+      void refreshAssets();
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [taskStatus, taskId]);
 
   useEffect(() => {
     let timer = null;
@@ -546,8 +744,9 @@ export default function MusicPage({ onNavigate }) {
   }
 
   async function handleGenerate() {
-    if (!form.prompt.trim()) {
-      pushToast({ title: "请输入音乐描述", tone: "warning" });
+    const validationError = validateGenerateForm();
+    if (validationError) {
+      pushToast({ title: validationError, tone: "warning" });
       return;
     }
     setIsSubmitting(true);
@@ -558,17 +757,33 @@ export default function MusicPage({ onNavigate }) {
     setShowConflictHint(false);
     setTaskResult(null);
     try {
+      const resolvedPrompt = taskType === "extract"
+        ? (form.prompt.trim() || `extract ${form.track_name.trim() || "track"}`)
+        : form.prompt.trim();
       const payload = {
-        prompt: form.prompt.trim(),
+        task_type: taskType,
+        prompt: resolvedPrompt,
         project_id: currentProject?.id || null,
         lyrics: form.lyrics.trim(),
         audio_duration: Number(form.audio_duration),
         vocal_language: form.vocal_language.trim() || "unknown",
         num_inference_steps: Number(form.num_inference_steps),
         seed: toNumberOrNull(form.seed),
+        source_asset_name: form.source_asset_name || null,
+        reference_asset_name: form.reference_asset_name || null,
         bpm: toNumberOrNull(form.bpm),
         keyscale: form.keyscale.trim() || null,
         timesignature: form.timesignature.trim() || null,
+        track_name: form.track_name.trim() || null,
+        complete_track_classes: (form.complete_track_classes || "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+        repainting_start: toNumberOrNull(form.repainting_start),
+        repainting_end: toNumberOrNull(form.repainting_end),
+        audio_cover_strength: Number(form.audio_cover_strength || 1.0),
+        guidance_scale: isTurboModel ? 0.0 : Number(form.guidance_scale || 7.0),
+        shift: Number(form.shift || 3.0),
       };
       const created = await api.post("/music/generate", payload);
       setTaskId(created?.task_id || "");
@@ -662,6 +877,52 @@ export default function MusicPage({ onNavigate }) {
     }
   }
 
+  function handleStartRenameAsset(assetName) {
+    if (!assetName) {
+      return;
+    }
+    setRenamingAssetName(assetName);
+    setRenameAssetValue(assetName);
+  }
+
+  function handleCancelRenameAsset() {
+    setRenamingAssetName("");
+    setRenameAssetValue("");
+    setRenamingBusyAssetName("");
+  }
+
+  async function handleConfirmRenameAsset(assetName) {
+    if (!assetName) {
+      return;
+    }
+    const newName = String(renameAssetValue || "").trim();
+    if (!newName) {
+      pushToast({ title: "请输入新的文件名", tone: "warning" });
+      return;
+    }
+    setRenamingBusyAssetName(assetName);
+    try {
+      const result = await api.post(`/music/assets/${encodeURIComponent(assetName)}/rename`, {
+        new_name: newName,
+      });
+      const renamedName = String(result?.name || newName);
+      setForm((prev) => ({
+        ...prev,
+        source_asset_name: prev.source_asset_name === assetName ? renamedName : prev.source_asset_name,
+        reference_asset_name: prev.reference_asset_name === assetName ? renamedName : prev.reference_asset_name,
+      }));
+      if (previewAssetName === assetName) {
+        setPreviewAssetName(renamedName);
+      }
+      handleCancelRenameAsset();
+      await refreshAssets();
+      pushToast({ title: "音乐资产已重命名", tone: "success" });
+    } catch (error) {
+      pushToast({ title: `重命名失败：${getErrorMessage(error)}`, tone: "error" });
+      setRenamingBusyAssetName("");
+    }
+  }
+
   function playAssetPreview(assetName) {
     if (!assetName) return;
     setPreviewAssetName(assetName);
@@ -747,7 +1008,8 @@ export default function MusicPage({ onNavigate }) {
             使用已配置的 ACE-Step Diffusers 本地模型生成音乐，不自动下载模型。
           </p>
 
-          <div className="musicAssistPanel">
+          {hideTextMusicInputs ? null : (
+            <div className="musicAssistPanel">
             <div className="sectionHeader" style={{ marginBottom: 8 }}>
               <h3 className="cardTitle" style={{ fontSize: 14 }}>
                 <Bot size={16} /> AI 音乐助手（对话模式）
@@ -757,7 +1019,7 @@ export default function MusicPage({ onNavigate }) {
               </div>
             </div>
             <div className="editorGrid three" style={{ marginBottom: 8 }}>
-              <div className="formGroup" style={{ gridColumn: "span 2" }}>
+              <div className="formGroup">
                 <label className="formLabel">LLM 来源</label>
                 <Select value={assistSource} onValueChange={setAssistSource} options={ASSIST_SOURCE_OPTIONS} />
               </div>
@@ -827,122 +1089,364 @@ export default function MusicPage({ onNavigate }) {
             {assistStatus?.error ? (
               <div className="errorText">{assistStatus.error}</div>
             ) : null}
-          </div>
-
-          <div className="formGroup">
-            <label className="formLabel">音乐描述（必填）</label>
-            <textarea
-              className="textArea"
-              value={form.prompt}
-              onChange={(event) => setForm((prev) => ({ ...prev, prompt: event.target.value }))}
-              placeholder="例如：温暖钢琴与弦乐，电影感，60 秒，适合旁白背景"
-              style={{ minHeight: 108 }}
-            />
-          </div>
-
-          <div className="formGroup">
-            <label className="formLabel">歌词（可选，留空可自动）</label>
-            <textarea
-              className="textArea compactArea"
-              value={form.lyrics}
-              onChange={(event) => setForm((prev) => ({ ...prev, lyrics: event.target.value }))}
-              placeholder="纯音乐可填 [Instrumental]"
-            />
-          </div>
+            </div>
+          )}
 
           <div className="editorGrid three">
             <div className="formGroup">
-              <label className="formLabel">时长（秒）</label>
-              <input
-                className="textInput"
-                type="number"
-                min="1"
-                max="120"
-                step="1"
-                value={form.audio_duration}
-                onChange={(event) => setForm((prev) => ({ ...prev, audio_duration: event.target.value }))}
-              />
-            </div>
-            <div className="formGroup">
-              <label className="formLabel">推理步数</label>
-              <input
-                className="textInput"
-                type="number"
-                min="1"
-                max="100"
-                step="1"
-                value={form.num_inference_steps}
-                onChange={(event) => setForm((prev) => ({ ...prev, num_inference_steps: event.target.value }))}
-              />
-            </div>
-            <div className="formGroup">
-              <label className="formLabel">语言</label>
+              <label className="formLabel">Music 模型</label>
               <Select
-                value={form.vocal_language}
-                onValueChange={(value) => setForm((prev) => ({ ...prev, vocal_language: value }))}
-                options={LANGUAGE_OPTIONS}
+                value={selectedModelVariant}
+                onValueChange={handleSelectModelVariant}
+                options={MUSIC_MODEL_VARIANT_OPTIONS}
+                disabled={isValidating || isSubmitting || isMusicTaskActive}
+              />
+            </div>
+            <div className="formGroup">
+              <label className="formLabel">任务模式</label>
+              <Select
+                value={form.task_type}
+                onValueChange={(value) => setForm((prev) => ({ ...prev, task_type: value }))}
+                options={taskTypeOptions}
+              />
+              {!selectedTaskSupported ? (
+                <div className="errorText" style={{ marginTop: 8 }}>
+                  当前模型不支持该任务模式，请切换模型或选择其他任务模式。
+                </div>
+              ) : null}
+            </div>
+            <div className="formGroup" style={{ gridColumn: "span 2" }}>
+              <label className="formLabel">音频输入</label>
+              <div className="controlRow">
+                <Button
+                  variant="secondary"
+                  icon={Music}
+                  disabled={isUploadingMusicAsset}
+                  onClick={() => uploadInputRef.current?.click()}
+                >
+                  {isUploadingMusicAsset ? "上传中..." : "上传音频到资产库"}
+                </Button>
+                <Button
+                  variant="ghost"
+                  icon={RefreshCw}
+                  disabled={isUploadingMusicAsset}
+                  onClick={refreshAssets}
+                >
+                  刷新资产
+                </Button>
+              </div>
+              <input
+                ref={uploadInputRef}
+                type="file"
+                accept="audio/*"
+                style={{ display: "none" }}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (file) {
+                    handleUploadMusicAsset(file);
+                  }
+                }}
               />
             </div>
           </div>
+
+          {needsSourceAsset ? (
+            <div className="formGroup">
+              <label className="formLabel">源音频资产</label>
+              <Select
+                value={form.source_asset_name}
+                onValueChange={(value) => setForm((prev) => ({ ...prev, source_asset_name: value }))}
+                options={assetOptions}
+              />
+            </div>
+          ) : null}
+
+          {needsReferenceAsset ? (
+            <div className="formGroup">
+              <label className="formLabel">参考音频资产</label>
+              <Select
+                value={form.reference_asset_name}
+                onValueChange={(value) => setForm((prev) => ({ ...prev, reference_asset_name: value }))}
+                options={assetOptions}
+              />
+            </div>
+          ) : null}
+
+          {needsTrackName && taskType === "extract" ? (
+            <div className="formGroup">
+              <label className="formLabel">轨道类型</label>
+              <Select
+                value={form.track_name}
+                onValueChange={(value) => setForm((prev) => ({ ...prev, track_name: value }))}
+                options={TRACK_NAME_OPTIONS}
+              />
+            </div>
+          ) : null}
+
+          {needsTrackName && taskType !== "extract" ? (
+            <div className="editorGrid three">
+              <div className="formGroup">
+                <label className="formLabel">轨道类型</label>
+                <Select
+                  value={form.track_name}
+                  onValueChange={(value) => setForm((prev) => ({ ...prev, track_name: value }))}
+                  options={TRACK_NAME_OPTIONS}
+                />
+              </div>
+              <div className="formGroup" style={{ gridColumn: "span 2" }}>
+                <label className="formLabel">轨道名称（可编辑）</label>
+                <input
+                  className="textInput"
+                  value={form.track_name}
+                  onChange={(event) => setForm((prev) => ({ ...prev, track_name: event.target.value }))}
+                  placeholder="例如 vocals"
+                />
+              </div>
+            </div>
+          ) : null}
+
+          {taskType === "complete" ? (
+            <div className="formGroup">
+              <label className="formLabel">补全轨道类别（可选）</label>
+              <input
+                className="textInput"
+                value={form.complete_track_classes}
+                onChange={(event) => setForm((prev) => ({ ...prev, complete_track_classes: event.target.value }))}
+                placeholder="例如 vocals, drums"
+              />
+            </div>
+          ) : null}
+
+          {needsRepaintRange ? (
+            <div className="editorGrid two">
+              <div className="formGroup">
+                <label className="formLabel">重绘起点（秒）</label>
+                <input
+                  className="textInput"
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={form.repainting_start}
+                  onChange={(event) => setForm((prev) => ({ ...prev, repainting_start: event.target.value }))}
+                  placeholder="留空从头开始"
+                />
+              </div>
+              <div className="formGroup">
+                <label className="formLabel">重绘终点（秒）</label>
+                <input
+                  className="textInput"
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={form.repainting_end}
+                  onChange={(event) => setForm((prev) => ({ ...prev, repainting_end: event.target.value }))}
+                  placeholder="留空到结束"
+                />
+              </div>
+            </div>
+          ) : null}
 
           <div className="editorGrid three">
             <div className="formGroup">
-              <label className="formLabel">Seed（可选）</label>
+              <label className="formLabel">Guidance Scale</label>
               <input
                 className="textInput"
                 type="number"
-                step="1"
-                value={form.seed}
-                onChange={(event) => setForm((prev) => ({ ...prev, seed: event.target.value }))}
-                placeholder="留空随机"
+                min="0"
+                max="30"
+                step="0.1"
+                value={isTurboModel ? "0.0" : form.guidance_scale}
+                onChange={(event) => setForm((prev) => ({ ...prev, guidance_scale: event.target.value }))}
+                disabled={isTurboModel}
               />
+              {isTurboModel ? (
+                <div className="secondary" style={{ marginTop: 6 }}>Turbo 模型不支持 CFG，已自动关闭</div>
+              ) : null}
             </div>
             <div className="formGroup">
-              <label className="formLabel">BPM（可选）</label>
-              <Select
-                value={form.bpm}
-                onValueChange={(value) => setForm((prev) => ({ ...prev, bpm: value }))}
-                options={BPM_OPTIONS}
-              />
+              <label className="formLabel">Shift</label>
+              {isTurboModel ? (
+                <Select
+                  value={TURBO_SHIFT_OPTIONS.some((item) => item.value === form.shift) ? form.shift : "3.0"}
+                  onValueChange={(value) => setForm((prev) => ({ ...prev, shift: value }))}
+                  options={TURBO_SHIFT_OPTIONS}
+                />
+              ) : (
+                <input
+                  className="textInput"
+                  type="number"
+                  min={String(shiftMin)}
+                  max={String(shiftMax)}
+                  step="0.1"
+                  value={form.shift}
+                  onChange={(event) => setForm((prev) => ({ ...prev, shift: event.target.value }))}
+                />
+              )}
+              <div className="secondary" style={{ marginTop: 6 }}>
+                {isTurboModel ? "Turbo：固定使用 1 / 2 / 3 三档" : "Base：建议 1.0 - 5.0"}
+              </div>
             </div>
-            <div className="formGroup">
-              <label className="formLabel">调式（可选）</label>
-              <Select
-                value={form.keyscale}
-                onValueChange={(value) => setForm((prev) => ({ ...prev, keyscale: value }))}
-                options={KEYSCALE_OPTIONS}
-              />
-            </div>
+            {taskType === "extract" ? (
+              <div className="formGroup">
+                <label className="formLabel">推理步数</label>
+                <input
+                  className="textInput"
+                  type="number"
+                  min={selectedModelVariant === "base" ? String(BASE_MIN_INFERENCE_STEPS) : "1"}
+                  max="100"
+                  step="1"
+                  value={form.num_inference_steps}
+                  onChange={(event) => setForm((prev) => ({ ...prev, num_inference_steps: event.target.value }))}
+                />
+              </div>
+            ) : (
+              <div className="formGroup">
+                <label className="formLabel">Cover 强度</label>
+                <input
+                  className="textInput"
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={form.audio_cover_strength}
+                  onChange={(event) => setForm((prev) => ({ ...prev, audio_cover_strength: event.target.value }))}
+                  disabled={taskType !== "cover"}
+                />
+              </div>
+            )}
           </div>
 
-          <div className="formGroup">
-            <label className="formLabel">拍号（可选）</label>
-            <Select
-              value={form.timesignature}
-              onValueChange={(value) => setForm((prev) => ({ ...prev, timesignature: value }))}
-              options={TIMESIGNATURE_OPTIONS}
-            />
-          </div>
+          {hideTextMusicInputs ? null : (
+            <>
+              <div className="formGroup">
+                <label className="formLabel">音乐描述（必填）</label>
+                <textarea
+                  className="textArea"
+                  value={form.prompt}
+                  onChange={(event) => setForm((prev) => ({ ...prev, prompt: event.target.value }))}
+                  placeholder="例如：温暖钢琴与弦乐，电影感，60 秒，适合旁白背景"
+                  style={{ minHeight: 108 }}
+                />
+              </div>
 
-          <div className="controlRow">
-            <Button
-              variant="primary"
-              disabled={isSubmitting || !musicEnabled || ACTIVE_STATUSES.has(taskStatus)}
-              onClick={handleGenerate}
-            >
-              {isSubmitting ? "提交中..." : "开始生成"}
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={!taskId || !ACTIVE_STATUSES.has(taskStatus) || isCancelling}
-              onClick={handleCancel}
-            >
-              {isCancelling ? "取消中..." : "取消任务"}
-            </Button>
-            <Button variant="ghost" icon={RefreshCw} onClick={refreshAssets}>
-              刷新资产
-            </Button>
-          </div>
+              <div className="formGroup">
+                <label className="formLabel">歌词（可选，留空可自动）</label>
+                <textarea
+                  className="textArea compactArea"
+                  value={form.lyrics}
+                  onChange={(event) => setForm((prev) => ({ ...prev, lyrics: event.target.value }))}
+                  placeholder="纯音乐可填 [Instrumental]"
+                />
+              </div>
+
+              <div className="editorGrid three">
+                <div className="formGroup">
+                  <label className="formLabel">时长（秒）</label>
+                  <input
+                    className="textInput"
+                    type="number"
+                    min="1"
+                    max="120"
+                    step="1"
+                    value={form.audio_duration}
+                    onChange={(event) => setForm((prev) => ({ ...prev, audio_duration: event.target.value }))}
+                  />
+                </div>
+                <div className="formGroup">
+                  <label className="formLabel">推理步数</label>
+                  <input
+                    className="textInput"
+                    type="number"
+                    min={selectedModelVariant === "base" ? String(BASE_MIN_INFERENCE_STEPS) : "1"}
+                    max="100"
+                    step="1"
+                    value={form.num_inference_steps}
+                    onChange={(event) => setForm((prev) => ({ ...prev, num_inference_steps: event.target.value }))}
+                  />
+                </div>
+                <div className="formGroup">
+                  <label className="formLabel">语言</label>
+                  <Select
+                    value={form.vocal_language}
+                    onValueChange={(value) => setForm((prev) => ({ ...prev, vocal_language: value }))}
+                    options={LANGUAGE_OPTIONS}
+                  />
+                </div>
+              </div>
+
+              <div className="editorGrid three">
+                <div className="formGroup">
+                  <label className="formLabel">Seed（可选）</label>
+                  <input
+                    className="textInput"
+                    type="number"
+                    step="1"
+                    value={form.seed}
+                    onChange={(event) => setForm((prev) => ({ ...prev, seed: event.target.value }))}
+                    placeholder="留空随机"
+                  />
+                </div>
+                <div className="formGroup">
+                  <label className="formLabel">BPM（可选）</label>
+                  <Select
+                    value={form.bpm}
+                    onValueChange={(value) => setForm((prev) => ({ ...prev, bpm: value }))}
+                    options={BPM_OPTIONS}
+                  />
+                </div>
+                <div className="formGroup">
+                  <label className="formLabel">调式（可选）</label>
+                  <Select
+                    value={form.keyscale}
+                    onValueChange={(value) => setForm((prev) => ({ ...prev, keyscale: value }))}
+                    options={KEYSCALE_OPTIONS}
+                  />
+                </div>
+              </div>
+
+              <div className="formGroup">
+                <label className="formLabel">拍号（可选）</label>
+                <Select
+                  value={form.timesignature}
+                  onValueChange={(value) => setForm((prev) => ({ ...prev, timesignature: value }))}
+                  options={TIMESIGNATURE_OPTIONS}
+                />
+              </div>
+            </>
+          )}
+
+          {hideTextMusicInputs ? (
+            <div className="controlRow">
+              <Button
+                variant="primary"
+                disabled={isSubmitting || !musicEnabled || ACTIVE_STATUSES.has(taskStatus) || !selectedTaskSupported}
+                onClick={handleGenerate}
+              >
+                {isSubmitting ? "提交中..." : "开始生成"}
+              </Button>
+            </div>
+          ) : (
+            <div className="controlRow">
+              <Button
+                variant="primary"
+                disabled={isSubmitting || !musicEnabled || ACTIVE_STATUSES.has(taskStatus) || !selectedTaskSupported}
+                onClick={handleGenerate}
+              >
+                {isSubmitting ? "提交中..." : "开始生成"}
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={!taskId || !ACTIVE_STATUSES.has(taskStatus) || isCancelling}
+                onClick={handleCancel}
+              >
+                {isCancelling ? "取消中..." : "取消任务"}
+              </Button>
+              <Button variant="ghost" icon={RefreshCw} onClick={refreshAssets}>
+                刷新资产
+              </Button>
+            </div>
+          )}
         </GlassCard>
 
         <GlassCard>
@@ -988,6 +1492,18 @@ export default function MusicPage({ onNavigate }) {
               <span>模型校验</span>
               <strong style={{ color: validation?.valid ? "var(--success)" : "var(--warning)" }}>
                 {validation?.valid ? "通过" : "未通过"}
+              </strong>
+            </div>
+            <div className="statRow">
+              <span>模型类型</span>
+              <strong>{validation ? (validation.is_turbo ? "Turbo" : "Base / SFT") : "-"}</strong>
+            </div>
+            <div className="statRow">
+              <span>支持任务</span>
+              <strong style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {Array.isArray(validation?.supported_task_types) && validation.supported_task_types.length
+                  ? validation.supported_task_types.join(", ")
+                  : "-"}
               </strong>
             </div>
             {validation?.message ? (
@@ -1089,59 +1605,106 @@ export default function MusicPage({ onNavigate }) {
           <div className="musicAssetList">
             {assets.map((item) => (
               <div key={item.name} className={`musicAssetRow ${previewAssetName === item.name ? "active" : ""}`}>
-                <button
-                  className="musicAssetMeta"
-                  onClick={() => setPreviewAssetName(item.name)}
-                  type="button"
-                >
-                  <div className="musicAssetName">{item.name}</div>
-                  <div className="musicAssetSub">
-                    <span>{formatFileSize(item.size)}</span>
-                    <span>{formatDateTime(item.updated_at)}</span>
+                {renamingAssetName === item.name ? (
+                  <div className="musicAssetMeta" style={{ cursor: "default" }}>
+                    <input
+                      className="textInput"
+                      value={renameAssetValue}
+                      onChange={(event) => setRenameAssetValue(event.target.value)}
+                      style={{ maxWidth: 320 }}
+                    />
+                    <div className="musicAssetSub">
+                      <span>{formatFileSize(item.size)}</span>
+                      <span>{formatDateTime(item.updated_at)}</span>
+                    </div>
                   </div>
-                </button>
+                ) : (
+                  <button
+                    className="musicAssetMeta"
+                    onClick={() => setPreviewAssetName(item.name)}
+                    type="button"
+                  >
+                    <div className="musicAssetName">{item.name}</div>
+                    <div className="musicAssetSub">
+                      <span>{formatFileSize(item.size)}</span>
+                      <span>{formatDateTime(item.updated_at)}</span>
+                    </div>
+                  </button>
+                )}
                 <div className="controlRow" style={{ justifyContent: "flex-end" }}>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    icon={previewAssetName === item.name && isPreviewPlaying ? Pause : Play}
-                    onClick={() => toggleAssetPreview(item.name)}
-                  >
-                    {previewAssetName === item.name && isPreviewPlaying ? "暂停" : "播放"}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    icon={Download}
-                    onClick={() => downloadAudioUrl(buildAssetAudioUrl(item.name), item.name)}
-                  >
-                    下载
-                  </Button>
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    icon={Trash2}
-                    disabled={deletingAssetName === item.name}
-                    onClick={() => handleDeleteAsset(item.name)}
-                  >
-                    {deletingAssetName === item.name ? "删除中..." : "删除"}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={attachingKey === `${item.name}:bgm`}
-                    onClick={() => handleAttach(item.name, "bgm")}
-                  >
-                    设为 BGM
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={attachingKey === `${item.name}:ambience`}
-                    onClick={() => handleAttach(item.name, "ambience")}
-                  >
-                    设为环境音
-                  </Button>
+                  {renamingAssetName === item.name ? (
+                    <>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={renamingBusyAssetName === item.name}
+                        onClick={() => handleConfirmRenameAsset(item.name)}
+                      >
+                        {renamingBusyAssetName === item.name ? "保存中..." : "保存"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={renamingBusyAssetName === item.name}
+                        onClick={handleCancelRenameAsset}
+                      >
+                        取消
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon={Pencil}
+                        disabled={deletingAssetName === item.name}
+                        onClick={() => handleStartRenameAsset(item.name)}
+                      >
+                        重命名
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon={previewAssetName === item.name && isPreviewPlaying ? Pause : Play}
+                        onClick={() => toggleAssetPreview(item.name)}
+                      >
+                        {previewAssetName === item.name && isPreviewPlaying ? "暂停" : "播放"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon={Download}
+                        onClick={() => downloadAudioUrl(buildAssetAudioUrl(item.name), item.name)}
+                      >
+                        下载
+                      </Button>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        icon={Trash2}
+                        disabled={deletingAssetName === item.name}
+                        onClick={() => handleDeleteAsset(item.name)}
+                      >
+                        {deletingAssetName === item.name ? "删除中..." : "删除"}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={attachingKey === `${item.name}:bgm`}
+                        onClick={() => handleAttach(item.name, "bgm")}
+                      >
+                        设为 BGM
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={attachingKey === `${item.name}:ambience`}
+                        onClick={() => handleAttach(item.name, "ambience")}
+                      >
+                        设为环境音
+                      </Button>
+                    </>
+                  )}
                 </div>
               </div>
             ))}

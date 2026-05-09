@@ -28,6 +28,9 @@ class RuntimeConfigTest(unittest.TestCase):
                 tts_model_path="omnivoice",
                 voxcpm_tts_model_path="openbmb/VoxCPM2",
                 music_enabled=True,
+                music_turbo_model_dir="D:/AIModels/ACE-Step/acestep-v15-xl-turbo-diffusers",
+                music_base_model_dir="D:/AIModels/ACE-Step/acestep-v15-xl-base-diffusers",
+                music_model_variant="base",
                 music_model_dir="D:/AIModels/ACE-Step/acestep-v15-xl-turbo-diffusers",
                 music_device_mode="cpu_offload",
                 asr_model_path="faster-whisper-large-v3",
@@ -39,6 +42,9 @@ class RuntimeConfigTest(unittest.TestCase):
             self.assertEqual(raw["llm_backend"], "gemini")
             self.assertEqual(raw["voxcpm_tts_model_path"], "openbmb/VoxCPM2")
             self.assertTrue(raw["music_enabled"])
+            self.assertEqual(raw["music_turbo_model_dir"], "D:/AIModels/ACE-Step/acestep-v15-xl-turbo-diffusers")
+            self.assertEqual(raw["music_base_model_dir"], "D:/AIModels/ACE-Step/acestep-v15-xl-base-diffusers")
+            self.assertEqual(raw["music_model_variant"], "base")
             self.assertEqual(raw["music_model_dir"], "D:/AIModels/ACE-Step/acestep-v15-xl-turbo-diffusers")
             self.assertEqual(raw["music_device_mode"], "cpu_offload")
             self.assertEqual(raw["secondary_llm_model_path"], "E:/models/qwen2.5-1.5b.gguf")
@@ -49,6 +55,9 @@ class RuntimeConfigTest(unittest.TestCase):
             self.assertEqual(loaded.llm_threads, 4)
             self.assertEqual(loaded.voxcpm_tts_model_path, "openbmb/VoxCPM2")
             self.assertTrue(loaded.music_enabled)
+            self.assertEqual(loaded.music_turbo_model_dir, "D:/AIModels/ACE-Step/acestep-v15-xl-turbo-diffusers")
+            self.assertEqual(loaded.music_base_model_dir, "D:/AIModels/ACE-Step/acestep-v15-xl-base-diffusers")
+            self.assertEqual(loaded.music_model_variant, "base")
             self.assertEqual(loaded.music_model_dir, "D:/AIModels/ACE-Step/acestep-v15-xl-turbo-diffusers")
             self.assertEqual(loaded.music_device_mode, "cpu_offload")
             self.assertEqual(loaded.secondary_llm_n_ctx, 3072)

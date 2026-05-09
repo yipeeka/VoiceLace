@@ -86,12 +86,22 @@ export default function OrchestratorConfigCard({ form, isSaving, onSetField, onS
           </div>
 
           <div className="formGroup">
-            <label className="formLabel">Music 模型目录（ACE-Step Diffusers 本地目录）</label>
+            <label className="formLabel">Music Turbo 模型目录（ACE-Step Diffusers）</label>
             <input
               className="textInput"
-              value={form.music_model_dir ?? ""}
-              onChange={(e) => onSetField("music_model_dir", e.target.value)}
+              value={form.music_turbo_model_dir ?? form.music_model_dir ?? ""}
+              onChange={(e) => onSetField("music_turbo_model_dir", e.target.value)}
               placeholder="e.g. D:/AIModels/ACE-Step/acestep-v15-xl-turbo-diffusers"
+            />
+          </div>
+
+          <div className="formGroup">
+            <label className="formLabel">Music Base 模型目录（ACE-Step Diffusers）</label>
+            <input
+              className="textInput"
+              value={form.music_base_model_dir ?? form.music_model_dir ?? ""}
+              onChange={(e) => onSetField("music_base_model_dir", e.target.value)}
+              placeholder="e.g. D:/AIModels/ACE-Step/acestep-v15-xl-base-diffusers"
             />
           </div>
 

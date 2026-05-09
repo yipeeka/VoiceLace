@@ -154,6 +154,27 @@ class ModelOrchestratorTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("music_backend", status)
         self.assertTrue(status["music_loaded"])
 
+    async def test_ensure_music_ready_uses_selected_music_variant_dir(self) -> None:
+        llm = _FakeLlmEngine()
+        tts = _FakeTtsEngine()
+        music = _FakeMusicEngine()
+        orch = ModelOrchestrator(llm, tts, music)
+        orch.set_config(
+            OrchestratorConfig(
+                music_enabled=True,
+                music_model_variant="base",
+                music_turbo_model_dir="E:/models/acestep-turbo",
+                music_base_model_dir="E:/models/acestep-base",
+                music_model_dir="E:/legacy/music-model",
+                music_device_mode="cpu_offload",
+            )
+        )
+
+        await orch.ensure_music_ready()
+        self.assertTrue(music.is_loaded)
+        args, _kwargs = music.loaded_args
+        self.assertEqual(args[0], "E:/models/acestep-base")
+
     async def test_unload_tts_runs_when_engine_only_has_error(self) -> None:
         llm = _FakeLlmEngine()
         tts = _FakeTtsEngine()

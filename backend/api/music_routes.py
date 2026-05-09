@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from backend.engine.llm_parser import extract_json_object, strip_json_fences
@@ -18,12 +18,17 @@ from backend.models import (
     MusicAssistFinalizeRequest,
     MusicAssistLoadRequest,
     MusicGenerateRequest,
+    MusicModelSelectRequest,
+    RenameMusicAssetRequest,
 )
 from backend.persistence import load_project
+from backend.runtime_config import save_runtime_config
 from backend.services import bind_postprocess_asset_to_project
 from backend.state import get_app_state
 
 router = APIRouter()
+MUSIC_ASSET_SUFFIXES = {".wav", ".mp3", ".flac", ".ogg"}
+MUSIC_TASK_TYPES = {"text2music", "cover", "repaint", "lego", "extract", "complete"}
 ALLOWED_ASSIST_SOURCES = {"primary_local", "secondary_local", "openai", "gemini"}
 ALLOWED_VOCAL_LANGUAGES = {"unknown", "zh", "en", "ja", "ko"}
 ALLOWED_BPMS = {60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 180}
@@ -93,9 +98,97 @@ def _resolve_music_asset_path(state, asset_name: str) -> Path:
         raise HTTPException(status_code=400, detail="asset_name 非法") from exc
     if not source.exists() or not source.is_file():
         raise HTTPException(status_code=404, detail="Music asset not found")
-    if source.suffix.lower() not in {".wav", ".mp3", ".flac", ".ogg"}:
+    if source.suffix.lower() not in MUSIC_ASSET_SUFFIXES:
         raise HTTPException(status_code=400, detail="仅支持音频文件")
     return source
+
+
+def _resolve_music_asset_rename_target(state, source: Path, new_name: str) -> Path:
+    music_dir = (state.settings.output_dir / "music").resolve()
+    cleaned = str(new_name or "").strip()
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="new_name 不能为空")
+    normalized_name = Path(cleaned).name
+    if normalized_name != cleaned:
+        raise HTTPException(status_code=400, detail="new_name 非法")
+    target = (music_dir / normalized_name).resolve()
+    try:
+        target.relative_to(music_dir)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="new_name 非法") from exc
+
+    target_suffix = target.suffix.lower()
+    if not target_suffix:
+        target = target.with_suffix(source.suffix.lower())
+        target_suffix = target.suffix.lower()
+    if target_suffix not in MUSIC_ASSET_SUFFIXES:
+        raise HTTPException(status_code=400, detail="仅支持音频文件重命名")
+    if target == source:
+        return source
+    if target.exists():
+        raise HTTPException(status_code=409, detail="目标文件名已存在")
+    return target
+
+
+def _normalize_music_task_type(task_type: str) -> str:
+    normalized = (task_type or "text2music").strip().lower()
+    if normalized not in MUSIC_TASK_TYPES:
+        raise HTTPException(status_code=400, detail=f"Unsupported task_type: {task_type}")
+    return normalized
+
+
+def _supported_task_types_from_report(report: dict[str, Any]) -> list[str]:
+    supported_task_types = ["text2music", "cover", "repaint"]
+    if bool(report.get("supports_lego_complete")):
+        supported_task_types.extend(["lego", "extract", "complete"])
+    return supported_task_types
+
+
+def _validate_music_generation_payload(state, payload: MusicGenerateRequest) -> dict[str, Any]:
+    from backend.engine.music_engine import MusicEngine
+
+    selected_variant = str(getattr(state.orchestrator.config, "music_model_variant", "turbo") or "turbo").strip().lower()
+    task_type = _normalize_music_task_type(payload.task_type)
+    source_name = (payload.source_asset_name or "").strip()
+    reference_name = (payload.reference_asset_name or "").strip()
+    track_name = (payload.track_name or "").strip() or None
+    complete_track_classes = [str(item).strip() for item in (payload.complete_track_classes or []) if str(item).strip()]
+
+    source_required = task_type in {"cover", "repaint", "lego", "extract", "complete"}
+    if source_required and not source_name:
+        raise HTTPException(status_code=400, detail=f"{task_type} 任务需要 source_asset_name")
+    if task_type in {"extract", "lego"} and not track_name:
+        raise HTTPException(status_code=400, detail=f"{task_type} 任务需要 track_name")
+    if task_type in {"repaint", "lego"}:
+        repaint_start = payload.repainting_start
+        repaint_end = payload.repainting_end
+        if repaint_start is not None and repaint_end is not None and repaint_end > 0 and repaint_start >= repaint_end:
+            raise HTTPException(status_code=400, detail="repainting_start 必须小于 repainting_end")
+    if selected_variant == "turbo":
+        shift = float(payload.shift)
+        if shift not in {1.0, 2.0, 3.0}:
+            raise HTTPException(status_code=400, detail="Turbo 模型只支持 shift 1.0 / 2.0 / 3.0")
+    if selected_variant == "base" and (int(payload.num_inference_steps) < 32 or int(payload.num_inference_steps) > 100):
+        raise HTTPException(status_code=400, detail="Base 模型推理步数需要 32 - 100")
+    if task_type in {"lego", "extract", "complete"}:
+        model_report = MusicEngine.validate_model_dir(
+            state.orchestrator.get_active_music_model_dir(state.orchestrator.config)
+        )
+        if bool(model_report.get("is_turbo")):
+            raise HTTPException(status_code=400, detail=f"{task_type} 任务仅支持 Base 模型，当前模型为 Turbo")
+
+    source_audio_path = _resolve_music_asset_path(state, source_name) if source_name else None
+    reference_audio_path = _resolve_music_asset_path(state, reference_name) if reference_name else None
+
+    return {
+        "task_type": task_type,
+        "source_asset_name": source_name or None,
+        "reference_asset_name": reference_name or None,
+        "source_audio_path": source_audio_path,
+        "reference_audio_path": reference_audio_path,
+        "track_name": track_name,
+        "complete_track_classes": complete_track_classes,
+    }
 
 
 def _build_music_assist_config(state, source: str) -> dict[str, Any]:
@@ -350,7 +443,8 @@ async def _run_music_task(task_id: str, payload: MusicGenerateRequest, state) ->
 
             if not bool(state.orchestrator.config.music_enabled):
                 raise RuntimeError("音乐生成功能未启用（music_enabled=false）")
-            if not state.orchestrator.config.music_model_dir.strip():
+            active_music_model_dir = state.orchestrator.get_active_music_model_dir(state.orchestrator.config)
+            if not active_music_model_dir.strip():
                 raise RuntimeError("未配置音乐模型目录（music_model_dir）")
 
             async with state.music_assist_lock:
@@ -373,7 +467,11 @@ async def _run_music_task(task_id: str, payload: MusicGenerateRequest, state) ->
             music_output_dir = state.settings.output_dir / "music"
             output_path = music_output_dir / f"{task_id}.wav"
             await _emit_music_event(state, task, task_id, {"type": "task_stage", "stage": "generating"})
+            runtime_options = task.get("runtime_options") or {}
+            selected_variant = str(getattr(state.orchestrator.config, "music_model_variant", "turbo") or "turbo").strip().lower()
+            effective_guidance_scale = 0.0 if selected_variant == "turbo" else payload.guidance_scale
             result = await state.music_engine.generate_to_file(
+                task_type=runtime_options.get("task_type", payload.task_type),
                 prompt=payload.prompt,
                 output_path=output_path,
                 lyrics=payload.lyrics,
@@ -381,9 +479,18 @@ async def _run_music_task(task_id: str, payload: MusicGenerateRequest, state) ->
                 vocal_language=payload.vocal_language,
                 num_inference_steps=payload.num_inference_steps,
                 seed=payload.seed,
+                source_audio_path=runtime_options.get("source_audio_path"),
+                reference_audio_path=runtime_options.get("reference_audio_path"),
                 bpm=payload.bpm,
                 keyscale=payload.keyscale,
                 timesignature=payload.timesignature,
+                track_name=runtime_options.get("track_name"),
+                complete_track_classes=runtime_options.get("complete_track_classes"),
+                repainting_start=payload.repainting_start,
+                repainting_end=payload.repainting_end,
+                audio_cover_strength=payload.audio_cover_strength,
+                guidance_scale=effective_guidance_scale,
+                shift=payload.shift,
             )
 
             if task.get("status") == "cancel_requested":
@@ -399,8 +506,13 @@ async def _run_music_task(task_id: str, payload: MusicGenerateRequest, state) ->
             task["result"] = {
                 **result,
                 "audio_url": f"/api/v1/music/tasks/{task_id}/audio",
-                "model_dir": state.orchestrator.config.music_model_dir,
+                "model_dir": state.orchestrator.get_active_music_model_dir(state.orchestrator.config),
                 "device_mode": state.orchestrator.config.music_device_mode,
+                "model_variant": state.orchestrator.config.music_model_variant,
+                "task_type": runtime_options.get("task_type", payload.task_type),
+                "source_asset_name": runtime_options.get("source_asset_name"),
+                "reference_asset_name": runtime_options.get("reference_asset_name"),
+                "track_name": runtime_options.get("track_name"),
             }
             await _emit_music_event(state, task, task_id, {"type": "task_status", "status": "done"})
             await _emit_music_event(state, task, task_id, {"type": "complete", "data": task["result"]})
@@ -430,6 +542,7 @@ async def generate_music(payload: MusicGenerateRequest, state=Depends(get_app_st
     for item in state.music_tasks.values():
         if item.get("status") in {"queued", "running", "cancel_requested"}:
             raise HTTPException(status_code=409, detail="已有音乐任务正在进行，请等待当前任务结束")
+    runtime_options = _validate_music_generation_payload(state, payload)
     task_id = str(uuid4())
     task = {
         "task_id": task_id,
@@ -441,6 +554,7 @@ async def generate_music(payload: MusicGenerateRequest, state=Depends(get_app_st
         "error": "",
         "cancel_message": "",
         "result": None,
+        "runtime_options": runtime_options,
         "events": [{"type": "task_status", "status": "queued"}],
     }
     state.music_tasks[task_id] = task
@@ -454,10 +568,45 @@ async def generate_music(payload: MusicGenerateRequest, state=Depends(get_app_st
 async def validate_music_model_dir(state=Depends(get_app_state)):
     from backend.engine.music_engine import MusicEngine
 
-    report = MusicEngine.validate_model_dir(state.orchestrator.config.music_model_dir)
+    active_model_dir = state.orchestrator.get_active_music_model_dir(state.orchestrator.config)
+    report = MusicEngine.validate_model_dir(active_model_dir)
+    supported_task_types = _supported_task_types_from_report(report)
     report["music_enabled"] = bool(state.orchestrator.config.music_enabled)
     report["device_mode"] = state.orchestrator.config.music_device_mode
+    report["model_variant"] = state.orchestrator.config.music_model_variant
+    report["music_turbo_model_dir"] = state.orchestrator.config.music_turbo_model_dir
+    report["music_base_model_dir"] = state.orchestrator.config.music_base_model_dir
+    report["supported_task_types"] = supported_task_types
     return report
+
+
+@router.post("/model/select")
+async def select_music_model_variant(payload: MusicModelSelectRequest, state=Depends(get_app_state)):
+    old_model_dir = getattr(state.music_engine, "model_dir", "")
+    config = state.orchestrator.config
+    config.music_model_variant = payload.model_variant
+    state.orchestrator.set_config(config)
+    save_runtime_config(state.settings.runtime_config_path, state.orchestrator.config)
+    active_model_dir = state.orchestrator.get_active_music_model_dir(state.orchestrator.config)
+    if state.music_engine.is_loaded:
+        try:
+            resolved_active = str(Path(active_model_dir).expanduser().resolve())
+        except Exception:
+            resolved_active = str(active_model_dir)
+        if old_model_dir != resolved_active:
+            await state.music_engine.unload_model()
+
+    from backend.engine.music_engine import MusicEngine
+
+    report = MusicEngine.validate_model_dir(active_model_dir)
+    return {
+        "status": "ok",
+        "model_variant": state.orchestrator.config.music_model_variant,
+        "model_dir": active_model_dir,
+        "supported_task_types": _supported_task_types_from_report(report),
+        "music_enabled": bool(state.orchestrator.config.music_enabled),
+        "device_mode": state.orchestrator.config.music_device_mode,
+    }
 
 
 @router.get("/assist/status")
@@ -611,18 +760,45 @@ async def list_music_assets(state=Depends(get_app_state)):
     music_dir = state.settings.output_dir / "music"
     if not music_dir.exists():
         return {"items": []}
+    candidates: list[Path] = []
+    for suffix in MUSIC_ASSET_SUFFIXES:
+        candidates.extend(music_dir.glob(f"*{suffix}"))
     items = []
-    for wav in sorted(music_dir.glob("*.wav"), key=lambda p: p.stat().st_mtime, reverse=True):
-        stat = wav.stat()
+    for audio_file in sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True):
+        stat = audio_file.stat()
         items.append(
             {
-                "name": wav.name,
-                "path": str(wav),
+                "name": audio_file.name,
+                "path": str(audio_file),
                 "size": int(stat.st_size),
                 "updated_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
             }
         )
     return {"items": items}
+
+
+@router.post("/assets/upload")
+async def upload_music_asset(file: UploadFile = File(...), state=Depends(get_app_state)):
+    filename = file.filename or ""
+    suffix = Path(filename).suffix.lower() or ".wav"
+    if suffix not in MUSIC_ASSET_SUFFIXES:
+        raise HTTPException(status_code=400, detail="仅支持 wav/mp3/flac/ogg 文件")
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="上传文件为空")
+
+    music_dir = state.settings.output_dir / "music"
+    music_dir.mkdir(parents=True, exist_ok=True)
+    target_name = f"upload_{uuid4().hex[:10]}{suffix}"
+    target_path = music_dir / target_name
+    target_path.write_bytes(payload)
+    stat = target_path.stat()
+    return {
+        "name": target_name,
+        "path": str(target_path),
+        "size": int(stat.st_size),
+        "updated_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+    }
 
 
 @router.get("/assets/{asset_name}/audio")
@@ -642,6 +818,26 @@ async def delete_music_asset(asset_name: str, state=Depends(get_app_state)):
     source = _resolve_music_asset_path(state, asset_name)
     source.unlink(missing_ok=True)
     return {"status": "deleted", "asset_name": asset_name}
+
+
+@router.post("/assets/{asset_name}/rename")
+async def rename_music_asset(asset_name: str, payload: RenameMusicAssetRequest, state=Depends(get_app_state)):
+    source = _resolve_music_asset_path(state, asset_name)
+    target = _resolve_music_asset_rename_target(state, source, payload.new_name)
+    if target != source:
+        try:
+            source.rename(target)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"重命名失败: {exc}") from exc
+    stat = target.stat()
+    return {
+        "status": "renamed",
+        "old_name": source.name,
+        "name": target.name,
+        "path": str(target),
+        "size": int(stat.st_size),
+        "updated_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+    }
 
 
 @router.post("/assets/attach")

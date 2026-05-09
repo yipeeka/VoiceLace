@@ -73,6 +73,13 @@ class Settings:
     default_voxcpm_tts_model_path: str = field(default_factory=lambda: os.getenv("BV_VOXCPM_TTS_MODEL_PATH", "openbmb/VoxCPM2"))
     default_tts_device: str = field(default_factory=lambda: os.getenv("BV_TTS_DEVICE", "cuda:0"))
     default_music_model_dir: str = field(default_factory=lambda: os.getenv("BV_MUSIC_MODEL_DIR", ""))
+    default_music_turbo_model_dir: str = field(
+        default_factory=lambda: os.getenv("BV_MUSIC_TURBO_MODEL_DIR", os.getenv("BV_MUSIC_MODEL_DIR", ""))
+    )
+    default_music_base_model_dir: str = field(
+        default_factory=lambda: os.getenv("BV_MUSIC_BASE_MODEL_DIR", os.getenv("BV_MUSIC_MODEL_DIR", ""))
+    )
+    default_music_model_variant: str = field(default_factory=lambda: os.getenv("BV_MUSIC_MODEL_VARIANT", "turbo"))
     default_music_enabled: bool = field(default_factory=lambda: os.getenv("BV_MUSIC_ENABLED", "false").lower() == "true")
     default_music_device_mode: str = field(default_factory=lambda: os.getenv("BV_MUSIC_DEVICE_MODE", "cpu_offload"))
     default_asr_model_path: str = field(default_factory=lambda: os.getenv("BV_ASR_MODEL_PATH", "base"))

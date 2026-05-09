@@ -79,6 +79,7 @@ async def update_orchestrator_config(payload: OrchestratorConfigPayload, state=D
     old_music_model_dir = getattr(state.music_engine, "model_dir", "")
     old_music_device_mode = getattr(state.music_engine, "device_mode", "")
     config = OrchestratorConfig(**payload.model_dump())
+    next_music_model_dir = state.orchestrator.get_active_music_model_dir(config)
     saved = await state.orchestrator.update_config(config)
     save_runtime_config(state.settings.runtime_config_path, config)
     state.asr_engine.model_path = config.asr_model_path
@@ -103,7 +104,7 @@ async def update_orchestrator_config(payload: OrchestratorConfigPayload, state=D
         state.music_assist_engine_source = ""
         state.music_assist_engine_error = ""
     if state.music_engine.is_loaded and (
-        old_music_model_dir != str(Path(config.music_model_dir).expanduser().resolve())
+        old_music_model_dir != str(Path(next_music_model_dir).expanduser().resolve())
         or old_music_device_mode != config.music_device_mode
     ):
         await state.music_engine.unload_model()
@@ -120,6 +121,7 @@ async def reset_orchestrator_config(state=Depends(get_app_state)):
     old_music_model_dir = getattr(state.music_engine, "model_dir", "")
     old_music_device_mode = getattr(state.music_engine, "device_mode", "")
     config = load_runtime_default_config(state.settings.runtime_defaults_config_path) or OrchestratorConfig()
+    next_music_model_dir = state.orchestrator.get_active_music_model_dir(config)
     saved = await state.orchestrator.update_config(config)
     save_runtime_config(state.settings.runtime_config_path, config)
     state.asr_engine.model_path = config.asr_model_path
@@ -144,7 +146,7 @@ async def reset_orchestrator_config(state=Depends(get_app_state)):
         state.music_assist_engine_source = ""
         state.music_assist_engine_error = ""
     if state.music_engine.is_loaded and (
-        old_music_model_dir != str(Path(config.music_model_dir).expanduser().resolve())
+        old_music_model_dir != str(Path(next_music_model_dir).expanduser().resolve())
         or old_music_device_mode != config.music_device_mode
     ):
         await state.music_engine.unload_model()
@@ -211,6 +213,12 @@ async def unload_tts(state=Depends(get_app_state)):
 
 @router.post("/load-music")
 async def load_music(payload: LoadMusicRequest, state=Depends(get_app_state)):
+    if payload.music_model_variant is not None:
+        state.orchestrator.config.music_model_variant = payload.music_model_variant
+    if payload.music_turbo_model_dir is not None:
+        state.orchestrator.config.music_turbo_model_dir = payload.music_turbo_model_dir
+    if payload.music_base_model_dir is not None:
+        state.orchestrator.config.music_base_model_dir = payload.music_base_model_dir
     if payload.music_model_dir is not None:
         state.orchestrator.config.music_model_dir = payload.music_model_dir
     if payload.music_device_mode is not None:

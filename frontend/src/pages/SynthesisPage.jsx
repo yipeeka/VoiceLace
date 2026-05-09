@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 
@@ -17,6 +17,7 @@ import { useScriptStore } from "../stores/useScriptStore";
 import { useSynthesisStore } from "../stores/useSynthesisStore";
 import { useUiStore } from "../stores/useUiStore";
 import { API_ORIGIN, api } from "../utils/api";
+import { buildProjectFilePayload, saveProjectFile } from "../utils/projectFile";
 import { buildSegmentEditorDraft, createSegmentDraft, normalizeSegmentFromEditorDraft } from "../utils/segmentEditorState";
 import { hasEditingDraftChanges } from "../utils/scriptEditorDirty";
 import {
@@ -45,7 +46,14 @@ function formatTimeMs(ms) {
 }
 
 export default function SynthesisPage() {
-  const { currentProject, refreshCurrentProject, importArchive, importWarnings } = useProjectStore();
+  const {
+    currentProject,
+    refreshCurrentProject,
+    importArchive,
+    importWarnings,
+    currentProjectFileHandle,
+    bindCurrentProjectFile,
+  } = useProjectStore();
   const {
     taskId, status, connectionStatus, modelStatus, lastSyncError, progress, queuePosition, failedCount, retryCount,
     effectiveSegmentConcurrency, queueSnapshot,
@@ -76,7 +84,9 @@ export default function SynthesisPage() {
   const [systemRuntimeStatus, setSystemRuntimeStatus] = useState(null);
   const [exportWizardOpen, setExportWizardOpen] = useState(false);
   const updatedRowTimerRef = useRef(null);
-  const { saveScript, isSaving: isScriptSaving, error: scriptError } = useScriptStore();
+  const { saveScript, isSaving: isScriptSaving, error: scriptError, script, sourceText } = useScriptStore();
+  const setProjectSaveAction = useUiStore((state) => state.setProjectSaveAction);
+  const clearProjectSaveAction = useUiStore((state) => state.clearProjectSaveAction);
   const pushToast = useUiStore.getState().pushToast;
 
   const config = useSynthesisStore((s) => s.config ?? {
@@ -855,6 +865,52 @@ export default function SynthesisPage() {
       return { ...current, segments: reordered };
     });
   }
+
+  const handleSaveProjectFile = useCallback(async (options = {}) => {
+    if (!currentProject) {
+      pushToast({ title: "请先创建或选择项目", tone: "warning" });
+      return;
+    }
+    const forceSaveAs = Boolean(options?.forceSaveAs);
+    const payload = buildProjectFilePayload({
+      project: currentProject,
+      script: draftScript || script,
+      sourceText: draftScript?.source_text || sourceText || script?.source_text || "",
+    });
+    try {
+      const result = await saveProjectFile({
+        payload,
+        preferredName: currentProject.name,
+        existingHandle: currentProjectFileHandle || null,
+        forceSaveAs,
+      });
+      if (result?.handle) {
+        bindCurrentProjectFile({ handle: result.handle, fileName: result.fileName || "" });
+      }
+      pushToast({
+        title: forceSaveAs ? "项目文件已另存" : result?.mode === "inplace" ? "项目文件已保存" : "项目文件已导出",
+        tone: "success",
+      });
+    } catch (saveError) {
+      if (saveError?.name === "AbortError") {
+        return;
+      }
+      pushToast({ title: `保存项目失败：${saveError?.message || "未知错误"}`, tone: "error" });
+    }
+  }, [
+    currentProject,
+    draftScript,
+    script,
+    sourceText,
+    currentProjectFileHandle,
+    bindCurrentProjectFile,
+    pushToast,
+  ]);
+
+  useEffect(() => {
+    setProjectSaveAction(handleSaveProjectFile);
+    return () => clearProjectSaveAction();
+  }, [setProjectSaveAction, clearProjectSaveAction, handleSaveProjectFile]);
 
   return (
     <div className="pageGrid" style={{ gap: 20 }}>
