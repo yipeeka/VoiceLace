@@ -22,6 +22,10 @@ class ModelState(str, Enum):
     MUSIC_READY = "music_ready"
     MUSIC_WORKING = "music_working"
     UNLOADING_MUSIC = "unloading_music"
+    LOADING_ASR = "loading_asr"
+    ASR_READY = "asr_ready"
+    ASR_WORKING = "asr_working"
+    UNLOADING_ASR = "unloading_asr"
 
 
 @dataclass(slots=True)
@@ -67,8 +71,15 @@ class OrchestratorConfig:
     music_model_variant: str = settings.default_music_model_variant
     music_model_dir: str = settings.default_music_model_dir
     music_device_mode: str = settings.default_music_device_mode
+    asr_backend: str = settings.default_asr_backend
     asr_model_path: str = settings.default_asr_model_path
     asr_device: str = settings.default_asr_device
+    qwen3_asr_crispasr_exe: str = settings.default_qwen3_asr_crispasr_exe
+    qwen3_asr_model_path: str = settings.default_qwen3_asr_model_path
+    qwen3_asr_forced_aligner_model_path: str = settings.default_qwen3_asr_forced_aligner_model_path
+    qwen3_asr_threads: int = settings.default_qwen3_asr_threads
+    qwen3_asr_language: str = settings.default_qwen3_asr_language
+    qwen3_asr_enable_timestamps: bool = settings.default_qwen3_asr_enable_timestamps
     pyannote_model_id: str = settings.default_pyannote_model_id
     pyannote_auth_token: str = settings.default_pyannote_auth_token
     pyannote_device: str = settings.default_pyannote_device
@@ -81,16 +92,19 @@ class GpuInfo:
     total_vram_mb: int = 0
     used_vram_mb: int = 0
     free_vram_mb: int = 0
+    torch_allocated_mb: int = 0
+    torch_reserved_mb: int = 0
 
 
 Listener = Callable[[dict], Awaitable[None]]
 
 
 class ModelOrchestrator:
-    def __init__(self, llm_engine, tts_engine, music_engine=None) -> None:
+    def __init__(self, llm_engine, tts_engine, music_engine=None, asr_engine=None) -> None:
         self._llm = llm_engine
         self._tts = tts_engine
         self._music = music_engine
+        self._asr = asr_engine
         self._state = ModelState.IDLE
         self._lock = asyncio.Lock()
         self._listeners: list[Listener] = []
@@ -126,6 +140,20 @@ class ModelOrchestrator:
         else:
             active_dir = turbo_dir or base_dir or legacy_dir
         config.music_model_dir = active_dir
+
+        asr_backend = str(getattr(config, "asr_backend", "whisper") or "whisper").strip().lower()
+        if asr_backend in {"qwen3_asr", "qwen3-asr"}:
+            asr_backend = "qwen3_crispasr"
+        if asr_backend not in {"whisper", "qwen3_crispasr"}:
+            asr_backend = "whisper"
+        config.asr_backend = asr_backend
+
+        try:
+            config.qwen3_asr_threads = max(0, int(getattr(config, "qwen3_asr_threads", 0) or 0))
+        except Exception:
+            config.qwen3_asr_threads = 0
+        config.qwen3_asr_language = str(getattr(config, "qwen3_asr_language", "auto") or "auto").strip() or "auto"
+        config.qwen3_asr_enable_timestamps = bool(getattr(config, "qwen3_asr_enable_timestamps", False))
         return config
 
     @classmethod
@@ -156,33 +184,58 @@ class ModelOrchestrator:
         return asdict(self._config)
 
     def get_gpu_info(self) -> dict:
+        default = GpuInfo()
         try:
             import torch
 
             if torch.cuda.is_available():
                 dev = torch.cuda.current_device()
                 total = int(torch.cuda.get_device_properties(dev).total_memory)
-                used = int(torch.cuda.memory_allocated(dev))
+                allocated = int(torch.cuda.memory_allocated(dev))
+                reserved = int(torch.cuda.memory_reserved(dev))
+                used = max(allocated, reserved)
                 free = max(0, total - used)
                 name = torch.cuda.get_device_name(dev)
+                info = GpuInfo(
+                    device_name=name,
+                    name=name,
+                    total_vram_mb=int(total / 1024 / 1024),
+                    used_vram_mb=int(used / 1024 / 1024),
+                    free_vram_mb=int(free / 1024 / 1024),
+                    torch_allocated_mb=int(allocated / 1024 / 1024),
+                    torch_reserved_mb=int(reserved / 1024 / 1024),
+                )
+                try:
+                    import pynvml  # type: ignore
+
+                    pynvml.nvmlInit()
+                    handle = pynvml.nvmlDeviceGetHandleByIndex(int(dev))
+                    mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                    nvml_name = pynvml.nvmlDeviceGetName(handle)
+                    if isinstance(nvml_name, bytes):
+                        nvml_name = nvml_name.decode("utf-8", errors="ignore")
+                    info.name = str(nvml_name or info.name)
+                    info.device_name = info.name
+                    info.total_vram_mb = int(int(mem_info.total) / 1024 / 1024)
+                    info.used_vram_mb = int(int(mem_info.used) / 1024 / 1024)
+                    info.free_vram_mb = int(int(mem_info.free) / 1024 / 1024)
+                except Exception:
+                    pass
                 return asdict(
-                    GpuInfo(
-                        device_name=name,
-                        name=name,
-                        total_vram_mb=int(total / 1024 / 1024),
-                        used_vram_mb=int(used / 1024 / 1024),
-                        free_vram_mb=int(free / 1024 / 1024),
-                    )
+                    info
                 )
         except Exception:
             pass
-        return asdict(GpuInfo())
+        return asdict(default)
 
     async def ensure_llm_ready(self) -> None:
         async with self._lock:
             if self._music is not None and getattr(self._music, "is_loaded", False) and self._config.auto_serial:
                 await self._set_state(ModelState.UNLOADING_MUSIC, "music")
                 await self._music.unload_model()
+            if self._asr is not None and getattr(self._asr, "is_loaded", False) and self._config.auto_serial:
+                await self._set_state(ModelState.UNLOADING_ASR, "asr")
+                await self._asr.unload_model()
             if self._tts.is_loaded and self._config.auto_serial:
                 await self._set_state(ModelState.UNLOADING_TTS, "tts")
                 await self._tts.unload_model()
@@ -216,6 +269,9 @@ class ModelOrchestrator:
             if self._music is not None and getattr(self._music, "is_loaded", False) and self._config.auto_serial:
                 await self._set_state(ModelState.UNLOADING_MUSIC, "music")
                 await self._music.unload_model()
+            if self._asr is not None and getattr(self._asr, "is_loaded", False) and self._config.auto_serial:
+                await self._set_state(ModelState.UNLOADING_ASR, "asr")
+                await self._asr.unload_model()
             if self._llm.is_loaded and self._config.auto_serial:
                 await self._set_state(ModelState.UNLOADING_LLM, "llm")
                 await self._llm.unload_model()
@@ -252,6 +308,9 @@ class ModelOrchestrator:
         self._config = self._normalize_music_config(self._config)
         active_model_dir = self.get_active_music_model_dir(self._config)
         async with self._lock:
+            if self._asr is not None and getattr(self._asr, "is_loaded", False) and self._config.auto_serial:
+                await self._set_state(ModelState.UNLOADING_ASR, "asr")
+                await self._asr.unload_model()
             if self._llm.is_loaded and self._config.auto_serial:
                 await self._set_state(ModelState.UNLOADING_LLM, "llm")
                 await self._llm.unload_model()
@@ -278,6 +337,38 @@ class ModelOrchestrator:
                 )
             await self._set_state(ModelState.MUSIC_READY, "music")
 
+    async def ensure_asr_ready(self, *, backend: str | None = None) -> None:
+        if self._asr is None:
+            raise RuntimeError("ASR engine is not configured")
+        target_backend = str(backend or self._config.asr_backend or "whisper").strip().lower() or "whisper"
+        async with self._lock:
+            if self._music is not None and getattr(self._music, "is_loaded", False) and self._config.auto_serial:
+                await self._set_state(ModelState.UNLOADING_MUSIC, "music")
+                await self._music.unload_model()
+            if self._llm.is_loaded and self._config.auto_serial:
+                await self._set_state(ModelState.UNLOADING_LLM, "llm")
+                await self._llm.unload_model()
+            if self._tts.is_loaded and self._config.auto_serial:
+                await self._set_state(ModelState.UNLOADING_TTS, "tts")
+                await self._tts.unload_model()
+            need_reload = True
+            if hasattr(self._asr, "needs_reload"):
+                need_reload = bool(
+                    self._asr.needs_reload(
+                        model_path=self._config.asr_model_path,
+                        device=self._config.asr_device,
+                        backend=target_backend,
+                    )
+                )
+            if need_reload:
+                await self._set_state(ModelState.LOADING_ASR, "asr")
+                await self._asr.load_model(
+                    model_path=self._config.asr_model_path,
+                    device=self._config.asr_device,
+                    backend=target_backend,
+                )
+            await self._set_state(ModelState.ASR_READY, "asr")
+
     async def unload_llm(self) -> None:
         async with self._lock:
             if self._llm.is_loaded:
@@ -301,20 +392,33 @@ class ModelOrchestrator:
             await self._music.unload_model()
             await self._set_state(ModelState.IDLE, "music")
 
+    async def unload_asr(self) -> None:
+        if self._asr is None:
+            return
+        async with self._lock:
+            if getattr(self._asr, "is_loaded", False):
+                await self._set_state(ModelState.UNLOADING_ASR, "asr")
+            await self._asr.unload_model()
+            await self._set_state(ModelState.IDLE, "asr")
+
     async def get_status(self) -> dict:
         self._config = self._normalize_music_config(self._config)
         llm_loaded = bool(self._llm.is_loaded)
         tts_loaded = bool(self._tts.is_loaded)
         music_loaded = bool(getattr(self._music, "is_loaded", False)) if self._music is not None else False
+        asr_loaded = bool(getattr(self._asr, "is_loaded", False)) if self._asr is not None else False
         llm_error = getattr(self._llm, "last_error", "")
         tts_error = getattr(self._tts, "last_error", "")
         music_error = getattr(self._music, "last_error", "") if self._music is not None else ""
+        asr_error = getattr(self._asr, "last_error", "") if self._asr is not None else ""
         llm_backend = getattr(self._llm, "backend_name", "unknown")
         tts_backend = getattr(self._tts, "backend_name", "unknown")
         music_backend = getattr(self._music, "backend_name", "unknown") if self._music is not None else "disabled"
+        asr_backend = getattr(self._asr, "backend_name", "unknown") if self._asr is not None else "disabled"
         llm_status = "ready" if llm_loaded else ("error" if llm_error else "idle")
         tts_status = "ready" if tts_loaded else ("error" if tts_error else "idle")
         music_status = "ready" if music_loaded else ("error" if music_error else "idle")
+        asr_status = "ready" if asr_loaded else ("error" if asr_error else "idle")
         llm_fallback_active = bool(
             llm_loaded
             and llm_backend == "mock"
@@ -331,15 +435,19 @@ class ModelOrchestrator:
             "llm_loaded": llm_loaded,
             "tts_loaded": tts_loaded,
             "music_loaded": music_loaded,
+            "asr_loaded": asr_loaded,
             "llm_status": llm_status,
             "tts_status": tts_status,
             "music_status": music_status,
+            "asr_status": asr_status,
             "llm_backend": llm_backend,
             "tts_backend": tts_backend,
             "music_backend": music_backend,
+            "asr_backend": asr_backend,
             "llm_error": llm_error,
             "tts_error": tts_error,
             "music_error": music_error,
+            "asr_error": asr_error,
             "llm_fallback_active": llm_fallback_active,
             "llm_think_mode_effective": llm_think_mode_effective,
             "llm_think_mode_support": llm_think_mode_support,

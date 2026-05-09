@@ -7,12 +7,15 @@ export const useSpeechRecognitionStore = create((set) => ({
   warnings: [],
   alignments: [],
   speakerMap: {},
+  showTimeline: false,
   error: "",
   backendUsed: "",
   modelFiles: null,
   translationSource: "secondary_local",
   translationMode: "polish_only",
   translationTargetLanguage: "中文",
+  asrBackend: "whisper",
+  asrEnableTimestamps: false,
   translationResult: "",
   translationError: "",
   translationEngineStatus: {
@@ -28,6 +31,7 @@ export const useSpeechRecognitionStore = create((set) => ({
   setWarnings: (warnings) => set({ warnings: Array.isArray(warnings) ? warnings : [] }),
   setAlignments: (alignments) => set({ alignments: Array.isArray(alignments) ? alignments : [] }),
   setSpeakerMap: (speakerMap) => set({ speakerMap: speakerMap && typeof speakerMap === "object" ? { ...speakerMap } : {} }),
+  setShowTimeline: (showTimeline) => set({ showTimeline: Boolean(showTimeline) }),
   updateSpeakerMapEntry: (source, target) =>
     set((state) => ({
       speakerMap: {
@@ -41,6 +45,11 @@ export const useSpeechRecognitionStore = create((set) => ({
   setTranslationSource: (translationSource) => set({ translationSource: String(translationSource ?? "secondary_local") }),
   setTranslationMode: (translationMode) => set({ translationMode: String(translationMode ?? "polish_only") }),
   setTranslationTargetLanguage: (translationTargetLanguage) => set({ translationTargetLanguage: String(translationTargetLanguage ?? "中文") }),
+  setAsrBackend: (asrBackend) => {
+    const val = String(asrBackend ?? "whisper").trim().toLowerCase();
+    set({ asrBackend: val === "qwen3_crispasr" ? "qwen3_crispasr" : "whisper" });
+  },
+  setAsrEnableTimestamps: (asrEnableTimestamps) => set({ asrEnableTimestamps: Boolean(asrEnableTimestamps) }),
   setTranslationResult: (translationResult) => set({ translationResult: String(translationResult ?? "") }),
   setTranslationError: (translationError) => set({ translationError: String(translationError ?? "") }),
   setTranslationEngineStatus: (translationEngineStatus) =>
@@ -65,10 +74,12 @@ export const useSpeechRecognitionStore = create((set) => ({
       warnings: [],
       alignments: [],
       speakerMap: {},
+      showTimeline: false,
       error: "",
       backendUsed: "",
       modelFiles: null,
       translationResult: "",
       translationError: "",
+      asrEnableTimestamps: false,
     }),
 }));

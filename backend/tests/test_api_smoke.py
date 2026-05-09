@@ -60,6 +60,12 @@ class ApiSmokeTest(unittest.TestCase):
         self.assertIn("llm_think_mode_support", body)
         self.assertIn("llm_load_mode", body)
         self.assertIn("asr_backend", body)
+        self.assertIn("asr_default_backend", body)
+        self.assertIn("qwen3_asr_ready", body)
+        self.assertIn("qwen3_asr_crispasr_exe_exists", body)
+        self.assertIn("qwen3_asr_model_exists", body)
+        self.assertIn("qwen3_asr_forced_aligner_model_path", body)
+        self.assertIn("qwen3_asr_forced_aligner_model_exists", body)
         self.assertIn("python_executable", body)
         self.assertIn("llama_cpp_available", body)
         self.assertIn("llama_cpp_module_path", body)
@@ -415,7 +421,13 @@ class ApiSmokeTest(unittest.TestCase):
         asr = self.app_state.asr_engine
         original_transcribe = asr.transcribe
 
-        async def fake_transcribe(audio_path: str, *, backend: str = "whisper", speaker_labels: bool = False):
+        async def fake_transcribe(
+            audio_path: str,
+            *,
+            backend: str = "whisper",
+            speaker_labels: bool = False,
+            enable_timestamps: bool | None = None,
+        ):
             self.assertTrue(Path(audio_path).exists())
             return {
                 "text": "测试文本",
@@ -448,7 +460,7 @@ class ApiSmokeTest(unittest.TestCase):
     def test_asr_transcribe_file_rejects_qwen_backend(self) -> None:
         response = self.client.post(
             "/api/v1/asr/transcribe-file",
-            data={"backend": "qwen3_asr", "speaker_labels": "false"},
+            data={"backend": "not_a_backend", "speaker_labels": "false"},
             files={"file": ("sample.wav", b"RIFFdemo", "audio/wav")},
         )
         self.assertEqual(response.status_code, 400)

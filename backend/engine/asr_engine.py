@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 from typing import Any
 
 from backend.config import settings
@@ -12,8 +13,15 @@ from backend.config import settings
 class ASREngine:
     def __init__(self) -> None:
         self.is_loaded = False
+        self.default_backend = settings.default_asr_backend
         self.model_path = settings.default_asr_model_path
         self.device = settings.default_asr_device
+        self.crispasr_exe = settings.default_qwen3_asr_crispasr_exe
+        self.qwen3_model_path = settings.default_qwen3_asr_model_path
+        self.qwen3_forced_aligner_model_path = settings.default_qwen3_asr_forced_aligner_model_path
+        self.qwen3_threads = int(settings.default_qwen3_asr_threads)
+        self.qwen3_language = settings.default_qwen3_asr_language
+        self.qwen3_enable_timestamps = bool(settings.default_qwen3_asr_enable_timestamps)
         self.pyannote_model_id = settings.default_pyannote_model_id
         self.pyannote_auth_token = settings.default_pyannote_auth_token
         self.pyannote_device = settings.default_pyannote_device
@@ -25,6 +33,18 @@ class ASREngine:
         self._pyannote_loaded = False
         self._pyannote_error = ""
 
+    def needs_reload(self, *, model_path: str | None = None, device: str | None = None, backend: str = "whisper") -> bool:
+        if not self.is_loaded:
+            return True
+        target_backend = self._normalize_backend(backend)
+        if (self._backend or "") != target_backend:
+            return True
+        target_model_path = model_path or self.model_path
+        target_device = device or self.device
+        if target_backend == "whisper":
+            return (target_model_path or "") != (self.model_path or "") or (target_device or "") != (self.device or "")
+        return False
+
     async def load_model(
         self,
         model_path: str | None = None,
@@ -32,11 +52,21 @@ class ASREngine:
         backend: str = "whisper",
     ) -> None:
         target_backend = self._normalize_backend(backend)
-        if target_backend != "whisper":
-            raise ValueError(f"Unsupported ASR backend: {backend}")
+        self.default_backend = target_backend
         self.model_path = model_path or self.model_path or "base"
         self.device = device or self.device or "cpu"
-        await self._load_whisper_like_model()
+        if target_backend == "whisper":
+            await self._load_whisper_like_model()
+            return
+        if target_backend == "qwen3_crispasr":
+            self._validate_crispasr_config()
+            self._model = {"backend": "qwen3_crispasr"}
+            self._backend = "qwen3_crispasr"
+            self.backend_name = "qwen3_crispasr"
+            self.last_error = ""
+            self.is_loaded = True
+            return
+        raise ValueError(f"Unsupported ASR backend: {backend}")
 
     async def unload_model(self) -> None:
         self._model = None
@@ -61,26 +91,64 @@ class ASREngine:
         *,
         backend: str = "whisper",
         speaker_labels: bool = False,
+        enable_timestamps: bool | None = None,
     ) -> dict[str, Any]:
         target = Path(audio_path)
         if not target.exists():
             raise FileNotFoundError(f"Audio file not found: {target}")
 
-        target_backend = self._normalize_backend(backend)
-        if target_backend != "whisper":
+        requested_backend = backend if str(backend or "").strip() else self.default_backend
+        target_backend = self._normalize_backend(requested_backend)
+        if target_backend == "whisper":
+            raw_text, segments, backend_used = await self._transcribe_whisper_segments(target)
+        elif target_backend == "qwen3_crispasr":
+            # Qwen3-ASR (CrispASR) is treated as text-only in this project for stability.
+            # We explicitly disable speaker labeling and timeline behavior on this backend.
+            speaker_labels = False
+            enable_timestamps = False
+            raw_text, segments, backend_used = await self._transcribe_crispasr_segments(
+                target, enable_timestamps_override=enable_timestamps
+            )
+        else:
             raise ValueError(f"Unsupported ASR backend: {backend}")
-
-        raw_text, segments, backend_used = await self._transcribe_whisper_segments(target)
         if not raw_text:
             raise RuntimeError("ASR returned empty transcript")
 
         warnings: list[str] = []
         aligned_segments = [dict(segment or {}) for segment in (segments or [])]
+        if target_backend == "qwen3_crispasr":
+            warnings.append("Qwen3-ASR (CrispASR) 当前仅支持识别文本，已禁用时间轴与说话人标签。")
+        # Final safety net: if backend returned inline timestamp tokens as plain text,
+        # parse and merge them here so downstream alignment/speaker labeling can work.
+        if aligned_segments:
+            recovered_segments: list[dict[str, Any]] = []
+            for seg in aligned_segments:
+                text = str(seg.get("text", "") or "")
+                if "[" in text and "-->" in text and "]" in text:
+                    token_segments = self._parse_inline_timestamp_tokens(text)
+                    merged_segments = self._merge_timestamp_tokens(token_segments) if token_segments else []
+                    if merged_segments:
+                        recovered_segments.extend(merged_segments)
+                        continue
+                recovered_segments.append(seg)
+            aligned_segments = recovered_segments
+            if aligned_segments:
+                rebuilt_text = "\n".join(str(seg.get("text", "")).strip() for seg in aligned_segments if str(seg.get("text", "")).strip()).strip()
+                if rebuilt_text:
+                    raw_text = rebuilt_text
         speaker_map: dict[str, str] = {}
-        if speaker_labels:
+        has_timestamps = any(
+            isinstance(seg.get("start"), (int, float)) and isinstance(seg.get("end"), (int, float))
+            for seg in aligned_segments
+        )
+        if speaker_labels and has_timestamps:
             turns = await self._run_diarization(target)
-            labeled_text, aligned_segments, speaker_map = self._label_segments_with_turns(segments, raw_text, turns, warnings)
+            labeled_text, aligned_segments, speaker_map = self._label_segments_with_turns(aligned_segments, raw_text, turns, warnings)
             plain_text = self._strip_speaker_labels(labeled_text)
+        elif speaker_labels:
+            warnings.append("当前 ASR 输出缺少稳定时间戳，已跳过说话人分离。")
+            labeled_text = raw_text
+            plain_text = raw_text
         else:
             labeled_text = raw_text
             plain_text = raw_text
@@ -114,7 +182,21 @@ class ASREngine:
             "alignments": alignments,
             "speaker_map": speaker_map,
             "warnings": warnings,
-            "model_files": {},
+            "model_files": self._build_model_files(backend_used),
+        }
+
+    def _build_model_files(self, backend_name: str) -> dict[str, str]:
+        backend = str(backend_name or "").strip().lower()
+        if backend == "qwen3_crispasr":
+            return {
+                "main_model_path": str(Path(self.qwen3_model_path or "").expanduser()) if self.qwen3_model_path else "",
+                "crispasr_exe": str(Path(self.crispasr_exe or "").expanduser()) if self.crispasr_exe else "",
+                "forced_aligner_model_path": str(Path(self.qwen3_forced_aligner_model_path or "").expanduser())
+                if self.qwen3_forced_aligner_model_path
+                else "",
+            }
+        return {
+            "main_model_path": str(self.model_path or ""),
         }
 
     async def _load_whisper_like_model(self) -> None:
@@ -202,6 +284,266 @@ class ASREngine:
         if not segments and raw_text:
             segments = [{"start": None, "end": None, "text": raw_text}]
         return raw_text, segments, self._backend or "whisper"
+
+    def _validate_crispasr_config(self) -> None:
+        exe = Path(str(self.crispasr_exe or "").strip()).expanduser()
+        model = Path(str(self.qwen3_model_path or "").strip()).expanduser()
+        if not str(self.crispasr_exe or "").strip():
+            raise RuntimeError("未配置 CrispASR 可执行文件路径（qwen3_asr_crispasr_exe）")
+        if not exe.exists() or not exe.is_file():
+            raise RuntimeError(f"CrispASR 可执行文件不存在: {exe}")
+        if not str(self.qwen3_model_path or "").strip():
+            raise RuntimeError("未配置 Qwen3-ASR GGUF 模型路径（qwen3_asr_model_path）")
+        if not model.exists() or not model.is_file():
+            raise RuntimeError(f"Qwen3-ASR GGUF 模型不存在: {model}")
+
+    @staticmethod
+    def _parse_srt_time_to_seconds(value: str) -> float:
+        text = str(value or "").strip()
+        m = re.match(r"^(\d+):(\d+):(\d+)[,.](\d+)$", text)
+        if not m:
+            return 0.0
+        hh = int(m.group(1))
+        mm = int(m.group(2))
+        ss = int(m.group(3))
+        frac_text = m.group(4)
+        if len(frac_text) >= 3:
+            ms = int(frac_text[:3])
+        else:
+            ms = int(frac_text.ljust(3, "0"))
+        return float(hh * 3600 + mm * 60 + ss + ms / 1000.0)
+
+    @classmethod
+    def _parse_srt_segments(cls, text: str) -> list[dict[str, Any]]:
+        blocks = re.split(r"\r?\n\r?\n+", str(text or "").strip())
+        segments: list[dict[str, Any]] = []
+        for block in blocks:
+            lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+            if len(lines) < 2:
+                continue
+            if re.fullmatch(r"\d+", lines[0]):
+                lines = lines[1:]
+            if not lines:
+                continue
+            time_line = lines[0]
+            tm = re.match(r"^(.+?)\s*-->\s*(.+?)$", time_line)
+            if not tm:
+                continue
+            start = cls._parse_srt_time_to_seconds(tm.group(1))
+            end = cls._parse_srt_time_to_seconds(tm.group(2))
+            cue_text = " ".join(lines[1:]).strip()
+            if cue_text:
+                segments.append({"start": start, "end": end, "text": cue_text})
+        return segments
+
+    @classmethod
+    def _parse_inline_timestamp_tokens(cls, text: str) -> list[dict[str, Any]]:
+        pattern = re.compile(r"\[\s*([0-9:.,]+)\s*-->\s*([0-9:.,]+)\s*\]\s*([^\[]*)")
+        tokens: list[dict[str, Any]] = []
+        for match in pattern.finditer(str(text or "")):
+            start = cls._parse_srt_time_to_seconds(match.group(1))
+            end = cls._parse_srt_time_to_seconds(match.group(2))
+            chunk = str(match.group(3) or "").strip()
+            if not chunk:
+                continue
+            if end < start:
+                end = start
+            tokens.append({"start": start, "end": end, "text": chunk})
+        return tokens
+
+    @staticmethod
+    def _join_tokens_for_language(current: str, token: str) -> str:
+        left = str(current or "")
+        right = str(token or "")
+        if not left:
+            return right
+        if not right:
+            return left
+        if left.endswith(" ") or right.startswith(" "):
+            return left + right
+        cjk_or_punc = r"[\u4e00-\u9fff，。！？；：、“”‘’（）《》【】,.!?;:]"
+        if re.match(cjk_or_punc, right[0]) or re.match(cjk_or_punc, left[-1]):
+            return left + right
+        return f"{left} {right}"
+
+    @classmethod
+    def _merge_timestamp_tokens(cls, tokens: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not tokens:
+            return []
+        merged: list[dict[str, Any]] = []
+        sentence_end = {"。", "！", "？", ".", "!", "?"}
+        punctuation = {"，", "。", "！", "？", "；", "：", ",", ".", "!", "?", ";", ":"}
+        gap_threshold = 0.45
+
+        current: dict[str, Any] | None = None
+        for idx, token in enumerate(tokens):
+            text = str(token.get("text", "")).strip()
+            if not text:
+                continue
+            start = float(token.get("start", 0.0) or 0.0)
+            end = float(token.get("end", start) or start)
+            if end < start:
+                end = start
+
+            if current is None:
+                current = {"start": start, "end": end, "text": text}
+                continue
+
+            gap = max(0.0, start - float(current["end"]))
+            should_split = gap > gap_threshold
+            if str(current["text"])[-1:] in sentence_end:
+                should_split = True
+            if text in punctuation and not should_split:
+                current["text"] = cls._join_tokens_for_language(str(current["text"]), text)
+                current["end"] = max(float(current["end"]), end)
+                continue
+
+            if should_split:
+                merged.append(current)
+                current = {"start": start, "end": end, "text": text}
+            else:
+                current["text"] = cls._join_tokens_for_language(str(current["text"]), text)
+                current["end"] = max(float(current["end"]), end)
+
+            if current is not None and float(current["end"]) <= float(current["start"]) and idx + 1 < len(tokens):
+                next_start = float(tokens[idx + 1].get("start", current["end"]) or current["end"])
+                if next_start > float(current["start"]):
+                    current["end"] = next_start
+
+        if current is not None:
+            merged.append(current)
+        return merged
+
+    async def _transcribe_crispasr_segments(
+        self,
+        target: Path,
+        *,
+        enable_timestamps_override: bool | None = None,
+    ) -> tuple[str, list[dict[str, Any]], str]:
+        if not self.is_loaded or self._backend != "qwen3_crispasr":
+            await self.load_model(self.model_path, self.device, backend="qwen3_crispasr")
+        self._validate_crispasr_config()
+
+        exe = str(Path(self.crispasr_exe).expanduser())
+        model = str(Path(self.qwen3_model_path).expanduser())
+        language = str(self.qwen3_language or "auto").strip() or "auto"
+        threads = int(self.qwen3_threads or 0)
+        if enable_timestamps_override is None:
+            use_timestamps = bool(self.qwen3_enable_timestamps)
+        else:
+            use_timestamps = bool(enable_timestamps_override)
+        forced_aligner = str(self.qwen3_forced_aligner_model_path or "").strip()
+
+        work_dir = Path(tempfile.mkdtemp(prefix="qwen3_asr_", dir=settings.output_dir))
+        normalized_wav = work_dir / "input_16k.wav"
+        srt_output = work_dir / "output.srt"
+        try:
+            cmd_decode = [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-nostdin",
+                "-y",
+                "-i",
+                str(target),
+                "-ac",
+                "1",
+                "-ar",
+                "16000",
+                "-c:a",
+                "pcm_s16le",
+                str(normalized_wav),
+            ]
+            try:
+                await asyncio.to_thread(subprocess.run, cmd_decode, capture_output=True, check=True)
+            except FileNotFoundError as exc:
+                raise RuntimeError("未找到 ffmpeg，请先安装并加入 PATH。") from exc
+            except subprocess.CalledProcessError as exc:
+                stderr = (exc.stderr or b"").decode("utf-8", errors="ignore").strip()
+                raise RuntimeError(f"ffmpeg 转码失败：{stderr or exc}") from exc
+
+            cmd = [
+                exe,
+                "--backend",
+                "qwen3",
+                "-m",
+                model,
+                "-f",
+                str(normalized_wav),
+            ]
+            if threads > 0:
+                cmd.extend(["-t", str(threads)])
+            if language:
+                cmd.extend(["-l", language])
+            if forced_aligner:
+                forced_aligner_path = Path(forced_aligner).expanduser()
+                if not forced_aligner_path.exists() or not forced_aligner_path.is_file():
+                    raise RuntimeError(f"Qwen3-ForcedAligner GGUF 模型不存在: {forced_aligner_path}")
+                cmd.extend(["-am", str(forced_aligner_path)])
+            if use_timestamps:
+                cmd.extend(["-osrt"])
+                if forced_aligner:
+                    cmd.extend(["-ml", "1"])
+
+            try:
+                proc = await asyncio.to_thread(
+                    subprocess.run,
+                    cmd,
+                    capture_output=True,
+                    check=False,
+                    text=True,
+                    encoding="utf-8",
+                    errors="ignore",
+                )
+            except FileNotFoundError as exc:
+                raise RuntimeError(f"未找到 CrispASR 可执行文件：{exe}") from exc
+
+            if proc.returncode != 0:
+                message = (proc.stderr or proc.stdout or "").strip()
+                raise RuntimeError(f"CrispASR 运行失败（exit={proc.returncode}）：{message or 'unknown error'}")
+
+            raw_output = (proc.stdout or "").strip()
+            segments: list[dict[str, Any]] = []
+            if use_timestamps:
+                if srt_output.exists():
+                    srt_text = srt_output.read_text(encoding="utf-8", errors="ignore")
+                    segments = self._parse_srt_segments(srt_text)
+                if not segments:
+                    segments = self._parse_srt_segments(raw_output)
+                if not segments:
+                    token_segments = self._parse_inline_timestamp_tokens(raw_output)
+                    segments = self._merge_timestamp_tokens(token_segments)
+                raw_text = "\n".join(seg.get("text", "").strip() for seg in segments if seg.get("text", "").strip()).strip()
+                if not raw_text:
+                    raw_text = raw_output.strip()
+            else:
+                raw_text = raw_output.strip()
+                # CrispASR sometimes emits inline timestamp tokens even when -osrt is not explicitly used.
+                # Always try to parse/merge them so alignments remain usable for speaker labeling and preview.
+                token_segments = self._parse_inline_timestamp_tokens(raw_output)
+                if token_segments:
+                    segments = self._merge_timestamp_tokens(token_segments)
+                    merged_text = "\n".join(seg.get("text", "").strip() for seg in segments if seg.get("text", "").strip()).strip()
+                    if merged_text:
+                        raw_text = merged_text
+
+            if not raw_text and segments:
+                raw_text = "\n".join(seg.get("text", "").strip() for seg in segments if seg.get("text", "").strip()).strip()
+            if not raw_text:
+                raise RuntimeError("CrispASR 输出为空。")
+            if not segments:
+                segments = [{"start": None, "end": None, "text": raw_text}]
+            return raw_text, segments, "qwen3_crispasr"
+        finally:
+            for path in (normalized_wav, srt_output):
+                try:
+                    path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+            try:
+                work_dir.rmdir()
+            except Exception:
+                pass
 
     async def _run_diarization(self, target: Path) -> list[dict[str, Any]]:
         pipeline = await self._ensure_diarization_pipeline()
@@ -412,9 +754,11 @@ class ASREngine:
 
     @staticmethod
     def _normalize_backend(backend: str | None) -> str:
-        val = (backend or "whisper").strip().lower()
+        val = (backend or "").strip().lower()
         if val in {"", "whisper"}:
             return "whisper"
+        if val in {"qwen3_crispasr", "qwen3_asr", "qwen3-asr"}:
+            return "qwen3_crispasr"
         return val
 
     @staticmethod

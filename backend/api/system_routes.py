@@ -56,6 +56,24 @@ async def get_status(state=Depends(get_app_state)):
     status["asr_error"] = getattr(state.asr_engine, "last_error", "")
     status["asr_device"] = getattr(state.asr_engine, "device", "")
     status["asr_model_path"] = getattr(state.asr_engine, "model_path", "")
+    status["asr_default_backend"] = getattr(state.asr_engine, "default_backend", "whisper")
+    status["qwen3_asr_crispasr_exe"] = getattr(state.asr_engine, "crispasr_exe", "")
+    status["qwen3_asr_model_path"] = getattr(state.asr_engine, "qwen3_model_path", "")
+    status["qwen3_asr_forced_aligner_model_path"] = getattr(state.asr_engine, "qwen3_forced_aligner_model_path", "")
+    status["qwen3_asr_threads"] = int(getattr(state.asr_engine, "qwen3_threads", 0) or 0)
+    status["qwen3_asr_language"] = getattr(state.asr_engine, "qwen3_language", "auto")
+    status["qwen3_asr_enable_timestamps"] = bool(getattr(state.asr_engine, "qwen3_enable_timestamps", False))
+    crispasr_exe = Path(str(status["qwen3_asr_crispasr_exe"] or "")).expanduser() if status["qwen3_asr_crispasr_exe"] else None
+    qwen3_model = Path(str(status["qwen3_asr_model_path"] or "")).expanduser() if status["qwen3_asr_model_path"] else None
+    qwen3_aligner = (
+        Path(str(status["qwen3_asr_forced_aligner_model_path"] or "")).expanduser()
+        if status["qwen3_asr_forced_aligner_model_path"]
+        else None
+    )
+    status["qwen3_asr_crispasr_exe_exists"] = bool(crispasr_exe and crispasr_exe.exists() and crispasr_exe.is_file())
+    status["qwen3_asr_model_exists"] = bool(qwen3_model and qwen3_model.exists() and qwen3_model.is_file())
+    status["qwen3_asr_forced_aligner_model_exists"] = bool(qwen3_aligner and qwen3_aligner.exists() and qwen3_aligner.is_file())
+    status["qwen3_asr_ready"] = bool(status["qwen3_asr_crispasr_exe_exists"] and status["qwen3_asr_model_exists"])
     pyannote_status = state.asr_engine.get_pyannote_status()
     status["pyannote_model_id"] = pyannote_status.get("pyannote_model_id", "")
     status["pyannote_loaded"] = bool(pyannote_status.get("pyannote_loaded", False))
@@ -71,8 +89,15 @@ async def get_gpu_info(state=Depends(get_app_state)):
 
 @router.put("/orchestrator/config")
 async def update_orchestrator_config(payload: OrchestratorConfigPayload, state=Depends(get_app_state)):
+    old_asr_backend = getattr(state.asr_engine, "default_backend", "whisper")
     old_model_path = getattr(state.asr_engine, "model_path", "")
     old_device = getattr(state.asr_engine, "device", "")
+    old_qwen3_crispasr_exe = getattr(state.asr_engine, "crispasr_exe", "")
+    old_qwen3_model_path = getattr(state.asr_engine, "qwen3_model_path", "")
+    old_qwen3_forced_aligner_model_path = getattr(state.asr_engine, "qwen3_forced_aligner_model_path", "")
+    old_qwen3_threads = int(getattr(state.asr_engine, "qwen3_threads", 0) or 0)
+    old_qwen3_language = getattr(state.asr_engine, "qwen3_language", "auto")
+    old_qwen3_timestamps = bool(getattr(state.asr_engine, "qwen3_enable_timestamps", False))
     old_pyannote_model_id = getattr(state.asr_engine, "pyannote_model_id", "")
     old_pyannote_auth_token = getattr(state.asr_engine, "pyannote_auth_token", "")
     old_pyannote_device = getattr(state.asr_engine, "pyannote_device", "")
@@ -82,19 +107,33 @@ async def update_orchestrator_config(payload: OrchestratorConfigPayload, state=D
     next_music_model_dir = state.orchestrator.get_active_music_model_dir(config)
     saved = await state.orchestrator.update_config(config)
     save_runtime_config(state.settings.runtime_config_path, config)
+    state.asr_engine.default_backend = config.asr_backend
     state.asr_engine.model_path = config.asr_model_path
     state.asr_engine.device = config.asr_device
+    state.asr_engine.crispasr_exe = config.qwen3_asr_crispasr_exe
+    state.asr_engine.qwen3_model_path = config.qwen3_asr_model_path
+    state.asr_engine.qwen3_forced_aligner_model_path = config.qwen3_asr_forced_aligner_model_path
+    state.asr_engine.qwen3_threads = int(config.qwen3_asr_threads)
+    state.asr_engine.qwen3_language = config.qwen3_asr_language
+    state.asr_engine.qwen3_enable_timestamps = bool(config.qwen3_asr_enable_timestamps)
     state.asr_engine.pyannote_model_id = config.pyannote_model_id
     state.asr_engine.pyannote_auth_token = config.pyannote_auth_token
     state.asr_engine.pyannote_device = config.pyannote_device
     if state.asr_engine.is_loaded and (
-        old_model_path != config.asr_model_path
+        old_asr_backend != config.asr_backend
+        or old_model_path != config.asr_model_path
         or old_device != config.asr_device
+        or old_qwen3_crispasr_exe != config.qwen3_asr_crispasr_exe
+        or old_qwen3_model_path != config.qwen3_asr_model_path
+        or old_qwen3_forced_aligner_model_path != config.qwen3_asr_forced_aligner_model_path
+        or old_qwen3_threads != int(config.qwen3_asr_threads)
+        or old_qwen3_language != config.qwen3_asr_language
+        or old_qwen3_timestamps != bool(config.qwen3_asr_enable_timestamps)
         or old_pyannote_model_id != config.pyannote_model_id
         or old_pyannote_auth_token != config.pyannote_auth_token
         or old_pyannote_device != config.pyannote_device
     ):
-        await state.asr_engine.unload_model()
+        await state.orchestrator.unload_asr()
     if state.translation_llm_engine.is_loaded:
         await state.translation_llm_engine.unload_model()
         state.translation_engine_source = ""
@@ -113,8 +152,15 @@ async def update_orchestrator_config(payload: OrchestratorConfigPayload, state=D
 
 @router.post("/orchestrator/config/reset")
 async def reset_orchestrator_config(state=Depends(get_app_state)):
+    old_asr_backend = getattr(state.asr_engine, "default_backend", "whisper")
     old_model_path = getattr(state.asr_engine, "model_path", "")
     old_device = getattr(state.asr_engine, "device", "")
+    old_qwen3_crispasr_exe = getattr(state.asr_engine, "crispasr_exe", "")
+    old_qwen3_model_path = getattr(state.asr_engine, "qwen3_model_path", "")
+    old_qwen3_forced_aligner_model_path = getattr(state.asr_engine, "qwen3_forced_aligner_model_path", "")
+    old_qwen3_threads = int(getattr(state.asr_engine, "qwen3_threads", 0) or 0)
+    old_qwen3_language = getattr(state.asr_engine, "qwen3_language", "auto")
+    old_qwen3_timestamps = bool(getattr(state.asr_engine, "qwen3_enable_timestamps", False))
     old_pyannote_model_id = getattr(state.asr_engine, "pyannote_model_id", "")
     old_pyannote_auth_token = getattr(state.asr_engine, "pyannote_auth_token", "")
     old_pyannote_device = getattr(state.asr_engine, "pyannote_device", "")
@@ -124,19 +170,33 @@ async def reset_orchestrator_config(state=Depends(get_app_state)):
     next_music_model_dir = state.orchestrator.get_active_music_model_dir(config)
     saved = await state.orchestrator.update_config(config)
     save_runtime_config(state.settings.runtime_config_path, config)
+    state.asr_engine.default_backend = config.asr_backend
     state.asr_engine.model_path = config.asr_model_path
     state.asr_engine.device = config.asr_device
+    state.asr_engine.crispasr_exe = config.qwen3_asr_crispasr_exe
+    state.asr_engine.qwen3_model_path = config.qwen3_asr_model_path
+    state.asr_engine.qwen3_forced_aligner_model_path = config.qwen3_asr_forced_aligner_model_path
+    state.asr_engine.qwen3_threads = int(config.qwen3_asr_threads)
+    state.asr_engine.qwen3_language = config.qwen3_asr_language
+    state.asr_engine.qwen3_enable_timestamps = bool(config.qwen3_asr_enable_timestamps)
     state.asr_engine.pyannote_model_id = config.pyannote_model_id
     state.asr_engine.pyannote_auth_token = config.pyannote_auth_token
     state.asr_engine.pyannote_device = config.pyannote_device
     if state.asr_engine.is_loaded and (
-        old_model_path != config.asr_model_path
+        old_asr_backend != config.asr_backend
+        or old_model_path != config.asr_model_path
         or old_device != config.asr_device
+        or old_qwen3_crispasr_exe != config.qwen3_asr_crispasr_exe
+        or old_qwen3_model_path != config.qwen3_asr_model_path
+        or old_qwen3_forced_aligner_model_path != config.qwen3_asr_forced_aligner_model_path
+        or old_qwen3_threads != int(config.qwen3_asr_threads)
+        or old_qwen3_language != config.qwen3_asr_language
+        or old_qwen3_timestamps != bool(config.qwen3_asr_enable_timestamps)
         or old_pyannote_model_id != config.pyannote_model_id
         or old_pyannote_auth_token != config.pyannote_auth_token
         or old_pyannote_device != config.pyannote_device
     ):
-        await state.asr_engine.unload_model()
+        await state.orchestrator.unload_asr()
     if state.translation_llm_engine.is_loaded:
         await state.translation_llm_engine.unload_model()
         state.translation_engine_source = ""
@@ -235,7 +295,7 @@ async def unload_music(state=Depends(get_app_state)):
 
 @router.post("/unload-asr")
 async def unload_asr(state=Depends(get_app_state)):
-    await state.asr_engine.unload_model()
+    await state.orchestrator.unload_asr()
     state.asr_engine.last_error = ""
     return {"status": "ok"}
 

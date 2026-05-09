@@ -67,6 +67,25 @@ class _FakeMusicEngine:
         self.unload_called = True
 
 
+class _FakeAsrEngine:
+    def __init__(self) -> None:
+        self.is_loaded = False
+        self.last_error = ""
+        self.backend_name = "unloaded"
+        self.loaded_args = None
+        self.unload_called = False
+
+    async def load_model(self, *args, **kwargs) -> None:
+        self.is_loaded = True
+        self.backend_name = str(kwargs.get("backend") or "whisper")
+        self.loaded_args = (args, kwargs)
+
+    async def unload_model(self) -> None:
+        self.is_loaded = False
+        self.backend_name = "unloaded"
+        self.unload_called = True
+
+
 class ModelOrchestratorTest(unittest.IsolatedAsyncioTestCase):
     async def test_status_marks_llm_fallback_active(self) -> None:
         llm = _FakeLlmEngine()
@@ -186,6 +205,33 @@ class ModelOrchestratorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(tts.unload_called)
         self.assertEqual(orch.state.value, "idle")
+
+    async def test_ensure_asr_ready_unloads_llm_tts_music_when_auto_serial_enabled(self) -> None:
+        llm = _FakeLlmEngine()
+        tts = _FakeTtsEngine()
+        music = _FakeMusicEngine()
+        asr = _FakeAsrEngine()
+        llm.is_loaded = True
+        tts.is_loaded = True
+        music.is_loaded = True
+        music.backend_name = "acestep_diffusers"
+        orch = ModelOrchestrator(llm, tts, music, asr)
+        orch.set_config(
+            OrchestratorConfig(
+                auto_serial=True,
+                asr_backend="qwen3_crispasr",
+                asr_model_path="base",
+                asr_device="cuda:0",
+            )
+        )
+
+        await orch.ensure_asr_ready()
+        self.assertTrue(asr.is_loaded)
+        self.assertTrue(llm.unload_called)
+        self.assertTrue(tts.unload_called)
+        self.assertTrue(music.unload_called)
+        _args, kwargs = asr.loaded_args
+        self.assertEqual(kwargs.get("backend"), "qwen3_crispasr")
 
 
 if __name__ == "__main__":

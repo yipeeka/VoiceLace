@@ -82,8 +82,19 @@ class Settings:
     default_music_model_variant: str = field(default_factory=lambda: os.getenv("BV_MUSIC_MODEL_VARIANT", "turbo"))
     default_music_enabled: bool = field(default_factory=lambda: os.getenv("BV_MUSIC_ENABLED", "false").lower() == "true")
     default_music_device_mode: str = field(default_factory=lambda: os.getenv("BV_MUSIC_DEVICE_MODE", "cpu_offload"))
+    default_asr_backend: str = field(default_factory=lambda: os.getenv("BV_ASR_BACKEND", "whisper"))
     default_asr_model_path: str = field(default_factory=lambda: os.getenv("BV_ASR_MODEL_PATH", "base"))
     default_asr_device: str = field(default_factory=lambda: os.getenv("BV_ASR_DEVICE", os.getenv("BV_TTS_DEVICE", "cuda:0")))
+    default_qwen3_asr_crispasr_exe: str = field(default_factory=lambda: os.getenv("BV_QWEN3_ASR_CRISPASR_EXE", ""))
+    default_qwen3_asr_model_path: str = field(default_factory=lambda: os.getenv("BV_QWEN3_ASR_MODEL_PATH", ""))
+    default_qwen3_asr_forced_aligner_model_path: str = field(
+        default_factory=lambda: os.getenv("BV_QWEN3_ASR_FORCED_ALIGNER_MODEL_PATH", "")
+    )
+    default_qwen3_asr_threads: int = field(default_factory=lambda: int(os.getenv("BV_QWEN3_ASR_THREADS", "0")))
+    default_qwen3_asr_language: str = field(default_factory=lambda: os.getenv("BV_QWEN3_ASR_LANGUAGE", "auto"))
+    default_qwen3_asr_enable_timestamps: bool = field(
+        default_factory=lambda: os.getenv("BV_QWEN3_ASR_ENABLE_TIMESTAMPS", "false").lower() == "true"
+    )
     default_pyannote_model_id: str = field(
         default_factory=lambda: os.getenv("BV_PYANNOTE_MODEL_ID", "pyannote/speaker-diarization-community-1")
     )

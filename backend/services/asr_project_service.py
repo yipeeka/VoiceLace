@@ -219,6 +219,8 @@ async def create_project_from_audio(
     audio_name: str | None,
     project_name: str | None,
     speaker_labels: bool,
+    asr_backend: str = "whisper",
+    enable_timestamps: bool = False,
     parse_mode: str,
     auto_parse: bool,
     speaker_map: dict[str, str] | None = None,
@@ -239,6 +241,9 @@ async def create_project_from_audio(
         await on_progress(event)
 
     await emit({"type": "chunk_total", "total": total_chunks})
+    orchestrator = getattr(state, "orchestrator", None)
+    if orchestrator is not None and hasattr(orchestrator, "ensure_asr_ready"):
+        await orchestrator.ensure_asr_ready(backend=asr_backend)
 
     work_dir = Path(tempfile.mkdtemp(prefix="asr_project_", dir=state.settings.output_dir))
     try:
@@ -262,8 +267,9 @@ async def create_project_from_audio(
                     target_path = audio_path
                 result = await state.asr_engine.transcribe(
                     str(target_path),
-                    backend="whisper",
+                    backend=asr_backend,
                     speaker_labels=speaker_labels,
+                    enable_timestamps=enable_timestamps,
                 )
                 raw_alignments = result.get("alignments") if isinstance(result, dict) else []
                 normalized: list[dict[str, Any]] = []
@@ -370,7 +376,11 @@ async def create_project_from_audio(
     parse_task_id: str | None = None
     if auto_parse and callable(enqueue_parse_task):
         try:
-            await state.asr_engine.unload_model()
+            orchestrator = getattr(state, "orchestrator", None)
+            if orchestrator is not None and hasattr(orchestrator, "unload_asr"):
+                await orchestrator.unload_asr()
+            else:
+                await state.asr_engine.unload_model()
             await emit({"type": "asr_unloaded_before_parse", "message": "已在自动解析前卸载 ASR 模型"})
         except Exception as exc:
             warning = f"自动解析前卸载 ASR 失败：{exc}"

@@ -53,8 +53,15 @@ export default function SystemStatusCard({
   const llamaCppModulePath = systemStatus?.llama_cpp_module_path ?? "";
   const asrLoaded = Boolean(systemStatus?.asr_loaded);
   const asrBackend = systemStatus?.asr_backend ?? "unknown";
+  const asrDefaultBackend = systemStatus?.asr_default_backend ?? systemStatus?.config?.asr_backend ?? "whisper";
   const asrError = systemStatus?.asr_error ?? "";
   const asrDevice = systemStatus?.asr_device ?? "";
+  const qwen3Ready = Boolean(systemStatus?.qwen3_asr_ready);
+  const qwen3Exe = systemStatus?.qwen3_asr_crispasr_exe ?? "";
+  const qwen3Model = systemStatus?.qwen3_asr_model_path ?? "";
+  const qwen3AlignerModel = systemStatus?.qwen3_asr_forced_aligner_model_path ?? "";
+  const qwen3AlignerModelExists = Boolean(systemStatus?.qwen3_asr_forced_aligner_model_exists);
+  const qwen3Timestamps = Boolean(systemStatus?.qwen3_asr_enable_timestamps);
   const pyannoteModelId = systemStatus?.pyannote_model_id ?? "";
   const pyannoteLoaded = Boolean(systemStatus?.pyannote_loaded);
   const pyannoteAvailable = Boolean(systemStatus?.pyannote_available);
@@ -190,9 +197,48 @@ export default function SystemStatusCard({
           </strong>
         </div>
         <div className="statRow">
+          <span>ASR 配置后端</span>
+          <strong>{asrDefaultBackend}</strong>
+        </div>
+        <div className="statRow">
           <span>ASR 设备</span>
           <strong>{asrDevice || "未设置"}</strong>
         </div>
+        {asrDefaultBackend === "qwen3_crispasr" ? (
+          <>
+            <div className="statRow">
+              <span>Qwen3-ASR 就绪</span>
+              <strong style={{ color: qwen3Ready ? "var(--success)" : "var(--warning)" }}>
+                {qwen3Ready ? "yes" : "no"}
+              </strong>
+            </div>
+            <div className="statRow">
+              <span>CrispASR 路径</span>
+              <strong title={qwen3Exe} style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {qwen3Exe || "未设置"}
+              </strong>
+            </div>
+            <div className="statRow">
+              <span>Qwen3 模型</span>
+              <strong title={qwen3Model} style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {qwen3Model || "未设置"}
+              </strong>
+            </div>
+            <div className="statRow">
+              <span>ForcedAligner</span>
+              <strong
+                title={qwen3AlignerModel}
+                style={{ color: qwen3AlignerModel ? (qwen3AlignerModelExists ? "var(--success)" : "var(--warning)") : "var(--text-secondary)", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+              >
+                {qwen3AlignerModel || "未设置（可选）"}
+              </strong>
+            </div>
+            <div className="statRow">
+              <span>时间戳模式</span>
+              <strong>{qwen3Timestamps ? "on" : "off"}</strong>
+            </div>
+          </>
+        ) : null}
         <div className="statRow">
           <span>pyannote 可用</span>
           <strong style={{ color: pyannoteAvailable ? "var(--success)" : "var(--warning)" }}>

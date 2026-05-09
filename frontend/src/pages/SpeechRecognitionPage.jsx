@@ -5,6 +5,7 @@ import GlassCard from "../components/shared/GlassCard";
 import ProjectToolbarCard from "../components/text/ProjectToolbarCard";
 import Button from "../components/ui/Button";
 import { useProjectStore } from "../stores/useProjectStore";
+import { useSettingsStore } from "../stores/useSettingsStore";
 import { useScriptStore } from "../stores/useScriptStore";
 import { useSpeechRecognitionStore } from "../stores/useSpeechRecognitionStore";
 import { useUiStore } from "../stores/useUiStore";
@@ -48,6 +49,8 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const speakerMap = useSpeechRecognitionStore((state) => state.speakerMap);
   const setSpeakerMap = useSpeechRecognitionStore((state) => state.setSpeakerMap);
   const updateSpeakerMapEntry = useSpeechRecognitionStore((state) => state.updateSpeakerMapEntry);
+  const showTimeline = useSpeechRecognitionStore((state) => state.showTimeline);
+  const setShowTimeline = useSpeechRecognitionStore((state) => state.setShowTimeline);
   const error = useSpeechRecognitionStore((state) => state.error);
   const setError = useSpeechRecognitionStore((state) => state.setError);
   const backendUsed = useSpeechRecognitionStore((state) => state.backendUsed);
@@ -60,6 +63,10 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const setTranslationMode = useSpeechRecognitionStore((state) => state.setTranslationMode);
   const translationTargetLanguage = useSpeechRecognitionStore((state) => state.translationTargetLanguage);
   const setTranslationTargetLanguage = useSpeechRecognitionStore((state) => state.setTranslationTargetLanguage);
+  const asrBackend = useSpeechRecognitionStore((state) => state.asrBackend);
+  const setAsrBackend = useSpeechRecognitionStore((state) => state.setAsrBackend);
+  const asrEnableTimestamps = useSpeechRecognitionStore((state) => state.asrEnableTimestamps);
+  const setAsrEnableTimestamps = useSpeechRecognitionStore((state) => state.setAsrEnableTimestamps);
   const translationResult = useSpeechRecognitionStore((state) => state.translationResult);
   const setTranslationResult = useSpeechRecognitionStore((state) => state.setTranslationResult);
   const translationError = useSpeechRecognitionStore((state) => state.translationError);
@@ -89,6 +96,8 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const setSourceText = useScriptStore((state) => state.setSourceText);
   const setProjectSaveAction = useUiStore((state) => state.setProjectSaveAction);
   const clearProjectSaveAction = useUiStore((state) => state.clearProjectSaveAction);
+  const systemStatus = useSettingsStore((state) => state.systemStatus);
+  const refreshSystemStatus = useSettingsStore((state) => state.refreshSystemStatus);
   const [isLoadingTranslationEngine, setIsLoadingTranslationEngine] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
   const isTranslationEngineLoaded = Boolean(translationEngineStatus?.loaded);
@@ -145,6 +154,17 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     });
   }, [alignments, speakerMap]);
 
+  const formatTimestamp = useCallback((ms) => {
+    const total = Math.max(0, Number(ms || 0));
+    const hh = Math.floor(total / 3600000);
+    const mm = Math.floor((total % 3600000) / 60000);
+    const ss = Math.floor((total % 60000) / 1000);
+    const mmm = Math.floor(total % 1000);
+    const pad2 = (v) => String(v).padStart(2, "0");
+    const pad3 = (v) => String(v).padStart(3, "0");
+    return `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}.${pad3(mmm)}`;
+  }, []);
+
   const mappedTranscript = useMemo(() => {
     if (!speakerLabels) return transcript;
     if (!remappedAlignments.length) return transcript;
@@ -159,9 +179,68 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       .join("\n");
   }, [remappedAlignments, speakerLabels, transcript]);
 
-  const previewText = speakerLabels ? mappedTranscript : plainText;
+  const mappedTimelineText = useMemo(() => {
+    if (!Array.isArray(remappedAlignments) || !remappedAlignments.length) return "";
+    return remappedAlignments
+      .map((item) => {
+        const text = String(item?.text || "").trim();
+        if (!text) return "";
+        const start = formatTimestamp(item?.start_ms);
+        const end = formatTimestamp(item?.end_ms);
+        const speaker = String(item?.speaker || "").trim();
+        const body = speakerLabels && speaker ? `${speaker}：${text}` : text;
+        return `[${start} --> ${end}] ${body}`;
+      })
+      .filter(Boolean)
+      .join("\n");
+  }, [remappedAlignments, formatTimestamp, speakerLabels]);
+
+  const collapseWhisperSegments = useCallback((text) => {
+    const raw = String(text || "").trim();
+    if (!raw) return "";
+    const parts = raw.split(/\r?\n+/).map((item) => item.trim()).filter(Boolean);
+    if (!parts.length) return "";
+    if (parts.length === 1) return parts[0];
+    const hasCjk = /[\u4e00-\u9fff]/.test(raw);
+    return hasCjk ? parts.join("") : parts.join(" ");
+  }, []);
+
+  const asrBackendConfigured = asrBackend === "qwen3_crispasr" ? "qwen3_crispasr" : "whisper";
+  const previewText = showTimeline && mappedTimelineText
+    ? mappedTimelineText
+    : (speakerLabels
+      ? mappedTranscript
+      : (asrBackendConfigured === "whisper" ? collapseWhisperSegments(plainText) : plainText));
   const canInsert = useMemo(() => Boolean((previewText || "").trim()), [previewText]);
   const canInsertTranslation = useMemo(() => Boolean((translationResult || "").trim()), [translationResult]);
+  const isQwen3Backend = asrBackendConfigured === "qwen3_crispasr";
+  const qwen3Ready = Boolean(systemStatus?.qwen3_asr_ready);
+  const asrUnavailableReason = useMemo(() => {
+    if (asrBackendConfigured !== "qwen3_crispasr") return "";
+    if (qwen3Ready) return "";
+    return "Qwen3-ASR (CrispASR) 未就绪，请在系统设置补全可执行文件与 GGUF 模型路径。";
+  }, [asrBackendConfigured, qwen3Ready]);
+  const showTimestampToggle = asrBackendConfigured === "qwen3_crispasr";
+  const effectiveAsrEnableTimestamps = !isQwen3Backend && Boolean(asrEnableTimestamps);
+  const speakerLabelHint = useMemo(() => {
+    if (!speakerLabels) return "";
+    if (asrBackendConfigured === "qwen3_crispasr") {
+      return "已为 Qwen3-ASR 自动开启时间戳，用于说话人标签对齐。";
+    }
+    return "Whisper + pyannote 会自动使用时间轴进行说话人标签对齐。";
+  }, [speakerLabels, asrBackendConfigured]);
+
+  useEffect(() => {
+    if (isQwen3Backend) {
+      if (speakerLabels) setSpeakerLabels(false);
+      if (showTimeline) setShowTimeline(false);
+      if (asrEnableTimestamps) setAsrEnableTimestamps(false);
+      return;
+    }
+    if (asrBackendConfigured === "whisper" && asrEnableTimestamps) {
+      setAsrEnableTimestamps(false);
+    }
+  }, [isQwen3Backend, speakerLabels, showTimeline, asrBackendConfigured, asrEnableTimestamps, setAsrEnableTimestamps, setSpeakerLabels, setShowTimeline]);
 
   async function readErrorMessage(response, fallback) {
     const raw = await response.text();
@@ -283,6 +362,10 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   }, [loadProjects, projects.length]);
 
   useEffect(() => {
+    refreshSystemStatus().catch(() => undefined);
+  }, [refreshSystemStatus]);
+
+  useEffect(() => {
     setRenameProjectName(currentProject?.name || "");
   }, [currentProject?.id, currentProject?.name]);
 
@@ -314,8 +397,9 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     try {
       const formData = new FormData();
       formData.append("file", blob, fileName);
-      formData.append("backend", "whisper");
-      formData.append("speaker_labels", String(Boolean(speakerLabels)));
+      formData.append("backend", asrBackendConfigured || "whisper");
+      formData.append("speaker_labels", String(!isQwen3Backend && Boolean(speakerLabels)));
+      formData.append("enable_timestamps", String(Boolean(effectiveAsrEnableTimestamps)));
       const controller = new AbortController();
       abortRef.current = controller;
 
@@ -452,6 +536,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       }
       setBackendUsed("");
       setModelFiles(null);
+      refreshSystemStatus().catch(() => undefined);
       useUiStore.getState().pushToast({ title: "ASR 已卸载", tone: "success" });
     } catch (err) {
       const message = err?.message || "卸载 ASR 失败";
@@ -582,7 +667,9 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       const formData = new FormData();
       formData.append("file", pendingAudio.blob, pendingAudio.fileName || "audio.wav");
       formData.append("project_name", projectName.trim());
-      formData.append("speaker_labels", String(Boolean(speakerLabels)));
+      formData.append("speaker_labels", String(!isQwen3Backend && Boolean(speakerLabels)));
+      formData.append("backend", asrBackendConfigured || "whisper");
+      formData.append("enable_timestamps", String(Boolean(effectiveAsrEnableTimestamps)));
       formData.append("parse_mode", "verified_five_step_pipeline");
       formData.append("auto_parse", "true");
       formData.append("speaker_map", JSON.stringify(speakerMap || {}));
@@ -1019,18 +1106,43 @@ export default function SpeechRecognitionPage({ onNavigate }) {
         </h2>
         <p className="cardSubtitle">支持录音与上传音频，识别结果可直接接入文本输入。</p>
 
-        <div className="muted">ASR 后端：Whisper</div>
+        <div className="muted">ASR 后端：{asrBackendConfigured === "qwen3_crispasr" ? "Qwen3-ASR (CrispASR)" : "Whisper / Faster-Whisper"}</div>
 
-        <label className="controlRow" style={{ cursor: "pointer" }}>
-          <input
-            type="checkbox"
-            checked={speakerLabels}
-            onChange={(event) => setSpeakerLabels(event.target.checked)}
-            disabled={isTranscribing || isRecording || isCreatingProject}
-            style={{ width: 14, height: 14 }}
-          />
-          <span style={{ fontSize: 13 }}>输出说话人标签（说话人1：文本）</span>
-        </label>
+        <div className="editorGrid two" style={{ marginTop: 6 }}>
+          <div className="formGroup">
+            <label className="formLabel">ASR 后端</label>
+            <select
+              className="textInput"
+              value={asrBackendConfigured}
+              onChange={(event) => setAsrBackend(event.target.value)}
+              disabled={isTranscribing || isRecording || isCreatingProject}
+            >
+              <option value="whisper">Whisper / Faster-Whisper</option>
+              <option value="qwen3_crispasr">Qwen3-ASR (CrispASR)</option>
+            </select>
+          </div>
+          {showTimestampToggle ? (
+            <div className="muted" style={{ alignSelf: "end" }}>
+              Qwen3-ASR 当前为纯识别模式（不提供时间轴/说话人标签）
+            </div>
+          ) : null}
+        </div>
+
+        {!isQwen3Backend ? (
+          <>
+            <label className="controlRow" style={{ cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={speakerLabels}
+                onChange={(event) => setSpeakerLabels(event.target.checked)}
+                disabled={isTranscribing || isRecording || isCreatingProject}
+                style={{ width: 14, height: 14 }}
+              />
+              <span style={{ fontSize: 13 }}>输出说话人标签（说话人1：文本）</span>
+            </label>
+            {speakerLabelHint ? <div className="muted">{speakerLabelHint}</div> : null}
+          </>
+        ) : null}
 
         <div className="controlRow">
           <Button variant={isRecording ? "danger" : "primary"} onClick={isRecording ? handleStopRecording : handleStartRecording} disabled={isTranscribing || isCreatingProject} icon={isRecording ? Square : Mic}>
@@ -1041,7 +1153,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
             上传音频
             <input type="file" accept="audio/*" onChange={handleUpload} disabled={isTranscribing || isRecording || isCreatingProject} style={{ display: "none" }} />
           </label>
-          <Button variant="primary" onClick={handleRecognize} disabled={isTranscribing || isRecording || isCreatingProject || !pendingAudio?.blob}>
+          <Button variant="primary" onClick={handleRecognize} disabled={isTranscribing || isRecording || isCreatingProject || !pendingAudio?.blob || Boolean(asrUnavailableReason)}>
             开始识别
           </Button>
           <Button variant="danger" onClick={handleAbortRecognize} disabled={!isTranscribing}>
@@ -1051,6 +1163,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
             卸载 ASR
           </Button>
         </div>
+        {asrUnavailableReason ? <div className="statusBadge warning">{asrUnavailableReason}</div> : null}
 
         {pendingAudio?.url ? (
           <audio controls preload="metadata" style={{ width: "100%" }} src={pendingAudio.url} />
@@ -1072,7 +1185,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
               variant="primary"
               icon={FolderPlus}
               onClick={handleCreateProjectFromAudio}
-              disabled={isTranscribing || isRecording || isCreatingProject || !pendingAudio?.blob}
+              disabled={isTranscribing || isRecording || isCreatingProject || !pendingAudio?.blob || Boolean(asrUnavailableReason)}
             >
               {isCreatingProject ? "转项目中..." : "一键转项目"}
             </Button>
@@ -1109,15 +1222,29 @@ export default function SpeechRecognitionPage({ onNavigate }) {
 
       <div className="speechPageColumn">
         <GlassCard>
-        <h2 className="cardTitle">
-          <WandSparkles size={16} />
-          识别预览
-        </h2>
+        <div className="sectionHeader">
+          <h2 className="cardTitle">
+            <WandSparkles size={16} />
+            识别预览
+          </h2>
+          {!isQwen3Backend ? (
+            <label className="controlRow" style={{ cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={showTimeline}
+                onChange={(event) => setShowTimeline(event.target.checked)}
+                disabled={isTranscribing || isRecording || isCreatingProject || !remappedAlignments.length}
+                style={{ width: 14, height: 14 }}
+              />
+              <span style={{ fontSize: 13 }}>显示时间轴</span>
+            </label>
+          ) : null}
+        </div>
         <textarea
           className="textArea"
           style={{ minHeight: 260 }}
           value={previewText}
-          readOnly={speakerLabels && remappedAlignments.length > 0}
+          readOnly={showTimeline || (speakerLabels && remappedAlignments.length > 0)}
           onChange={(event) => {
             if (speakerLabels) {
               if (remappedAlignments.length) return;

@@ -145,6 +145,57 @@ export default function OrchestratorConfigCard({ form, isSaving, onSetField, onS
           </div>
 
           <div className="formGroup">
+            <label className="formLabel">CrispASR 可执行文件</label>
+            <input
+              className="textInput"
+              value={form.qwen3_asr_crispasr_exe ?? ""}
+              onChange={(e) => onSetField("qwen3_asr_crispasr_exe", e.target.value)}
+              placeholder="如 D:/tools/CrispASR/build/bin/crispasr.exe"
+            />
+          </div>
+          <div className="formGroup">
+            <label className="formLabel">Qwen3-ASR GGUF 模型</label>
+            <input
+              className="textInput"
+              value={form.qwen3_asr_model_path ?? ""}
+              onChange={(e) => onSetField("qwen3_asr_model_path", e.target.value)}
+              placeholder="如 D:/models/qwen3-asr-0.6b-q4_k.gguf"
+            />
+          </div>
+          <div className="formGroup">
+            <label className="formLabel">Qwen3-ForcedAligner GGUF（可选）</label>
+            <input
+              className="textInput"
+              value={form.qwen3_asr_forced_aligner_model_path ?? ""}
+              onChange={(e) => onSetField("qwen3_asr_forced_aligner_model_path", e.target.value)}
+              placeholder="如 D:/models/qwen3-forced-aligner-0.6b-q4_k.gguf"
+            />
+          </div>
+          <div className="editorGrid three">
+            <div className="formGroup">
+              <label className="formLabel">线程数</label>
+              <input
+                className="textInput"
+                type="number"
+                min="0"
+                step="1"
+                value={form.qwen3_asr_threads ?? 0}
+                onChange={(e) => onSetField("qwen3_asr_threads", e.target.value)}
+                placeholder="0 表示默认"
+              />
+            </div>
+            <div className="formGroup">
+              <label className="formLabel">语言</label>
+              <input
+                className="textInput"
+                value={form.qwen3_asr_language ?? "auto"}
+                onChange={(e) => onSetField("qwen3_asr_language", e.target.value)}
+                placeholder="auto / zh / en"
+              />
+            </div>
+          </div>
+
+          <div className="formGroup">
             <label className="formLabel">pyannote 模型 ID</label>
             <input
               className="textInput"

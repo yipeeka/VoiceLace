@@ -42,6 +42,8 @@ async def _run_project_from_audio_task(task_id: str, task_input: dict, state) ->
             audio_name=task_input.get("audio_name"),
             project_name=task_input.get("project_name"),
             speaker_labels=bool(task_input.get("speaker_labels")),
+            asr_backend=str(task_input.get("asr_backend") or "whisper"),
+            enable_timestamps=bool(task_input.get("enable_timestamps")),
             parse_mode=task_input.get("parse_mode") or "verified_five_step_pipeline",
             auto_parse=bool(task_input.get("auto_parse")),
             speaker_map=task_input.get("speaker_map") or {},
@@ -67,11 +69,21 @@ async def transcribe_file(
     file: UploadFile = File(...),
     backend: str = Form("whisper"),
     speaker_labels: str | None = Form(None),
+    enable_timestamps: str | None = Form(None),
     state=Depends(get_app_state),
 ):
-    normalized_backend = (backend or "whisper").strip().lower()
-    if normalized_backend not in {"", "whisper"}:
+    normalized_backend = (backend or "").strip().lower()
+    if not normalized_backend:
+        normalized_backend = str(getattr(state.orchestrator.config, "asr_backend", "whisper") or "whisper").strip().lower()
+    if normalized_backend in {"qwen3_asr", "qwen3-asr"}:
+        normalized_backend = "qwen3_crispasr"
+    if normalized_backend not in {"whisper", "qwen3_crispasr"}:
         raise HTTPException(status_code=400, detail=f"Unsupported ASR backend: {backend}")
+    effective_speaker_labels = _parse_bool_form(speaker_labels, default=False)
+    effective_timestamps = _parse_bool_form(enable_timestamps, default=False)
+    if normalized_backend == "qwen3_crispasr":
+        effective_speaker_labels = False
+        effective_timestamps = False
 
     suffix = Path(file.filename or "upload.wav").suffix or ".wav"
     tmp_path: Path | None = None
@@ -84,10 +96,12 @@ async def transcribe_file(
             tmp_file.write(await file.read())
             tmp_path = Path(tmp_file.name)
 
+        await state.orchestrator.ensure_asr_ready(backend=normalized_backend)
         result = await state.asr_engine.transcribe(
             str(tmp_path),
-            backend="whisper",
-            speaker_labels=_parse_bool_form(speaker_labels, default=False),
+            backend=normalized_backend,
+            speaker_labels=effective_speaker_labels,
+            enable_timestamps=effective_timestamps,
         )
         return result
     except FileNotFoundError as exc:
@@ -107,6 +121,8 @@ async def project_from_audio(
     file: UploadFile = File(...),
     project_name: str | None = Form(None),
     speaker_labels: str | None = Form(None),
+    backend: str | None = Form(None),
+    enable_timestamps: str | None = Form(None),
     parse_mode: str = Form("verified_five_step_pipeline"),
     auto_parse: str | None = Form(None),
     speaker_map: str | None = Form(None),
@@ -131,7 +147,14 @@ async def project_from_audio(
             "error": "",
             "events": [{"type": "task_status", "status": "queued"}],
         }
+        chosen_backend = (backend or "").strip().lower() or str(getattr(state.orchestrator.config, "asr_backend", "whisper") or "whisper")
+        if chosen_backend in {"qwen3_asr", "qwen3-asr"}:
+            chosen_backend = "qwen3_crispasr"
+        if chosen_backend not in {"whisper", "qwen3_crispasr"}:
+            raise ValueError(f"Unsupported ASR backend: {backend}")
         task_input = {
+            "asr_backend": chosen_backend,
+            "enable_timestamps": _parse_bool_form(enable_timestamps, default=False),
             "tmp_path": str(tmp_path),
             "audio_name": file.filename,
             "project_name": project_name,
@@ -140,6 +163,9 @@ async def project_from_audio(
             "auto_parse": _parse_bool_form(auto_parse, default=True),
             "speaker_map": parse_speaker_map_form(speaker_map),
         }
+        if chosen_backend == "qwen3_crispasr":
+            task_input["speaker_labels"] = False
+            task_input["enable_timestamps"] = False
         handle = asyncio.create_task(_run_project_from_audio_task(task_id, task_input, state))
         state.asr_task_handles[task_id] = handle
         return {"task_id": task_id}

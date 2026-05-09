@@ -25,7 +25,14 @@ class _FakeAsrEngine:
         self._segment_text = segment_text
         self._speaker_name = speaker_name
 
-    async def transcribe(self, audio_path: str, *, backend: str = "whisper", speaker_labels: bool = False):
+    async def transcribe(
+        self,
+        audio_path: str,
+        *,
+        backend: str = "whisper",
+        speaker_labels: bool = False,
+        enable_timestamps: bool | None = None,
+    ):
         if self._fail_all:
             raise RuntimeError("chunk failed")
         if self._fail_chunk_name and Path(audio_path).stem == self._fail_chunk_name:
