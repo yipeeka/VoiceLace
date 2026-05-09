@@ -225,6 +225,9 @@ async def process_synthesis_segment(
         "index": index,
         "speaker": segment.speaker,
         "text": segment.text,
+        "source_start_ms": getattr(segment, "source_start_ms", None),
+        "source_end_ms": getattr(segment, "source_end_ms", None),
+        "source_duration_ms": getattr(segment, "source_duration_ms", None),
         "audio_url": f"/api/v1/tts/synthesize/{task_id}/audio/{segment.id}",
         "status": "done",
         "duration_ms": duration_ms,
@@ -243,6 +246,9 @@ async def process_synthesis_segment(
         "segment_id": segment.id,
         "speaker": segment.speaker,
         "text": segment.text,
+        "source_start_ms": getattr(segment, "source_start_ms", None),
+        "source_end_ms": getattr(segment, "source_end_ms", None),
+        "source_duration_ms": getattr(segment, "source_duration_ms", None),
     }
     return {
         "segment_result": segment_result,

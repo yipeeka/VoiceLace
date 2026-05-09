@@ -10,6 +10,24 @@ function normalizeArray(value) {
 }
 
 function normalizeSegment(segment, index = 0) {
+  const sourceStartMs =
+    segment?.source_start_ms === null || segment?.source_start_ms === undefined
+      ? null
+      : Number.isFinite(Number(segment.source_start_ms))
+        ? Number(segment.source_start_ms)
+        : null;
+  const sourceEndMs =
+    segment?.source_end_ms === null || segment?.source_end_ms === undefined
+      ? null
+      : Number.isFinite(Number(segment.source_end_ms))
+        ? Number(segment.source_end_ms)
+        : null;
+  const sourceDurationMs =
+    segment?.source_duration_ms === null || segment?.source_duration_ms === undefined
+      ? null
+      : Number.isFinite(Number(segment.source_duration_ms))
+        ? Number(segment.source_duration_ms)
+        : null;
   return {
     id: segment?.id || "",
     index,
@@ -19,6 +37,10 @@ function normalizeSegment(segment, index = 0) {
     emotion: segment?.emotion || "neutral",
     non_verbal: normalizeArray(segment?.non_verbal).map((item) => String(item).trim()).filter(Boolean),
     tts_overrides: normalizeObject(segment?.tts_overrides),
+    source_text: (segment?.source_text || "").trim(),
+    source_start_ms: sourceStartMs,
+    source_end_ms: sourceEndMs,
+    source_duration_ms: sourceDurationMs,
   };
 }
 

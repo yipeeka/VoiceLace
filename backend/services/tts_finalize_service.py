@@ -35,6 +35,34 @@ def timeline_from_segment_results(segment_results: list[dict], gap_ms: int) -> l
     return timeline
 
 
+def timeline_from_source_segment_results(segment_results: list[dict], gap_ms: int) -> list[TimelineEntry]:
+    timeline: list[TimelineEntry] = []
+    cursor = 0
+    for idx, item in enumerate(segment_results):
+        duration_ms = max(0, int(item.get("duration_ms") or 0))
+        raw_start = item.get("source_start_ms")
+        try:
+            parsed_start = max(0, int(raw_start)) if raw_start is not None else None
+        except Exception:
+            parsed_start = None
+        start_ms = parsed_start if parsed_start is not None else cursor
+        end_ms = start_ms + duration_ms
+        timeline.append(
+            TimelineEntry(
+                segment_id=str(item.get("segment_id", "")),
+                speaker=str(item.get("speaker", "narrator")),
+                text=str(item.get("text", "")),
+                start_ms=start_ms,
+                end_ms=end_ms,
+                duration_ms=duration_ms,
+            )
+        )
+        cursor = max(cursor, end_ms)
+        if idx < len(segment_results) - 1 and parsed_start is None:
+            cursor += max(0, int(gap_ms))
+    return timeline
+
+
 def finalize_rebuild_full(
     *,
     output_dir: Path,
@@ -49,6 +77,7 @@ def finalize_rebuild_full(
     srt_path: Path,
     lrc_path: Path,
     full_peaks_path: Path,
+    use_source_timeline: bool = False,
 ) -> dict:
     timeline: list[TimelineEntry] | None = None
     try:
@@ -58,6 +87,7 @@ def finalize_rebuild_full(
             crossfade_ms=30,
             normalize=True,
             target_sample_rate=24000,
+            use_source_timeline=bool(use_source_timeline),
         )
         with wav_export_path.open("wb") as wav_out:
             mixed_audio.export(wav_out, format="wav")
@@ -67,7 +97,10 @@ def finalize_rebuild_full(
             full_wav.setsampwidth(2)
             full_wav.setframerate(sample_rate)
             full_wav.writeframes(bytes(combined_frames) or b"\x00\x00" * sample_rate)
-        timeline = timeline_from_segment_results(list(task_segments.values()), int(config.gap_duration_ms))
+        if use_source_timeline:
+            timeline = timeline_from_source_segment_results(list(task_segments.values()), int(config.gap_duration_ms))
+        else:
+            timeline = timeline_from_segment_results(list(task_segments.values()), int(config.gap_duration_ms))
 
     legacy_wav = output_dir / f"{project_id}.wav"
     shutil.copyfile(wav_export_path, legacy_wav)

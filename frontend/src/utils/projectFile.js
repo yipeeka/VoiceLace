@@ -4,6 +4,7 @@ const DEFAULT_SYNTHESIS_CONFIG = {
   denoise: true,
   gap_duration_ms: 300,
   output_format: "wav",
+  timeline_lock_enabled: false,
 };
 
 function isFileSystemAccessAvailable() {

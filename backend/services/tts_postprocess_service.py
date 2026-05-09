@@ -39,12 +39,19 @@ def _build_segment_inputs(*, project, output_dir: Path) -> list[dict]:
                 "speaker": segment.speaker,
                 "text": segment.text,
                 "path": str(path),
+                "source_start_ms": getattr(segment, "source_start_ms", None),
+                "source_end_ms": getattr(segment, "source_end_ms", None),
+                "source_duration_ms": getattr(segment, "source_duration_ms", None),
             }
         )
     return inputs
 
 
 def _build_segment_timeline_ms(*, project, gap_duration_ms: int) -> list[dict]:
+    use_source_timeline = bool(
+        bool(getattr(project.synthesis_config, "timeline_lock_enabled", False))
+        or bool((getattr(project.script, "metadata", {}) or {}).get("dubbing_source"))
+    )
     timeline: list[dict] = []
     cursor = 0
     for idx, segment in enumerate(project.script.segments):
@@ -53,6 +60,13 @@ def _build_segment_timeline_ms(*, project, gap_duration_ms: int) -> list[dict]:
         if duration <= 0:
             duration = 1
         start = cursor
+        if use_source_timeline:
+            raw = getattr(segment, "source_start_ms", None)
+            try:
+                if raw is not None:
+                    start = max(0, int(raw))
+            except Exception:
+                start = cursor
         end = start + duration
         timeline.append(
             {
@@ -63,8 +77,8 @@ def _build_segment_timeline_ms(*, project, gap_duration_ms: int) -> list[dict]:
                 "duration_ms": duration,
             }
         )
-        cursor = end
-        if idx < len(project.script.segments) - 1:
+        cursor = max(cursor, end)
+        if idx < len(project.script.segments) - 1 and not use_source_timeline:
             cursor += max(0, int(gap_duration_ms))
     return timeline
 
@@ -343,12 +357,17 @@ async def run_postprocess_task(*, task_id: str, payload: PostprocessRequest, sta
         rebuilt_audio = None
         if segment_inputs and len(segment_inputs) == len(project.script.segments):
             try:
+                use_source_timeline = bool(
+                    bool(getattr(config, "timeline_lock_enabled", False))
+                    or bool((project.script.metadata or {}).get("dubbing_source"))
+                )
                 rebuilt_audio, _ = MixerEngine().mix_segments(
                     segment_inputs=segment_inputs,
                     gap_ms=int(config.gap_duration_ms),
                     crossfade_ms=0,
                     normalize=False,
                     target_sample_rate=24000,
+                    use_source_timeline=use_source_timeline,
                 )
             except Exception as exc:
                 warnings.append(f"重建音轨失败，已回退原始整轨：{exc}")

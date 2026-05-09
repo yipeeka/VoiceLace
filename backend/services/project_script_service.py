@@ -28,4 +28,8 @@ def segment_content_payload(segment: Segment) -> dict[str, Any]:
         "emotion": segment.emotion or "",
         "non_verbal": segment.non_verbal or [],
         "tts_overrides": segment.tts_overrides or {},
+        "source_text": segment.source_text or "",
+        "source_start_ms": segment.source_start_ms,
+        "source_end_ms": segment.source_end_ms,
+        "source_duration_ms": segment.source_duration_ms,
     }

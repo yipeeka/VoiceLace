@@ -131,6 +131,32 @@ class TtsWizardExportServiceTest(unittest.TestCase):
         finally:
             shutil.rmtree(output_dir, ignore_errors=True)
 
+    def test_timestamp_manifest_uses_source_timeline_for_dubbing_project(self) -> None:
+        tmp_root = Path.cwd() / ".tmp_test_outputs"
+        output_dir = tmp_root / f"wizard-{uuid4().hex[:8]}"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            project = self._build_project(output_dir)
+            project.script.metadata = {**(project.script.metadata or {}), "dubbing_source": True}
+            project.script.segments[0].source_start_ms = 120
+            project.script.segments[1].source_start_ms = 2500
+
+            manifest_path, _ = write_extended_export_file(
+                output_dir=output_dir,
+                project=project,
+                kind="timestamp_manifest",
+                fmt="json",
+                variant="raw",
+                profile="podcast",
+            )
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+            items = payload.get("items") or []
+            self.assertEqual(len(items), 2)
+            self.assertEqual(int(items[0]["start_ms"]), 120)
+            self.assertEqual(int(items[1]["start_ms"]), 2500)
+        finally:
+            shutil.rmtree(output_dir, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

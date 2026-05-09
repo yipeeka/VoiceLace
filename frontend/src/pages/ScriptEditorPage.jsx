@@ -103,6 +103,21 @@ function getQcHighlightStyle(severity) {
   return null;
 }
 
+function formatTimelineMs(ms) {
+  const value = Number(ms);
+  if (!Number.isFinite(value) || value < 0) return "";
+  const total = Math.floor(value);
+  const hh = Math.floor(total / 3600000);
+  const mm = Math.floor((total % 3600000) / 60000);
+  const ss = Math.floor((total % 60000) / 1000);
+  const mmm = total % 1000;
+  const hhText = String(hh).padStart(2, "0");
+  const mmText = String(mm).padStart(2, "0");
+  const ssText = String(ss).padStart(2, "0");
+  const mmmText = String(mmm).padStart(3, "0");
+  return `${hhText}:${mmText}:${ssText}.${mmmText}`;
+}
+
 function SortableSegmentCard({
   segment,
   isEditing,
@@ -138,6 +153,21 @@ function SortableSegmentCard({
   const charColor = getCharColor(segment.speaker);
   const qcStyle = getQcHighlightStyle(qcSeverity);
   const qcLabel = qcSeverity === "high" ? "高风险" : qcSeverity === "medium" ? "中风险" : qcSeverity === "low" ? "低风险" : "";
+  const sourceStartText = formatTimelineMs(segment?.source_start_ms);
+  const sourceEndText = formatTimelineMs(segment?.source_end_ms);
+  const hasSourceRange = Boolean(sourceStartText && sourceEndText);
+  const sourceDurationSec =
+    Number.isFinite(Number(segment?.source_duration_ms)) && Number(segment.source_duration_ms) >= 0
+      ? (Number(segment.source_duration_ms) / 1000).toFixed(2)
+      : "";
+  const speedValue =
+    segment?.tts_overrides && Number.isFinite(Number(segment.tts_overrides.speed))
+      ? Number(segment.tts_overrides.speed).toFixed(2)
+      : "";
+  const durationValue =
+    segment?.tts_overrides && Number.isFinite(Number(segment.tts_overrides.duration))
+      ? Number(segment.tts_overrides.duration).toFixed(2)
+      : "";
 
   return (
     <div
@@ -233,6 +263,14 @@ function SortableSegmentCard({
               )}
             </div>
             <p className="segmentText">{segment.text}</p>
+            {hasSourceRange || sourceDurationSec || speedValue || durationValue ? (
+              <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                {hasSourceRange ? `时间轴 ${sourceStartText} -> ${sourceEndText}` : ""}
+                {sourceDurationSec ? ` · 目标时长 ${sourceDurationSec}s` : ""}
+                {durationValue ? ` · duration ${durationValue}s` : ""}
+                {speedValue ? ` · speed ${speedValue}` : ""}
+              </div>
+            ) : null}
           </>
         )}
       </div>

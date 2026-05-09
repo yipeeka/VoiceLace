@@ -383,6 +383,7 @@ export const useSynthesisStore = create((set) => ({
     tts_auto_retry: true,
     tts_retry_attempts: 2,
     tts_segment_concurrency: 1,
+    timeline_lock_enabled: false,
   },
   startSynthesis: async ({ projectId, config }) => {
     return await runSynthesisFlow({

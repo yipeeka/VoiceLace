@@ -178,6 +178,21 @@ export function SynthesisGenerateCard({
             unit="ms"
           />
 
+          <div className="formGroup">
+            <label className="formLabel">时间轴锁定合成</label>
+            <label className="controlRow" style={{ cursor: "pointer", padding: "8px 12px", background: "var(--bg-elevated)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-default)" }}>
+              <input
+                type="checkbox"
+                checked={Boolean(config.timeline_lock_enabled)}
+                onChange={(e) => onSetConfig({ timeline_lock_enabled: e.target.checked })}
+                style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
+              />
+              <span style={{ fontSize: 13.5, color: "var(--text-secondary)" }}>
+                按片段 source_start_ms 放置音频（翻译配音项目建议开启）
+              </span>
+            </label>
+          </div>
+
           <div className="editorGrid">
             <div className="formGroup">
               <label className="formLabel">输出格式</label>

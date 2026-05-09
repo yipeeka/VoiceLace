@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 @dataclass(slots=True)
@@ -22,6 +23,7 @@ class MixerEngine:
         crossfade_ms: int = 30,
         normalize: bool = True,
         target_sample_rate: int = 24000,
+        use_source_timeline: bool = False,
     ):
         try:
             from pydub import AudioSegment
@@ -29,11 +31,8 @@ class MixerEngine:
         except Exception as exc:  # pragma: no cover
             raise RuntimeError(f"MixerEngine requires pydub: {exc}") from exc
 
-        merged = AudioSegment.silent(duration=0, frame_rate=target_sample_rate).set_channels(1)
-        timeline: list[TimelineEntry] = []
-        cursor_ms = 0
-
-        for index, item in enumerate(segment_inputs):
+        prepared: list[tuple[dict, Any]] = []
+        for item in segment_inputs:
             path = Path(item["path"])
             # Open file handle explicitly so it is always closed on Windows.
             with path.open("rb") as audio_file:
@@ -44,7 +43,61 @@ class MixerEngine:
             if crossfade_ms > 0:
                 fade_ms = min(crossfade_ms, max(1, len(audio) // 8))
                 audio = audio.fade_in(fade_ms).fade_out(fade_ms)
+            prepared.append((item, audio))
 
+        if use_source_timeline and prepared:
+            def _normalize_start_ms(raw: object) -> int | None:
+                try:
+                    if raw is None:
+                        return None
+                    return max(0, int(raw))
+                except Exception:
+                    return None
+
+            timeline: list[TimelineEntry] = []
+            starts: list[int] = []
+            for item, _audio in prepared:
+                parsed = _normalize_start_ms(item.get("source_start_ms", item.get("start_ms")))
+                if parsed is not None:
+                    starts.append(parsed)
+            if starts:
+                total_ms = 0
+                cursor_ms = 0
+                for item, audio in prepared:
+                    start_ms = _normalize_start_ms(item.get("source_start_ms", item.get("start_ms")))
+                    if start_ms is None:
+                        start_ms = cursor_ms
+                    end_ms = start_ms + len(audio)
+                    total_ms = max(total_ms, end_ms)
+                    cursor_ms = max(cursor_ms, end_ms)
+                merged = AudioSegment.silent(duration=max(1, total_ms), frame_rate=target_sample_rate).set_channels(1)
+                cursor_ms = 0
+                for item, audio in prepared:
+                    start_ms = _normalize_start_ms(item.get("source_start_ms", item.get("start_ms")))
+                    if start_ms is None:
+                        start_ms = cursor_ms
+                    end_ms = start_ms + len(audio)
+                    if end_ms > len(merged):
+                        merged += AudioSegment.silent(duration=end_ms - len(merged), frame_rate=target_sample_rate).set_channels(1)
+                    merged = merged.overlay(audio, position=start_ms)
+                    timeline.append(
+                        TimelineEntry(
+                            segment_id=str(item["segment_id"]),
+                            speaker=str(item.get("speaker", "narrator")),
+                            text=str(item.get("text", "")),
+                            start_ms=start_ms,
+                            end_ms=end_ms,
+                            duration_ms=len(audio),
+                        )
+                    )
+                    cursor_ms = max(cursor_ms, end_ms)
+                return merged, timeline
+
+        merged = AudioSegment.silent(duration=0, frame_rate=target_sample_rate).set_channels(1)
+        timeline: list[TimelineEntry] = []
+        cursor_ms = 0
+
+        for index, (item, audio) in enumerate(prepared):
             start_ms = cursor_ms
             end_ms = start_ms + len(audio)
             timeline.append(
@@ -59,8 +112,7 @@ class MixerEngine:
             )
             merged += audio
             cursor_ms = end_ms
-
-            if index < len(segment_inputs) - 1 and gap_ms > 0:
+            if index < len(prepared) - 1 and gap_ms > 0:
                 merged += AudioSegment.silent(duration=gap_ms, frame_rate=target_sample_rate).set_channels(1)
                 cursor_ms += gap_ms
 

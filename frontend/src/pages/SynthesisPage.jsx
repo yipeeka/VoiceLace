@@ -134,6 +134,7 @@ export default function SynthesisPage() {
     tts_auto_retry: true,
     tts_retry_attempts: 2,
     tts_segment_concurrency: 1,
+    timeline_lock_enabled: false,
   });
 
   const setConfig = (updater) =>
@@ -754,6 +755,7 @@ export default function SynthesisPage() {
       tts_auto_retry: Boolean(baseConfig.tts_auto_retry ?? true),
       tts_retry_attempts: Number(baseConfig.tts_retry_attempts ?? 2),
       tts_segment_concurrency: Number(baseConfig.tts_segment_concurrency ?? 1),
+      timeline_lock_enabled: Boolean(baseConfig.timeline_lock_enabled ?? false),
       bgm_track: {
         ...(baseConfig.bgm_track || {}),
         gain_db: Number(baseConfig.bgm_track?.gain_db || 0),

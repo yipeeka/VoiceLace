@@ -597,6 +597,62 @@ class ApiSmokeTest(unittest.TestCase):
             engine.backend_name = original_backend_name
             engine.model_name = original_model_name
 
+    def test_translate_dubbing_segments_returns_timing_and_overrides(self) -> None:
+        state = self.app_state
+        engine = state.translation_llm_engine
+        original_generate_text = engine.generate_text
+        original_source = state.translation_engine_source
+        original_is_loaded = engine.is_loaded
+        original_backend_name = engine.backend_name
+        try:
+            engine.is_loaded = True
+            engine.backend_name = "mock"
+            state.translation_engine_source = "secondary_local"
+
+            async def fake_generate_text(*, text: str, system_prompt: str, llm_options: dict | None = None):
+                self.assertTrue(text)
+                self.assertTrue(system_prompt)
+                return f"译文：{text}"
+
+            engine.generate_text = fake_generate_text
+
+            resp = self.client.post(
+                "/api/v1/llm/translate-dubbing-segments",
+                json={
+                    "source": "secondary_local",
+                    "target_language": "中文",
+                    "segments": [
+                        {
+                            "id": "seg-1",
+                            "speaker": "说话人1",
+                            "text": "hello world",
+                            "start_ms": 0,
+                            "end_ms": 3000,
+                        }
+                    ],
+                },
+            )
+            self.assertEqual(resp.status_code, 200)
+            body = resp.json()
+            self.assertEqual(body["source"], "secondary_local")
+            self.assertEqual(body["target_language"], "中文")
+            self.assertEqual(len(body["segments"]), 1)
+            segment = body["segments"][0]
+            self.assertEqual(segment["id"], "seg-1")
+            self.assertEqual(segment["speaker"], "说话人1")
+            self.assertEqual(segment["start_ms"], 0)
+            self.assertEqual(segment["end_ms"], 3000)
+            self.assertEqual(segment["duration_ms"], 3000)
+            self.assertIn("tts_overrides", segment)
+            self.assertIn("speed", segment["tts_overrides"])
+            self.assertIn("duration", segment["tts_overrides"])
+            self.assertGreater(segment["tts_overrides"]["duration"], 0)
+        finally:
+            engine.generate_text = original_generate_text
+            state.translation_engine_source = original_source
+            engine.is_loaded = original_is_loaded
+            engine.backend_name = original_backend_name
+
     def test_music_assist_load_chat_finalize_unload_flow(self) -> None:
         state = self.app_state
         engine = state.music_assist_llm_engine

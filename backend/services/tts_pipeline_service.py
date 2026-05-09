@@ -335,6 +335,10 @@ async def run_synthesis_task(*, task_id: str, payload: SynthesizeRequest, state,
         full_peaks_path = project_waveforms_dir / "full.peaks.json"
 
         can_rebuild_full = rebuild_full and failed_count == 0
+        use_source_timeline = bool(
+            bool(getattr(config, "timeline_lock_enabled", False))
+            or bool((project.script.metadata or {}).get("dubbing_source"))
+        )
         if can_rebuild_full:
             finalize = finalize_rebuild_full(
                 output_dir=state.settings.output_dir,
@@ -349,6 +353,7 @@ async def run_synthesis_task(*, task_id: str, payload: SynthesizeRequest, state,
                 srt_path=srt_path,
                 lrc_path=lrc_path,
                 full_peaks_path=full_peaks_path,
+                use_source_timeline=use_source_timeline,
             )
             final_format = finalize["final_format"]
             if finalize["mp3_fallback_to_wav"]:

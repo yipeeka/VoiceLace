@@ -145,12 +145,23 @@ def _build_timeline_rows(project) -> list[dict[str, Any]]:
     }
     chapter_lookup = _build_chapter_lookup(project)
     gap_ms = max(0, int(getattr(project.synthesis_config, "gap_duration_ms", 300) or 300))
+    use_source_timeline = bool(
+        bool(getattr(project.synthesis_config, "timeline_lock_enabled", False))
+        or bool((getattr(project.script, "metadata", {}) or {}).get("dubbing_source"))
+    )
     cursor = 0
     rows: list[dict[str, Any]] = []
     for idx, segment in enumerate(ordered_segments):
         asset = project.audio_assets.segments.get(segment.id)
         duration_ms = int(getattr(asset, "duration_ms", 0) or 0) if asset else 0
         start_ms = cursor
+        if use_source_timeline:
+            raw = getattr(segment, "source_start_ms", None)
+            try:
+                if raw is not None:
+                    start_ms = max(0, int(raw))
+            except Exception:
+                start_ms = cursor
         end_ms = start_ms + max(0, duration_ms)
         chapter = chapter_lookup.get(segment.id, {})
         status = "missing"
@@ -179,8 +190,8 @@ def _build_timeline_rows(project) -> list[dict[str, Any]]:
                 "status": status,
             }
         )
-        cursor = end_ms
-        if idx < len(ordered_segments) - 1:
+        cursor = max(cursor, end_ms)
+        if idx < len(ordered_segments) - 1 and not use_source_timeline:
             cursor += gap_ms
     return rows
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 from uuid import uuid4
 
@@ -8,7 +9,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from backend.engine.prompts import DEFAULT_PARSE_PROMPT
-from backend.models import LlmParseRequest, TranslatePolishRequest, TranslationEngineLoadRequest
+from backend.models import (
+    LlmParseRequest,
+    TranslateDubbingSegmentsRequest,
+    TranslatePolishRequest,
+    TranslationEngineLoadRequest,
+)
 from backend.persistence import append_project_event, load_project, save_project
 from backend.state import get_app_state
 
@@ -205,6 +211,56 @@ def _build_translate_prompt(*, mode: str, target_language: str) -> str:
     )
 
 
+def _clamp(value: float, lower: float, upper: float) -> float:
+    return max(lower, min(upper, value))
+
+
+def _safe_duration_from_ms(start_ms: int | None, end_ms: int | None) -> float | None:
+    if start_ms is None or end_ms is None:
+        return None
+    delta = int(end_ms) - int(start_ms)
+    if delta <= 0:
+        return None
+    return max(0.3, min(60.0, delta / 1000.0))
+
+
+def _estimate_speaking_seconds(text: str) -> float:
+    raw = str(text or "").strip()
+    if not raw:
+        return 0.4
+    cjk_count = len(re.findall(r"[\u4e00-\u9fff]", raw))
+    latin_tokens = re.findall(r"[A-Za-z0-9']+", raw)
+    punctuation = re.findall(r"[，。！？；,.!?;:]", raw)
+    if cjk_count > 0:
+        base = cjk_count / 4.6
+    else:
+        base = max(1, len(latin_tokens)) / 2.8
+    pause = len(punctuation) * 0.08
+    return max(0.4, min(60.0, base + pause))
+
+
+def _build_dubbing_translate_prompt(*, target_language: str, target_duration_sec: float) -> str:
+    lang = (target_language or "").strip() or "中文"
+    return (
+        "你是配音翻译编辑。请将用户输入翻译成目标语言，结果用于旁白/对白配音。"
+        "要求：忠实原意、自然口语、尽量简洁，不要解释，不要注释。"
+        f"\n目标语言：{lang}"
+        f"\n目标口播时长：约 {target_duration_sec:.2f} 秒"
+        "\n只输出最终译文正文。"
+    )
+
+
+def _build_dubbing_compress_prompt(*, target_language: str, target_duration_sec: float) -> str:
+    lang = (target_language or "").strip() or "中文"
+    return (
+        "你是配音文本压缩编辑。请在保持原意的前提下，把文本压缩为更短的口播版本。"
+        "要求：自然顺口，不要丢失关键信息，不要解释。"
+        f"\n目标语言：{lang}"
+        f"\n目标口播时长：约 {target_duration_sec:.2f} 秒"
+        "\n只输出压缩后的正文。"
+    )
+
+
 @router.post("/translate-polish")
 async def translate_polish(payload: TranslatePolishRequest, state=Depends(get_app_state)):
     source = (payload.source or "").strip().lower()
@@ -241,6 +297,117 @@ async def translate_polish(payload: TranslatePolishRequest, state=Depends(get_ap
         "mode": payload.mode,
         "target_language": payload.target_language,
         "backend": state.translation_llm_engine.backend_name,
+    }
+
+
+@router.post("/translate-dubbing-segments")
+async def translate_dubbing_segments(payload: TranslateDubbingSegmentsRequest, state=Depends(get_app_state)):
+    source = (payload.source or "").strip().lower()
+    if source not in ALLOWED_TRANSLATION_SOURCES:
+        raise HTTPException(status_code=400, detail=f"Unsupported translation source: {payload.source}")
+    if not payload.segments:
+        raise HTTPException(status_code=400, detail="segments is required")
+    if payload.min_speed > payload.max_speed:
+        raise HTTPException(status_code=400, detail="min_speed must be <= max_speed")
+
+    if not state.translation_llm_engine.is_loaded or state.translation_engine_source != source:
+        raise HTTPException(
+            status_code=400,
+            detail="Translation engine source mismatch or not loaded. Please load translation engine first.",
+        )
+
+    config = _build_translation_config(state, source)
+    translated_rows: list[dict[str, Any]] = []
+    combined_source: list[str] = []
+    combined_target: list[str] = []
+
+    for idx, segment in enumerate(payload.segments):
+        source_text = str(segment.text or "").strip()
+        speaker = (str(segment.speaker or "").strip() or "narrator")
+        seg_id = str(segment.id or f"dub-seg-{idx + 1}").strip() or f"dub-seg-{idx + 1}"
+        start_ms = int(segment.start_ms) if segment.start_ms is not None else None
+        end_ms = int(segment.end_ms) if segment.end_ms is not None else None
+
+        target_duration_sec = _safe_duration_from_ms(start_ms, end_ms)
+        if target_duration_sec is None:
+            target_duration_sec = _estimate_speaking_seconds(source_text)
+        target_duration_sec = _clamp(float(target_duration_sec), 0.3, 60.0)
+
+        translated_text = source_text
+        if source_text:
+            prompt = _build_dubbing_translate_prompt(
+                target_language=payload.target_language,
+                target_duration_sec=target_duration_sec,
+            )
+            translated_text = (
+                await state.translation_llm_engine.generate_text(
+                    text=source_text,
+                    system_prompt=prompt,
+                    llm_options=config["options"],
+                )
+            ).strip()
+
+            estimated_sec = _estimate_speaking_seconds(translated_text)
+            if estimated_sec > target_duration_sec * float(payload.max_speed):
+                compress_prompt = _build_dubbing_compress_prompt(
+                    target_language=payload.target_language,
+                    target_duration_sec=target_duration_sec,
+                )
+                compressed = (
+                    await state.translation_llm_engine.generate_text(
+                        text=translated_text,
+                        system_prompt=compress_prompt,
+                        llm_options=config["options"],
+                    )
+                ).strip()
+                if compressed:
+                    translated_text = compressed
+
+        estimated_target_sec = _estimate_speaking_seconds(translated_text)
+        if target_duration_sec <= 0:
+            suggested_speed = 1.0
+        else:
+            suggested_speed = estimated_target_sec / target_duration_sec
+        suggested_speed = _clamp(float(suggested_speed), float(payload.min_speed), float(payload.max_speed))
+
+        duration_ms: int | None = None
+        if start_ms is not None and end_ms is not None and end_ms >= start_ms:
+            duration_ms = int(end_ms - start_ms)
+
+        source_line = f"{speaker}：{source_text}" if source_text else ""
+        target_line = f"{speaker}：{translated_text}" if translated_text else ""
+        if source_line:
+            combined_source.append(source_line)
+        if target_line:
+            combined_target.append(target_line)
+
+        translated_rows.append(
+            {
+                "id": seg_id,
+                "index": idx,
+                "speaker": speaker,
+                "source_text": source_text,
+                "text": translated_text,
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+                "duration_ms": duration_ms,
+                "target_duration_sec": round(float(target_duration_sec), 3),
+                "estimated_duration_sec": round(float(estimated_target_sec), 3),
+                "tts_overrides": {
+                    "duration": round(float(target_duration_sec), 3),
+                    "speed": round(float(suggested_speed), 3),
+                },
+            }
+        )
+
+    state.translation_engine_error = ""
+    return {
+        "source": source,
+        "target_language": payload.target_language,
+        "backend": state.translation_llm_engine.backend_name,
+        "segments": translated_rows,
+        "source_text": "\n".join(combined_source),
+        "translated_text": "\n".join(combined_target),
     }
 
 

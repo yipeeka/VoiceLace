@@ -24,6 +24,7 @@ import { appendSpeechText, replaceSpeechText } from "../utils/speechText";
 export default function SpeechRecognitionPage({ onNavigate }) {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [isBuildingDubbingProject, setIsBuildingDubbingProject] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [pendingAudio, setPendingAudio] = useState(null);
   const [newProjectName, setNewProjectName] = useState("");
@@ -90,6 +91,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const importProjectFile = useProjectStore((state) => state.importProjectFile);
   const loadProjects = useProjectStore((state) => state.loadProjects);
   const loadProjectScript = useScriptStore((state) => state.loadProjectScript);
+  const saveScript = useScriptStore((state) => state.saveScript);
   const script = useScriptStore((state) => state.script);
   const loadProjectParseQc = useProjectStore((state) => state.loadProjectParseQc);
   const sourceText = useScriptStore((state) => state.sourceText);
@@ -101,7 +103,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const [isLoadingTranslationEngine, setIsLoadingTranslationEngine] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
   const isTranslationEngineLoaded = Boolean(translationEngineStatus?.loaded);
-  const isProjectOpsBusy = isTranscribing || isRecording || isCreatingProject;
+  const isProjectOpsBusy = isTranscribing || isRecording || isCreatingProject || isBuildingDubbingProject;
 
   const sortedProjects = useMemo(
     () => [...projects].sort((a, b) => Date.parse(b.updated_at || "") - Date.parse(a.updated_at || "")),
@@ -229,6 +231,10 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     }
     return "Whisper + pyannote 会自动使用时间轴进行说话人标签对齐。";
   }, [speakerLabels, asrBackendConfigured]);
+  const canBuildDubbingProject = useMemo(
+    () => Boolean(isTranslationEngineLoaded && remappedAlignments.length && !isQwen3Backend),
+    [isTranslationEngineLoaded, remappedAlignments.length, isQwen3Backend],
+  );
 
   useEffect(() => {
     if (isQwen3Backend) {
@@ -654,6 +660,107 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   function handleAbortTranslate() {
     if (!isTranslating || !translateAbortRef.current) return;
     translateAbortRef.current.abort();
+  }
+
+  async function handleCreateDubbingProject() {
+    if (!isTranslationEngineLoaded) {
+      setTranslationError("请先加载翻译引擎。");
+      return;
+    }
+    if (isQwen3Backend) {
+      setTranslationError("Qwen3-ASR (CrispASR) 当前不提供可用时间轴，无法创建时间轴匹配配音项目。");
+      return;
+    }
+    if (!remappedAlignments.length) {
+      setTranslationError("请先完成 Whisper 识别并拿到时间轴片段。");
+      return;
+    }
+    setIsBuildingDubbingProject(true);
+    setTranslationError("");
+    try {
+      const response = await fetch(`${API_BASE_URL}/llm/translate-dubbing-segments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: translationSource,
+          target_language: translationTargetLanguage,
+          segments: remappedAlignments.map((item) => ({
+            id: String(item?.id || ""),
+            speaker: String(item?.speaker || "narrator"),
+            text: String(item?.text || ""),
+            start_ms: Number.isFinite(Number(item?.start_ms)) ? Number(item.start_ms) : null,
+            end_ms: Number.isFinite(Number(item?.end_ms)) ? Number(item.end_ms) : null,
+          })),
+        }),
+      });
+      if (!response.ok) {
+        const message = await readErrorMessage(response, `HTTP ${response.status}`);
+        throw new Error(message);
+      }
+      const payload = await response.json();
+      const translatedSegments = Array.isArray(payload?.segments) ? payload.segments : [];
+      if (!translatedSegments.length) {
+        throw new Error("未返回可用分段翻译结果。");
+      }
+
+      const audioStem = String(pendingAudio?.fileName || "").replace(/\.[^.]+$/, "");
+      const baseName = (projectName || "").trim() || audioStem || "翻译配音";
+      const nextProjectName = `${baseName}-翻译配音`;
+      const project = await createProject(nextProjectName);
+
+      const scriptPayload = {
+        title: nextProjectName,
+        source_text: String(payload?.translated_text || "").trim(),
+        metadata: {
+          asr_source: true,
+          dubbing_source: true,
+          dubbing_target_language: String(translationTargetLanguage || "中文"),
+          dubbing_source_backend: String(translationSource || ""),
+          dubbing_segment_count: Number(translatedSegments.length),
+        },
+        characters: [],
+        segments: translatedSegments.map((segment, index) => {
+          const segText = String(segment?.text || "").trim();
+          const sourceText = String(segment?.source_text || "").trim();
+          const startMs = Number.isFinite(Number(segment?.start_ms)) ? Number(segment.start_ms) : null;
+          const endMs = Number.isFinite(Number(segment?.end_ms)) ? Number(segment.end_ms) : null;
+          const durationMs = Number.isFinite(Number(segment?.duration_ms))
+            ? Number(segment.duration_ms)
+            : (startMs !== null && endMs !== null && endMs >= startMs ? endMs - startMs : null);
+          const overrides = segment?.tts_overrides && typeof segment.tts_overrides === "object" ? segment.tts_overrides : {};
+          return {
+            id: String(segment?.id || `dub-seg-${index + 1}`),
+            index,
+            type: "dialogue",
+            speaker: String(segment?.speaker || "narrator"),
+            text: segText,
+            emotion: "neutral",
+            non_verbal: [],
+            tts_overrides: overrides,
+            source_text: sourceText,
+            source_start_ms: startMs,
+            source_end_ms: endMs,
+            source_duration_ms: durationMs,
+          };
+        }),
+      };
+
+      await saveScript({
+        projectId: project.id,
+        script: scriptPayload,
+      });
+      await selectProject(project.id, { suppressToast: true });
+      await loadProjectScript(project.id);
+      setTranslationResult(String(payload?.translated_text || "").trim());
+      useUiStore.getState().pushToast({ title: `已创建翻译配音项目：${nextProjectName}`, tone: "success" });
+      onNavigate?.("script");
+    } catch (err) {
+      const message = err?.message || "创建翻译配音项目失败";
+      setTranslationError(message);
+      useUiStore.getState().pushToast({ title: `创建失败：${message}`, tone: "error" });
+    } finally {
+      setIsBuildingDubbingProject(false);
+    }
   }
 
   async function handleCreateProjectFromAudio() {
@@ -1296,7 +1403,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
         <div className="editorGrid three">
           <div className="formGroup">
             <label className="formLabel">来源</label>
-            <select className="textInput" value={translationSource} onChange={(e) => setTranslationSource(e.target.value)} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject}>
+            <select className="textInput" value={translationSource} onChange={(e) => setTranslationSource(e.target.value)} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>
               <option value="primary_local">模型1（主模型）</option>
               <option value="secondary_local">模型2（小模型）</option>
               <option value="openai">OpenAI API</option>
@@ -1305,14 +1412,14 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           </div>
           <div className="formGroup">
             <label className="formLabel">模式</label>
-            <select className="textInput" value={translationMode} onChange={(e) => setTranslationMode(e.target.value)} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject}>
+            <select className="textInput" value={translationMode} onChange={(e) => setTranslationMode(e.target.value)} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>
               <option value="polish_only">仅润色</option>
               <option value="translate_polish">翻译+润色</option>
             </select>
           </div>
           <div className="formGroup">
             <label className="formLabel">目标语言</label>
-            <select className="textInput" value={translationTargetLanguage} onChange={(e) => setTranslationTargetLanguage(e.target.value)} disabled={translationMode !== "translate_polish" || isLoadingTranslationEngine || isTranslating || isCreatingProject}>
+            <select className="textInput" value={translationTargetLanguage} onChange={(e) => setTranslationTargetLanguage(e.target.value)} disabled={translationMode !== "translate_polish" || isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>
               <option value="中文">中文</option>
               <option value="英文">英文</option>
               <option value="日文">日文</option>
@@ -1321,21 +1428,29 @@ export default function SpeechRecognitionPage({ onNavigate }) {
         </div>
 
         <div className="controlRow">
-          <Button variant="secondary" onClick={handleLoadTranslationEngine} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject}>
+          <Button variant="secondary" onClick={handleLoadTranslationEngine} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>
             加载翻译引擎
           </Button>
-          <Button variant="secondary" onClick={handleUnloadTranslationEngine} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject}>
+          <Button variant="secondary" onClick={handleUnloadTranslationEngine} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>
             卸载翻译引擎
           </Button>
           <Button
             variant="primary"
             onClick={handleTranslatePolish}
-            disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || !isTranslationEngineLoaded}
+            disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject || !isTranslationEngineLoaded}
           >
             翻译润色
           </Button>
-          <Button variant="danger" onClick={handleAbortTranslate} disabled={!isTranslating}>
+          <Button variant="danger" onClick={handleAbortTranslate} disabled={!isTranslating || isBuildingDubbingProject}>
             终止翻译
+          </Button>
+          <Button
+            variant="primary"
+            icon={FolderPlus}
+            onClick={handleCreateDubbingProject}
+            disabled={!canBuildDubbingProject || isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}
+          >
+            {isBuildingDubbingProject ? "创建配音项目中..." : "生成翻译配音项目"}
           </Button>
         </div>
 
@@ -1343,6 +1458,8 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           引擎状态：{translationEngineStatus?.loaded ? "已加载" : "未加载"} · 来源：{translationEngineStatus?.source || "未选择"} · 后端：{translationEngineStatus?.backend || "unknown"}
         </div>
         {translationEngineStatus?.model_name ? <div className="muted">模型：{translationEngineStatus.model_name}</div> : null}
+        {!isQwen3Backend ? <div className="muted">翻译配音会按 Whisper 时间轴分段，并自动写入每段 speed/duration。</div> : null}
+        {isQwen3Backend ? <div className="muted">Qwen3-ASR 当前为纯识别模式，不支持时间轴匹配配音项目创建。</div> : null}
         {translationEngineStatus?.error ? <div className="errorText">{translationEngineStatus.error}</div> : null}
         {translationError ? <div className="errorText">{translationError}</div> : null}
 
