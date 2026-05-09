@@ -208,6 +208,66 @@ class ApiSmokeTest(unittest.TestCase):
             if renamed_name:
                 self.client.delete(f"/api/v1/music/assets/{renamed_name}")
 
+    def test_music_asset_category_crud_flow(self) -> None:
+        music_dir = self.app_state.settings.output_dir / "music"
+        music_dir.mkdir(parents=True, exist_ok=True)
+        asset_name = f"cat_asset_{uuid.uuid4().hex[:8]}.wav"
+        asset_path = music_dir / asset_name
+        created_category_id = ""
+        try:
+            asset_path.write_bytes(b"RIFFcat")
+
+            create_resp = self.client.post("/api/v1/music/assets/categories", json={"name": "测试分类"})
+            self.assertEqual(create_resp.status_code, 200)
+            created_category_id = str((create_resp.json().get("category") or {}).get("id") or "")
+            self.assertTrue(created_category_id)
+
+            assign_resp = self.client.post(
+                f"/api/v1/music/assets/{asset_name}/category",
+                json={"category_id": created_category_id},
+            )
+            self.assertEqual(assign_resp.status_code, 200)
+            self.assertEqual(assign_resp.json().get("category_id"), created_category_id)
+
+            list_resp = self.client.get("/api/v1/music/assets")
+            self.assertEqual(list_resp.status_code, 200)
+            body = list_resp.json()
+            categories = body.get("categories") or []
+            items = body.get("items") or []
+            self.assertTrue(any(item.get("id") == "uncategorized" for item in categories))
+            self.assertTrue(any(item.get("id") == created_category_id for item in categories))
+            target = next((item for item in items if item.get("name") == asset_name), None)
+            self.assertIsNotNone(target)
+            self.assertEqual(target.get("category_id"), created_category_id)
+            self.assertEqual(target.get("category_name"), "测试分类")
+
+            rename_resp = self.client.post(
+                f"/api/v1/music/assets/categories/{created_category_id}/rename",
+                json={"name": "测试分类-已改名"},
+            )
+            self.assertEqual(rename_resp.status_code, 200)
+            renamed = rename_resp.json().get("category") or {}
+            self.assertEqual(renamed.get("id"), created_category_id)
+            self.assertEqual(renamed.get("name"), "测试分类-已改名")
+
+            unassign_resp = self.client.post(
+                f"/api/v1/music/assets/{asset_name}/category",
+                json={"category_id": None},
+            )
+            self.assertEqual(unassign_resp.status_code, 200)
+            self.assertEqual(unassign_resp.json().get("category_id"), "uncategorized")
+
+            delete_resp = self.client.delete(f"/api/v1/music/assets/categories/{created_category_id}")
+            self.assertEqual(delete_resp.status_code, 200)
+            self.assertEqual(delete_resp.json().get("status"), "deleted")
+            created_category_id = ""
+        finally:
+            if created_category_id:
+                self.client.delete(f"/api/v1/music/assets/categories/{created_category_id}")
+            self.client.delete(f"/api/v1/music/assets/{asset_name}")
+            if asset_path.exists():
+                asset_path.unlink(missing_ok=True)
+
     def test_music_generate_cover_requires_source_asset(self) -> None:
         state = self.app_state
         original_music_enabled = state.orchestrator.config.music_enabled

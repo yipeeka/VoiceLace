@@ -63,6 +63,8 @@ const TURBO_SHIFT_OPTIONS = [
 ];
 const BASE_MIN_INFERENCE_STEPS = 32;
 const BASE_MAX_INFERENCE_STEPS = 100;
+const MUSIC_CATEGORY_ALL = "all";
+const MUSIC_CATEGORY_UNCATEGORIZED = "uncategorized";
 
 const BPM_OPTIONS = [
   { value: "", label: "不指定" },
@@ -199,6 +201,22 @@ function parseMusicEvent(data) {
   return null;
 }
 
+function normalizeAssetCategories(rawCategories) {
+  const out = [];
+  const seen = new Set();
+  for (const item of Array.isArray(rawCategories) ? rawCategories : []) {
+    const id = String(item?.id || "").trim();
+    const name = String(item?.name || "").trim();
+    if (!id || !name || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, name, builtin: Boolean(item?.builtin) });
+  }
+  if (!seen.has(MUSIC_CATEGORY_UNCATEGORIZED)) {
+    out.unshift({ id: MUSIC_CATEGORY_UNCATEGORIZED, name: "未分类", builtin: true });
+  }
+  return out;
+}
+
 export default function MusicPage({ onNavigate }) {
   const currentProject = useProjectStore((s) => s.currentProject);
   const currentProjectFileHandle = useProjectStore((s) => s.currentProjectFileHandle);
@@ -222,6 +240,14 @@ export default function MusicPage({ onNavigate }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [assets, setAssets] = useState([]);
+  const [assetCategories, setAssetCategories] = useState([{ id: MUSIC_CATEGORY_UNCATEGORIZED, name: "未分类", builtin: true }]);
+  const [assetCategoryFilter, setAssetCategoryFilter] = useState(MUSIC_CATEGORY_ALL);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [isCreatingCategory, setIsCreatingCategory] = useState(false);
+  const [renamingCategoryId, setRenamingCategoryId] = useState("");
+  const [renamingCategoryValue, setRenamingCategoryValue] = useState("");
+  const [categoryBusyId, setCategoryBusyId] = useState("");
+  const [activeCategoryActionId, setActiveCategoryActionId] = useState("");
   const [isLoadingAssets, setIsLoadingAssets] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
   const [validation, setValidation] = useState(null);
@@ -288,10 +314,40 @@ export default function MusicPage({ onNavigate }) {
     return map;
   }, [assets]);
 
+  const categoryById = useMemo(() => {
+    const map = {};
+    for (const item of assetCategories) {
+      if (item?.id) {
+        map[item.id] = item;
+      }
+    }
+    return map;
+  }, [assetCategories]);
+
   const assetOptions = useMemo(
     () => [{ value: "", label: "请选择" }, ...assets.map((item) => ({ value: item.name, label: item.name }))],
     [assets],
   );
+
+  const categoryFilterOptions = useMemo(
+    () => [
+      { value: MUSIC_CATEGORY_ALL, label: "全部" },
+      ...assetCategories.map((item) => ({ value: item.id, label: item.name })),
+    ],
+    [assetCategories],
+  );
+
+  const assetCategoryOptions = useMemo(
+    () => assetCategories.map((item) => ({ value: item.id, label: item.name })),
+    [assetCategories],
+  );
+
+  const filteredAssets = useMemo(() => {
+    if (assetCategoryFilter === MUSIC_CATEGORY_ALL) {
+      return assets;
+    }
+    return assets.filter((item) => (item?.category_id || MUSIC_CATEGORY_UNCATEGORIZED) === assetCategoryFilter);
+  }, [assets, assetCategoryFilter]);
 
   const previewAudioUrl = previewAssetName
     ? `${API_ORIGIN}/api/v1/music/assets/${encodeURIComponent(previewAssetName)}/audio?v=${encodeURIComponent(assetByName[previewAssetName]?.updated_at || "")}`
@@ -365,7 +421,11 @@ export default function MusicPage({ onNavigate }) {
     try {
       const payload = await api.get("/music/assets");
       const nextItems = Array.isArray(payload?.items) ? payload.items : [];
+      const nextCategories = normalizeAssetCategories(payload?.categories);
       setAssets(nextItems);
+      setAssetCategories(nextCategories);
+      const validFilterIds = new Set([MUSIC_CATEGORY_ALL, ...nextCategories.map((item) => item.id)]);
+      setAssetCategoryFilter((prev) => (validFilterIds.has(prev) ? prev : MUSIC_CATEGORY_ALL));
       if (!previewAssetName && nextItems.length > 0) {
         setPreviewAssetName(nextItems[0].name);
       }
@@ -373,6 +433,100 @@ export default function MusicPage({ onNavigate }) {
       pushToast({ title: `加载音乐资产失败：${getErrorMessage(error)}`, tone: "error" });
     } finally {
       setIsLoadingAssets(false);
+    }
+  }
+
+  async function handleCreateCategory() {
+    const name = newCategoryName.trim();
+    if (!name) {
+      pushToast({ title: "请输入分类名称", tone: "warning" });
+      return;
+    }
+    setIsCreatingCategory(true);
+    try {
+      const result = await api.post("/music/assets/categories", { name });
+      const nextCategories = normalizeAssetCategories(result?.categories);
+      setAssetCategories(nextCategories);
+      setNewCategoryName("");
+      pushToast({ title: "分类已创建", tone: "success" });
+    } catch (error) {
+      pushToast({ title: `创建分类失败：${getErrorMessage(error)}`, tone: "error" });
+    } finally {
+      setIsCreatingCategory(false);
+    }
+  }
+
+  async function handleSetAssetCategory(assetName, categoryId) {
+    if (!assetName) return;
+    const normalizedCategoryId = String(categoryId || MUSIC_CATEGORY_UNCATEGORIZED);
+    setCategoryBusyId(`${assetName}:set-category`);
+    try {
+      await api.post(`/music/assets/${encodeURIComponent(assetName)}/category`, { category_id: normalizedCategoryId });
+      await refreshAssets();
+    } catch (error) {
+      pushToast({ title: `设置分类失败：${getErrorMessage(error)}`, tone: "error" });
+    } finally {
+      setCategoryBusyId("");
+    }
+  }
+
+  function handleStartRenameCategory(category) {
+    if (!category?.id || category.builtin) {
+      return;
+    }
+    setRenamingCategoryId(category.id);
+    setRenamingCategoryValue(category.name || "");
+    setActiveCategoryActionId(category.id);
+  }
+
+  function handleCancelRenameCategory() {
+    setRenamingCategoryId("");
+    setRenamingCategoryValue("");
+  }
+
+  async function handleConfirmRenameCategory(categoryId) {
+    const name = renamingCategoryValue.trim();
+    if (!categoryId || !name) {
+      pushToast({ title: "分类名称不能为空", tone: "warning" });
+      return;
+    }
+    setCategoryBusyId(`${categoryId}:rename`);
+    try {
+      const result = await api.post(`/music/assets/categories/${encodeURIComponent(categoryId)}/rename`, { name });
+      setAssetCategories(normalizeAssetCategories(result?.categories));
+      setRenamingCategoryId("");
+      setRenamingCategoryValue("");
+      setActiveCategoryActionId(categoryId);
+      pushToast({ title: "分类已重命名", tone: "success" });
+    } catch (error) {
+      pushToast({ title: `重命名分类失败：${getErrorMessage(error)}`, tone: "error" });
+    } finally {
+      setCategoryBusyId("");
+    }
+  }
+
+  async function handleDeleteCategory(categoryId) {
+    if (!categoryId || categoryId === MUSIC_CATEGORY_UNCATEGORIZED) {
+      return;
+    }
+    const confirmed = window.confirm("删除分类后，分类下资产将回到未分类，是否继续？");
+    if (!confirmed) return;
+    setCategoryBusyId(`${categoryId}:delete`);
+    try {
+      const result = await api.delete(`/music/assets/categories/${encodeURIComponent(categoryId)}`);
+      setAssetCategories(normalizeAssetCategories(result?.categories));
+      if (assetCategoryFilter === categoryId) {
+        setAssetCategoryFilter(MUSIC_CATEGORY_ALL);
+      }
+      if (activeCategoryActionId === categoryId) {
+        setActiveCategoryActionId("");
+      }
+      await refreshAssets();
+      pushToast({ title: "分类已删除", tone: "success" });
+    } catch (error) {
+      pushToast({ title: `删除分类失败：${getErrorMessage(error)}`, tone: "error" });
+    } finally {
+      setCategoryBusyId("");
     }
   }
 
@@ -1595,15 +1749,111 @@ export default function MusicPage({ onNavigate }) {
           <div ref={statusCardRef} />
           <div className="sectionHeader">
           <h2 className="cardTitle">音乐资产库</h2>
-          <div className="secondary">{isLoadingAssets ? "刷新中..." : `共 ${assets.length} 条`}</div>
+          <div className="secondary">
+            {isLoadingAssets ? "刷新中..." : `显示 ${filteredAssets.length} / 共 ${assets.length} 条`}
+          </div>
         </div>
+        <div className="musicAssetCategoryToolbar">
+          <div style={{ minWidth: 200 }}>
+            <Select
+              value={assetCategoryFilter}
+              onValueChange={setAssetCategoryFilter}
+              options={categoryFilterOptions}
+            />
+          </div>
+          <input
+            className="textInput"
+            value={newCategoryName}
+            onChange={(event) => setNewCategoryName(event.target.value)}
+            placeholder="新分类名称"
+            style={{ maxWidth: 220 }}
+          />
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={isCreatingCategory}
+            onClick={handleCreateCategory}
+          >
+            {isCreatingCategory ? "创建中..." : "新建分类"}
+          </Button>
+        </div>
+        {assetCategories.filter((item) => !item.builtin).length > 0 ? (
+          <div className="musicCategoryList">
+            {assetCategories.filter((item) => !item.builtin).map((category) => (
+              <div key={category.id} className="musicCategoryRowCompact">
+                {renamingCategoryId === category.id ? (
+                  <>
+                    <input
+                      className="textInput"
+                      value={renamingCategoryValue}
+                      onChange={(event) => setRenamingCategoryValue(event.target.value)}
+                      style={{ maxWidth: 220 }}
+                    />
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={categoryBusyId === `${category.id}:rename`}
+                      onClick={() => handleConfirmRenameCategory(category.id)}
+                    >
+                      {categoryBusyId === `${category.id}:rename` ? "保存中..." : "保存"}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={categoryBusyId === `${category.id}:rename`}
+                      onClick={handleCancelRenameCategory}
+                    >
+                      取消
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className={`musicCategoryChip ${activeCategoryActionId === category.id ? "active" : ""}`}
+                      onClick={() => setActiveCategoryActionId((prev) => (prev === category.id ? "" : category.id))}
+                    >
+                      {category.name}
+                    </button>
+                    {activeCategoryActionId === category.id ? (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          icon={Pencil}
+                          disabled={Boolean(categoryBusyId)}
+                          onClick={() => handleStartRenameCategory(category)}
+                        >
+                          重命名
+                        </Button>
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          icon={Trash2}
+                          disabled={categoryBusyId === `${category.id}:delete`}
+                          onClick={() => handleDeleteCategory(category.id)}
+                        >
+                          {categoryBusyId === `${category.id}:delete` ? "删除中..." : "删除"}
+                        </Button>
+                      </>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : null}
         {assets.length === 0 ? (
           <div className="emptyState">
             <span>还没有生成结果</span>
           </div>
+        ) : filteredAssets.length === 0 ? (
+          <div className="emptyState">
+            <span>该分类下暂无资产</span>
+          </div>
         ) : (
           <div className="musicAssetList">
-            {assets.map((item) => (
+            {filteredAssets.map((item) => (
               <div key={item.name} className={`musicAssetRow ${previewAssetName === item.name ? "active" : ""}`}>
                 {renamingAssetName === item.name ? (
                   <div className="musicAssetMeta" style={{ cursor: "default" }}>
@@ -1625,6 +1875,7 @@ export default function MusicPage({ onNavigate }) {
                     type="button"
                   >
                     <div className="musicAssetName">{item.name}</div>
+                    <div className="musicAssetCategoryTag">{item.category_name || categoryById[item.category_id]?.name || "未分类"}</div>
                     <div className="musicAssetSub">
                       <span>{formatFileSize(item.size)}</span>
                       <span>{formatDateTime(item.updated_at)}</span>
@@ -1653,11 +1904,18 @@ export default function MusicPage({ onNavigate }) {
                     </>
                   ) : (
                     <>
+                      <div style={{ minWidth: 150 }}>
+                        <Select
+                          value={item.category_id || MUSIC_CATEGORY_UNCATEGORIZED}
+                          onValueChange={(value) => handleSetAssetCategory(item.name, value)}
+                          options={assetCategoryOptions}
+                        />
+                      </div>
                       <Button
                         variant="ghost"
                         size="sm"
                         icon={Pencil}
-                        disabled={deletingAssetName === item.name}
+                        disabled={deletingAssetName === item.name || Boolean(categoryBusyId)}
                         onClick={() => handleStartRenameAsset(item.name)}
                       >
                         重命名
@@ -1682,7 +1940,7 @@ export default function MusicPage({ onNavigate }) {
                         variant="danger"
                         size="sm"
                         icon={Trash2}
-                        disabled={deletingAssetName === item.name}
+                        disabled={deletingAssetName === item.name || Boolean(categoryBusyId)}
                         onClick={() => handleDeleteAsset(item.name)}
                       >
                         {deletingAssetName === item.name ? "删除中..." : "删除"}

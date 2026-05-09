@@ -14,6 +14,9 @@ from backend.engine.llm_parser import extract_json_object, strip_json_fences
 from backend.engine.music_prompts import build_music_assist_chat_prompt, build_music_assist_finalize_prompt
 from backend.models import (
     AttachMusicAssetRequest,
+    MusicAssetCategoryAssignRequest,
+    MusicAssetCategoryCreateRequest,
+    MusicAssetCategoryRenameRequest,
     MusicAssistChatRequest,
     MusicAssistFinalizeRequest,
     MusicAssistLoadRequest,
@@ -29,6 +32,8 @@ from backend.state import get_app_state
 router = APIRouter()
 MUSIC_ASSET_SUFFIXES = {".wav", ".mp3", ".flac", ".ogg"}
 MUSIC_TASK_TYPES = {"text2music", "cover", "repaint", "lego", "extract", "complete"}
+UNCATEGORIZED_CATEGORY_ID = "uncategorized"
+MUSIC_ASSET_CATEGORY_INDEX_FILENAME = ".asset_categories.json"
 ALLOWED_ASSIST_SOURCES = {"primary_local", "secondary_local", "openai", "gemini"}
 ALLOWED_VOCAL_LANGUAGES = {"unknown", "zh", "en", "ja", "ko"}
 ALLOWED_BPMS = {60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 180}
@@ -101,6 +106,137 @@ def _resolve_music_asset_path(state, asset_name: str) -> Path:
     if source.suffix.lower() not in MUSIC_ASSET_SUFFIXES:
         raise HTTPException(status_code=400, detail="仅支持音频文件")
     return source
+
+
+def _music_asset_category_index_path(state) -> Path:
+    return state.settings.output_dir / "music" / MUSIC_ASSET_CATEGORY_INDEX_FILENAME
+
+
+def _default_music_asset_category_index() -> dict[str, Any]:
+    return {
+        "categories": [],
+        "assignments": {},
+    }
+
+
+def _read_music_asset_category_index(state) -> dict[str, Any]:
+    path = _music_asset_category_index_path(state)
+    if not path.exists():
+        return _default_music_asset_category_index()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return _default_music_asset_category_index()
+    if not isinstance(payload, dict):
+        return _default_music_asset_category_index()
+    categories = payload.get("categories")
+    assignments = payload.get("assignments")
+    if not isinstance(categories, list):
+        categories = []
+    if not isinstance(assignments, dict):
+        assignments = {}
+    normalized_categories: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for item in categories:
+        if not isinstance(item, dict):
+            continue
+        category_id = str(item.get("id") or "").strip()
+        name = str(item.get("name") or "").strip()
+        if not category_id or not name:
+            continue
+        if category_id == UNCATEGORIZED_CATEGORY_ID or category_id in seen_ids:
+            continue
+        seen_ids.add(category_id)
+        normalized_categories.append(
+            {
+                "id": category_id,
+                "name": name,
+                "created_at": str(item.get("created_at") or _now_iso()),
+                "updated_at": str(item.get("updated_at") or _now_iso()),
+            }
+        )
+    normalized_assignments: dict[str, str] = {}
+    for key, value in assignments.items():
+        asset_name = str(key or "").strip()
+        category_id = str(value or "").strip()
+        if not asset_name or not category_id:
+            continue
+        if category_id == UNCATEGORIZED_CATEGORY_ID:
+            continue
+        normalized_assignments[asset_name] = category_id
+    return {
+        "categories": normalized_categories,
+        "assignments": normalized_assignments,
+    }
+
+
+def _write_music_asset_category_index(state, payload: dict[str, Any]) -> None:
+    path = _music_asset_category_index_path(state)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _normalize_music_category_name(name: str) -> str:
+    normalized = str(name or "").strip()
+    if not normalized:
+        raise HTTPException(status_code=400, detail="分类名称不能为空")
+    if len(normalized) > 40:
+        raise HTTPException(status_code=400, detail="分类名称长度不能超过 40")
+    return normalized
+
+
+def _build_music_categories_response(categories: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {"id": UNCATEGORIZED_CATEGORY_ID, "name": "未分类", "builtin": True},
+        *[
+            {
+                "id": str(item.get("id") or ""),
+                "name": str(item.get("name") or ""),
+                "builtin": False,
+            }
+            for item in categories
+        ],
+    ]
+
+
+def _build_music_asset_items_with_categories(*, payload: dict[str, Any], candidates: list[Path]) -> tuple[list[dict[str, Any]], bool]:
+    categories = payload.get("categories") or []
+    assignments = payload.get("assignments") or {}
+    category_name_by_id = {
+        str(item.get("id") or ""): str(item.get("name") or "")
+        for item in categories
+        if str(item.get("id") or "").strip()
+    }
+    items: list[dict[str, Any]] = []
+    existing_asset_names: set[str] = set()
+    changed = False
+    for audio_file in sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True):
+        stat = audio_file.stat()
+        asset_name = audio_file.name
+        existing_asset_names.add(asset_name)
+        raw_category_id = str(assignments.get(asset_name) or "").strip()
+        category_id = raw_category_id if raw_category_id in category_name_by_id else UNCATEGORIZED_CATEGORY_ID
+        if raw_category_id and category_id == UNCATEGORIZED_CATEGORY_ID:
+            assignments.pop(asset_name, None)
+            changed = True
+        items.append(
+            {
+                "name": asset_name,
+                "path": str(audio_file),
+                "size": int(stat.st_size),
+                "updated_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                "category_id": category_id,
+                "category_name": category_name_by_id.get(category_id, "未分类"),
+            }
+        )
+
+    stale_keys = [key for key in list(assignments.keys()) if key not in existing_asset_names]
+    if stale_keys:
+        for key in stale_keys:
+            assignments.pop(key, None)
+        changed = True
+
+    return items, changed
 
 
 def _resolve_music_asset_rename_target(state, source: Path, new_name: str) -> Path:
@@ -758,23 +894,140 @@ async def get_music_audio(task_id: str, state=Depends(get_app_state)):
 @router.get("/assets")
 async def list_music_assets(state=Depends(get_app_state)):
     music_dir = state.settings.output_dir / "music"
+    category_payload = _read_music_asset_category_index(state)
     if not music_dir.exists():
-        return {"items": []}
+        return {
+            "items": [],
+            "categories": _build_music_categories_response(category_payload.get("categories") or []),
+        }
     candidates: list[Path] = []
     for suffix in MUSIC_ASSET_SUFFIXES:
         candidates.extend(music_dir.glob(f"*{suffix}"))
-    items = []
-    for audio_file in sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True):
-        stat = audio_file.stat()
-        items.append(
-            {
-                "name": audio_file.name,
-                "path": str(audio_file),
-                "size": int(stat.st_size),
-                "updated_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-            }
-        )
-    return {"items": items}
+    items, changed = _build_music_asset_items_with_categories(payload=category_payload, candidates=candidates)
+    if changed:
+        _write_music_asset_category_index(state, category_payload)
+    return {
+        "items": items,
+        "categories": _build_music_categories_response(category_payload.get("categories") or []),
+    }
+
+
+@router.post("/assets/categories")
+async def create_music_asset_category(payload: MusicAssetCategoryCreateRequest, state=Depends(get_app_state)):
+    category_payload = _read_music_asset_category_index(state)
+    categories = category_payload.get("categories") or []
+    normalized_name = _normalize_music_category_name(payload.name)
+    lowered = normalized_name.lower()
+    if lowered == "未分类":
+        raise HTTPException(status_code=400, detail="分类名称不可与内置分类重复")
+    if any(str(item.get("name") or "").strip().lower() == lowered for item in categories):
+        raise HTTPException(status_code=409, detail="分类名称已存在")
+    now = _now_iso()
+    created = {
+        "id": f"cat_{uuid4().hex[:10]}",
+        "name": normalized_name,
+        "created_at": now,
+        "updated_at": now,
+    }
+    categories.append(created)
+    category_payload["categories"] = categories
+    _write_music_asset_category_index(state, category_payload)
+    return {
+        "status": "created",
+        "category": {"id": created["id"], "name": created["name"], "builtin": False},
+        "categories": _build_music_categories_response(categories),
+    }
+
+
+@router.post("/assets/categories/{category_id}/rename")
+async def rename_music_asset_category(category_id: str, payload: MusicAssetCategoryRenameRequest, state=Depends(get_app_state)):
+    normalized_id = str(category_id or "").strip()
+    if normalized_id == UNCATEGORIZED_CATEGORY_ID:
+        raise HTTPException(status_code=400, detail="内置分类不可重命名")
+    category_payload = _read_music_asset_category_index(state)
+    categories = category_payload.get("categories") or []
+    normalized_name = _normalize_music_category_name(payload.name)
+    lowered = normalized_name.lower()
+    for item in categories:
+        if str(item.get("id") or "").strip() != normalized_id and str(item.get("name") or "").strip().lower() == lowered:
+            raise HTTPException(status_code=409, detail="分类名称已存在")
+    target: dict[str, Any] | None = None
+    for item in categories:
+        if str(item.get("id") or "").strip() == normalized_id:
+            target = item
+            break
+    if target is None:
+        raise HTTPException(status_code=404, detail="分类不存在")
+    target["name"] = normalized_name
+    target["updated_at"] = _now_iso()
+    _write_music_asset_category_index(state, category_payload)
+    return {
+        "status": "renamed",
+        "category": {"id": target["id"], "name": target["name"], "builtin": False},
+        "categories": _build_music_categories_response(categories),
+    }
+
+
+@router.delete("/assets/categories/{category_id}")
+async def delete_music_asset_category(category_id: str, state=Depends(get_app_state)):
+    normalized_id = str(category_id or "").strip()
+    if normalized_id == UNCATEGORIZED_CATEGORY_ID:
+        raise HTTPException(status_code=400, detail="内置分类不可删除")
+    category_payload = _read_music_asset_category_index(state)
+    categories = category_payload.get("categories") or []
+    assignments = category_payload.get("assignments") or {}
+    kept_categories = [item for item in categories if str(item.get("id") or "").strip() != normalized_id]
+    if len(kept_categories) == len(categories):
+        raise HTTPException(status_code=404, detail="分类不存在")
+    for key, value in list(assignments.items()):
+        if str(value or "").strip() == normalized_id:
+            assignments.pop(key, None)
+    category_payload["categories"] = kept_categories
+    category_payload["assignments"] = assignments
+    _write_music_asset_category_index(state, category_payload)
+    return {
+        "status": "deleted",
+        "category_id": normalized_id,
+        "categories": _build_music_categories_response(kept_categories),
+    }
+
+
+@router.post("/assets/{asset_name}/category")
+async def set_music_asset_category(asset_name: str, payload: MusicAssetCategoryAssignRequest, state=Depends(get_app_state)):
+    source = _resolve_music_asset_path(state, asset_name)
+    normalized_id = str(payload.category_id or "").strip()
+    category_payload = _read_music_asset_category_index(state)
+    assignments = category_payload.get("assignments") or {}
+    categories = category_payload.get("categories") or []
+    if not normalized_id or normalized_id == UNCATEGORIZED_CATEGORY_ID:
+        assignments.pop(source.name, None)
+        category_payload["assignments"] = assignments
+        _write_music_asset_category_index(state, category_payload)
+        return {
+            "status": "updated",
+            "asset_name": source.name,
+            "category_id": UNCATEGORIZED_CATEGORY_ID,
+            "category_name": "未分类",
+            "categories": _build_music_categories_response(categories),
+        }
+
+    target_category = None
+    for item in categories:
+        if str(item.get("id") or "").strip() == normalized_id:
+            target_category = item
+            break
+    if target_category is None:
+        raise HTTPException(status_code=404, detail="分类不存在")
+    assignments[source.name] = normalized_id
+    category_payload["assignments"] = assignments
+    _write_music_asset_category_index(state, category_payload)
+    return {
+        "status": "updated",
+        "asset_name": source.name,
+        "category_id": normalized_id,
+        "category_name": str(target_category.get("name") or ""),
+        "categories": _build_music_categories_response(categories),
+    }
 
 
 @router.post("/assets/upload")
@@ -817,6 +1070,12 @@ async def get_music_asset_audio(asset_name: str, state=Depends(get_app_state)):
 async def delete_music_asset(asset_name: str, state=Depends(get_app_state)):
     source = _resolve_music_asset_path(state, asset_name)
     source.unlink(missing_ok=True)
+    category_payload = _read_music_asset_category_index(state)
+    assignments = category_payload.get("assignments") or {}
+    if source.name in assignments:
+        assignments.pop(source.name, None)
+        category_payload["assignments"] = assignments
+        _write_music_asset_category_index(state, category_payload)
     return {"status": "deleted", "asset_name": asset_name}
 
 
@@ -825,10 +1084,19 @@ async def rename_music_asset(asset_name: str, payload: RenameMusicAssetRequest, 
     source = _resolve_music_asset_path(state, asset_name)
     target = _resolve_music_asset_rename_target(state, source, payload.new_name)
     if target != source:
+        category_payload = _read_music_asset_category_index(state)
+        assignments = category_payload.get("assignments") or {}
+        old_name = source.name
+        old_assignment = assignments.get(old_name)
         try:
             source.rename(target)
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"重命名失败: {exc}") from exc
+        if old_assignment:
+            assignments.pop(old_name, None)
+            assignments[target.name] = old_assignment
+            category_payload["assignments"] = assignments
+            _write_music_asset_category_index(state, category_payload)
     stat = target.stat()
     return {
         "status": "renamed",

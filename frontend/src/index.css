@@ -1545,6 +1545,44 @@ select.textInput option {
   gap: 8px;
 }
 
+.musicAssetCategoryToolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.musicCategoryList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.musicCategoryRowCompact {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+}
+
+.musicCategoryChip {
+  border: 1px solid var(--border-default);
+  background: color-mix(in srgb, var(--bg-elevated) 90%, transparent);
+  color: var(--text-primary);
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.musicCategoryChip.active {
+  border-color: color-mix(in srgb, var(--accent-primary) 70%, var(--border-default));
+  background: color-mix(in srgb, var(--accent-primary) 16%, var(--bg-elevated));
+}
+
 .musicAssetRow {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) auto;
@@ -1577,6 +1615,11 @@ select.textInput option {
   font-size: 13px;
   color: var(--text-primary);
   font-family: "JetBrains Mono", monospace;
+}
+
+.musicAssetCategoryTag {
+  font-size: 11px;
+  color: var(--text-secondary);
 }
 
 .musicAssetSub {
