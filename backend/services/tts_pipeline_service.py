@@ -31,6 +31,8 @@ async def run_synthesis_task(*, task_id: str, payload: SynthesizeRequest, state,
     create_project_snapshot(state.settings.projects_dir, project, reason="before_synthesis_run")
     presets_by_id = {preset.id: preset for preset in state.voice_manager.list_presets()}
     config = payload.config or project.synthesis_config
+    if bool((project.script.metadata or {}).get("dubbing_source")) and config.get_tts_backend() == "voxcpm2":
+        raise HTTPException(status_code=400, detail="翻译/字幕配音项目仅支持 OmniVoice。")
     project.synthesis_config = config
     project.status = "synthesizing"
     save_project(state.settings.projects_dir, project)

@@ -560,6 +560,22 @@ pre, code {
 
 .editorGrid.three { grid-template-columns: 1fr 1fr 1fr; }
 
+@media (max-width: 1320px) {
+  .speechPageLayout .editorGrid.three {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 980px) {
+  .speechPageLayout .editorGrid.three {
+    grid-template-columns: 1fr;
+  }
+
+  .tabsTrigger {
+    min-width: 120px;
+  }
+}
+
 .sliderRow {
   display: flex;
   align-items: center;
@@ -629,10 +645,12 @@ pre, code {
   padding: 4px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-default);
+  flex-wrap: wrap;
 }
 
 .tabsTrigger {
   flex: 1;
+  min-width: 140px;
   padding: 6px 14px;
   border: none;
   border-radius: calc(var(--radius-md) - 4px);
@@ -656,6 +674,32 @@ pre, code {
 
 .tabsContent {
   animation: fadeInUp var(--duration-normal) var(--ease-out) both;
+}
+
+.speechUtilityTabContent {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.speechUtilityTitle {
+  align-items: flex-start;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.speechUtilitySubtitle {
+  margin-top: 0;
+  line-height: 1.55;
+}
+
+.speechUtilityActions {
+  gap: 8px;
+  align-items: stretch;
+}
+
+.speechUtilityActions .btn {
+  min-height: 40px;
 }
 
 /* ─────────────────────────────────────────────────────────────

@@ -1,9 +1,10 @@
-import { FolderPlus, Languages, Mic, Square, Trash2, Upload, WandSparkles } from "lucide-react";
+import { FileText, FolderPlus, Languages, Mic, Square, Trash2, Upload, WandSparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import GlassCard from "../components/shared/GlassCard";
 import ProjectToolbarCard from "../components/text/ProjectToolbarCard";
 import Button from "../components/ui/Button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/Tabs";
 import { useProjectStore } from "../stores/useProjectStore";
 import { useSettingsStore } from "../stores/useSettingsStore";
 import { useScriptStore } from "../stores/useScriptStore";
@@ -35,6 +36,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const chunksRef = useRef([]);
   const abortRef = useRef(null);
   const translateAbortRef = useRef(null);
+  const subtitleTranslateAbortRef = useRef(null);
   const archiveInputRef = useRef(null);
   const projectFileInputRef = useRef(null);
   const speakerLabels = useSpeechRecognitionStore((state) => state.speakerLabels);
@@ -102,8 +104,22 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const refreshSystemStatus = useSettingsStore((state) => state.refreshSystemStatus);
   const [isLoadingTranslationEngine, setIsLoadingTranslationEngine] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
+  const [utilityTab, setUtilityTab] = useState("translate");
+  const [subtitleFile, setSubtitleFile] = useState(null);
+  const [subtitleMode, setSubtitleMode] = useState("original");
+  const [subtitleLinePolicy, setSubtitleLinePolicy] = useState("auto");
+  const [subtitleProjectName, setSubtitleProjectName] = useState("");
+  const [subtitlePreview, setSubtitlePreview] = useState(null);
+  const [subtitleError, setSubtitleError] = useState("");
+  const [isPreviewingSubtitle, setIsPreviewingSubtitle] = useState(false);
+  const [isTranslatingSubtitle, setIsTranslatingSubtitle] = useState(false);
+  const [isCreatingSubtitleProject, setIsCreatingSubtitleProject] = useState(false);
+  const [dubbingTask, setDubbingTask] = useState({ taskId: "", status: "", stageLabel: "", processed: 0, total: 0, percent: 0, cacheHits: 0 });
+  const dubbingTaskIdRef = useRef("");
+  const [subtitleTask, setSubtitleTask] = useState({ taskId: "", status: "", stageLabel: "", processed: 0, total: 0, percent: 0, cacheHits: 0 });
+  const subtitleTaskIdRef = useRef("");
   const isTranslationEngineLoaded = Boolean(translationEngineStatus?.loaded);
-  const isProjectOpsBusy = isTranscribing || isRecording || isCreatingProject || isBuildingDubbingProject;
+  const isProjectOpsBusy = isTranscribing || isRecording || isCreatingProject || isBuildingDubbingProject || isCreatingSubtitleProject || isTranslatingSubtitle;
 
   const sortedProjects = useMemo(
     () => [...projects].sort((a, b) => Date.parse(b.updated_at || "") - Date.parse(a.updated_at || "")),
@@ -235,6 +251,28 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     () => Boolean(isTranslationEngineLoaded && remappedAlignments.length && !isQwen3Backend),
     [isTranslationEngineLoaded, remappedAlignments.length, isQwen3Backend],
   );
+  const subtitleTranslationReady = useMemo(
+    () => subtitleMode !== "translated" || (isTranslationEngineLoaded && translationEngineStatus?.source === translationSource),
+    [isTranslationEngineLoaded, subtitleMode, translationEngineStatus?.source, translationSource],
+  );
+  const subtitleCreateDisabledReason = useMemo(() => {
+    if (!subtitleFile) return "请先上传 SRT 或 ASS 字幕。";
+    if (subtitleMode === "translated" && !isTranslationEngineLoaded) return "请先加载翻译引擎。";
+    if (subtitleMode === "translated" && translationEngineStatus?.source !== translationSource) return "翻译引擎来源与当前选择不一致。";
+    if (subtitleMode === "translated" && !Array.isArray(subtitlePreview?.translated_segments)) return "请先点击“翻译字幕”，确认预览结果后再创建项目。";
+    if (isPreviewingSubtitle) return "正在解析字幕。";
+    if (isTranslatingSubtitle) return "正在翻译字幕。";
+    if (isCreatingSubtitleProject) return "正在创建项目。";
+    return "";
+  }, [isCreatingSubtitleProject, isPreviewingSubtitle, isTranslatingSubtitle, isTranslationEngineLoaded, subtitleFile, subtitleMode, subtitlePreview?.translated_segments, translationEngineStatus?.source, translationSource]);
+  const canCreateSubtitleProject = Boolean(
+    subtitleFile &&
+    subtitleTranslationReady &&
+    !isPreviewingSubtitle &&
+    !isTranslatingSubtitle &&
+    !isCreatingSubtitleProject &&
+    (subtitleMode !== "translated" || Array.isArray(subtitlePreview?.translated_segments))
+  );
 
   useEffect(() => {
     if (isQwen3Backend) {
@@ -256,6 +294,257 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       return String(parsed?.detail || parsed?.message || raw);
     } catch {
       return raw;
+    }
+  }
+
+  async function previewSubtitleFile(nextFile = subtitleFile, nextMode = subtitleMode, nextLinePolicy = subtitleLinePolicy) {
+    if (!nextFile) {
+      setSubtitlePreview(null);
+      return null;
+    }
+    setIsPreviewingSubtitle(true);
+    setSubtitleError("");
+    try {
+      const formData = new FormData();
+      formData.append("file", nextFile, nextFile.name || "subtitle.srt");
+      formData.append("mode", nextMode || "original");
+      formData.append("line_policy", nextLinePolicy || "auto");
+      const response = await fetch(`${API_BASE_URL}/subtitles/preview`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!response.ok) {
+        const message = await readErrorMessage(response, `HTTP ${response.status}`);
+        throw new Error(message);
+      }
+      const payload = await response.json();
+      setSubtitlePreview(payload);
+      return payload;
+    } catch (err) {
+      const message = err?.message || "字幕解析失败";
+      setSubtitleError(message);
+      setSubtitlePreview(null);
+      return null;
+    } finally {
+      setIsPreviewingSubtitle(false);
+    }
+  }
+
+  async function handleSubtitleFileChange(event) {
+    const file = event.target.files?.[0] || null;
+    setSubtitleFile(file);
+    setSubtitleError("");
+    setSubtitlePreview(null);
+    if (file) {
+      const stem = String(file.name || "").replace(/\.[^.]+$/, "");
+      setSubtitleProjectName((current) => current || (stem ? `${stem}-字幕配音` : ""));
+      await previewSubtitleFile(file, subtitleMode, subtitleLinePolicy);
+    }
+  }
+
+  async function handleSubtitleModeChange(value) {
+    setSubtitleMode(value);
+    if (subtitleFile) {
+      await previewSubtitleFile(subtitleFile, value, subtitleLinePolicy);
+    }
+  }
+
+  async function handleSubtitleLinePolicyChange(value) {
+    setSubtitleLinePolicy(value);
+    if (subtitleFile) {
+      await previewSubtitleFile(subtitleFile, subtitleMode, value);
+    }
+  }
+
+  async function handleCreateSubtitleDubbingProject() {
+    if (!subtitleFile) {
+      setSubtitleError("请先上传 SRT 或 ASS 字幕。");
+      return;
+    }
+    if (!canCreateSubtitleProject) {
+      setSubtitleError(subtitleCreateDisabledReason || "当前不能创建字幕配音项目。");
+      return;
+    }
+    setIsCreatingSubtitleProject(true);
+    setSubtitleError("");
+    try {
+      const formData = new FormData();
+      formData.append("file", subtitleFile, subtitleFile.name || "subtitle.srt");
+      formData.append("project_name", subtitleProjectName.trim());
+      formData.append("mode", subtitleMode);
+      formData.append("target_language", translationTargetLanguage);
+      formData.append("translation_source", translationSource);
+      formData.append("line_policy", subtitleLinePolicy);
+      if (subtitleMode === "translated" && Array.isArray(subtitlePreview?.translated_segments)) {
+        formData.append("translated_segments", JSON.stringify(subtitlePreview.translated_segments));
+      }
+      const response = await fetch(`${API_BASE_URL}/subtitles/create-dubbing-project`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!response.ok) {
+        const message = await readErrorMessage(response, `HTTP ${response.status}`);
+        throw new Error(message);
+      }
+      const payload = await response.json();
+      const projectId = String(payload?.project_id || "");
+      if (!projectId) {
+        throw new Error("后端未返回项目 ID。");
+      }
+      await selectProject(projectId, { suppressToast: true });
+      await loadProjectScript(projectId);
+      await loadProjects();
+      setSubtitlePreview((current) => ({
+        ...(current || {}),
+        warnings: payload?.warnings || current?.warnings || [],
+        segment_count: payload?.segment_count || current?.segment_count || 0,
+        format: payload?.format || current?.format || "",
+        speakers: payload?.speakers || current?.speakers || [],
+      }));
+      useUiStore.getState().pushToast({
+        title: `已创建字幕配音项目：${payload?.project?.name || subtitleProjectName || "字幕配音"}`,
+        tone: "success",
+      });
+      onNavigate?.("script");
+    } catch (err) {
+      const message = err?.message || "创建字幕配音项目失败";
+      setSubtitleError(message);
+      useUiStore.getState().pushToast({ title: `创建失败：${message}`, tone: "error" });
+    } finally {
+      setIsCreatingSubtitleProject(false);
+    }
+  }
+
+  async function handleTranslateSubtitle() {
+    if (!subtitleFile) {
+      setSubtitleError("请先上传 SRT 或 ASS 字幕。");
+      return;
+    }
+    if (!isTranslationEngineLoaded || translationEngineStatus?.source !== translationSource) {
+      setSubtitleError("请先按当前来源加载翻译引擎。");
+      return;
+    }
+    setIsTranslatingSubtitle(true);
+    setSubtitleError("");
+    setSubtitleTask({ taskId: "", status: "queued", stageLabel: "字幕翻译任务排队中", processed: 0, total: 0, percent: 0, cacheHits: 0 });
+    try {
+      const formData = new FormData();
+      formData.append("file", subtitleFile, subtitleFile.name || "subtitle.srt");
+      formData.append("target_language", translationTargetLanguage);
+      formData.append("translation_source", translationSource);
+      formData.append("line_policy", subtitleLinePolicy);
+      formData.append("max_concurrency", ["openai", "gemini"].includes(translationSource) ? "4" : "1");
+      const response = await fetch(`${API_BASE_URL}/subtitles/translate-preview/task`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!response.ok) {
+        const message = await readErrorMessage(response, `HTTP ${response.status}`);
+        throw new Error(message);
+      }
+      const queued = await response.json();
+      const taskId = String(queued?.task_id || "");
+      if (!taskId) {
+        throw new Error("字幕翻译任务未返回 task_id。");
+      }
+      subtitleTaskIdRef.current = taskId;
+      setSubtitleTask((current) => ({ ...current, taskId, status: "queued" }));
+      const payload = await runTaskChannel({
+        wsUrl: `${getWsBaseUrl()}/ws/llm-stream/${taskId}`,
+        timeoutMs: 40 * 60 * 1000,
+        maxReconnectRetries: 5,
+        baseDelayMs: 1000,
+        shouldReconnect: () => Boolean(subtitleTaskIdRef.current),
+        onConnectionStatus: () => {},
+        onOpen: async () => {},
+        syncTaskState: async ({ done, fail }) => {
+          try {
+            const stateResp = await fetch(`${API_BASE_URL}/subtitles/translate-preview/task/${taskId}`);
+            if (!stateResp.ok) return false;
+            const body = await stateResp.json();
+            setSubtitleTask((current) => ({
+              ...current,
+              status: String(body?.status || current.status || ""),
+              stageLabel: String(body?.stage_label || current.stageLabel || ""),
+              percent: Number(body?.stage_progress || current.percent || 0),
+            }));
+            if (body?.status === "done" && body?.result) {
+              done(body.result);
+              return true;
+            }
+            if (body?.status === "error") {
+              fail(new Error(String(body?.error || "字幕翻译任务失败")));
+              return true;
+            }
+            if (body?.status === "canceled") {
+              fail(new Error("字幕翻译任务已取消"));
+              return true;
+            }
+            return false;
+          } catch {
+            return false;
+          }
+        },
+        onMessage: ({ msg, done, fail }) => {
+          if (!msg || typeof msg !== "object") return;
+          if (msg.type === "task_status") {
+            setSubtitleTask((current) => ({ ...current, status: String(msg.status || current.status || "") }));
+            return;
+          }
+          if (msg.type === "dubbing_stage" || msg.type === "dubbing_progress" || msg.type === "progress") {
+            setSubtitleTask((current) => ({
+              ...current,
+              stageLabel: String(msg.stage_label || msg.stageLabel || current.stageLabel || ""),
+              processed: Number(msg.processed ?? msg.current ?? current.processed ?? 0),
+              total: Number(msg.total ?? current.total ?? 0),
+              percent: Number(msg.percent ?? current.percent ?? 0),
+              cacheHits: Number(msg.cache_hits ?? current.cacheHits ?? 0),
+            }));
+            return;
+          }
+          if (msg.type === "cancel_requested") {
+            setSubtitleTask((current) => ({ ...current, status: "cancel_requested", stageLabel: String(msg.message || "正在取消字幕翻译任务...") }));
+            return;
+          }
+          if (msg.type === "canceled") {
+            fail(new Error(String(msg.message || "字幕翻译任务已取消")));
+            return;
+          }
+          if (msg.type === "complete") {
+            done(msg.data || null);
+            return;
+          }
+          if (msg.type === "error") {
+            fail(new Error(String(msg.message || "字幕翻译任务失败")));
+          }
+        },
+      });
+      setSubtitleMode("translated");
+      setSubtitlePreview(payload);
+      setSubtitleTask((current) => ({ ...current, status: "done", stageLabel: "字幕翻译完成", percent: 100 }));
+      useUiStore.getState().pushToast({ title: "字幕翻译完成", tone: "success" });
+    } catch (err) {
+      const message = err?.message || "字幕翻译失败";
+      setSubtitleError(message);
+      const canceled = /取消|canceled/i.test(message);
+      setSubtitleTask((current) => ({ ...current, status: canceled ? "canceled" : "error", stageLabel: canceled ? "字幕翻译已取消" : "字幕翻译失败" }));
+      useUiStore.getState().pushToast({ title: canceled ? "已终止字幕翻译" : `字幕翻译失败：${message}`, tone: canceled ? "info" : "error" });
+    } finally {
+      subtitleTranslateAbortRef.current = null;
+      subtitleTaskIdRef.current = "";
+      setIsTranslatingSubtitle(false);
+    }
+  }
+
+  async function handleAbortSubtitleTranslate() {
+    if (!isTranslatingSubtitle || !subtitleTaskIdRef.current) return;
+    try {
+      await fetch(`${API_BASE_URL}/subtitles/translate-preview/task/${subtitleTaskIdRef.current}/cancel`, {
+        method: "POST",
+      });
+      setSubtitleTask((current) => ({ ...current, status: "cancel_requested", stageLabel: "正在取消字幕翻译任务..." }));
+    } catch {
+      setSubtitleTask((current) => ({ ...current, stageLabel: "取消请求发送失败，请稍后重试。" }));
     }
   }
 
@@ -386,6 +675,11 @@ export default function SpeechRecognitionPage({ onNavigate }) {
         translateAbortRef.current.abort();
         translateAbortRef.current = null;
       }
+      if (subtitleTranslateAbortRef.current) {
+        subtitleTranslateAbortRef.current.abort();
+        subtitleTranslateAbortRef.current = null;
+      }
+      subtitleTaskIdRef.current = "";
     };
   }, []);
 
@@ -657,7 +951,18 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     }
   }
 
-  function handleAbortTranslate() {
+  async function handleAbortTranslate() {
+    if (isBuildingDubbingProject && dubbingTaskIdRef.current) {
+      try {
+        await fetch(`${API_BASE_URL}/llm/translate-dubbing-segments/task/${dubbingTaskIdRef.current}/cancel`, {
+          method: "POST",
+        });
+        setDubbingTask((current) => ({ ...current, status: "cancel_requested", stageLabel: "正在取消翻译配音任务..." }));
+      } catch {
+        setDubbingTask((current) => ({ ...current, stageLabel: "取消请求发送失败，请稍后重试。" }));
+      }
+      return;
+    }
     if (!isTranslating || !translateAbortRef.current) return;
     translateAbortRef.current.abort();
   }
@@ -671,33 +976,117 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       setTranslationError("Qwen3-ASR (CrispASR) 当前不提供可用时间轴，无法创建时间轴匹配配音项目。");
       return;
     }
-    if (!remappedAlignments.length) {
+    const normalizedAlignments = (remappedAlignments || [])
+      .map((item, index) => ({
+        id: String(item?.id || `asr-seg-${index + 1}`),
+        speaker: String(item?.speaker || "narrator").trim() || "narrator",
+        text: String(item?.text || "").trim(),
+        start_ms: Number.isFinite(Number(item?.start_ms)) ? Number(item.start_ms) : null,
+        end_ms: Number.isFinite(Number(item?.end_ms)) ? Number(item.end_ms) : null,
+      }))
+      .filter((item) => item.text);
+    if (!normalizedAlignments.length) {
       setTranslationError("请先完成 Whisper 识别并拿到时间轴片段。");
       return;
     }
     setIsBuildingDubbingProject(true);
     setTranslationError("");
+    setDubbingTask({ taskId: "", status: "queued", stageLabel: "翻译配音任务排队中", processed: 0, total: normalizedAlignments.length, percent: 0, cacheHits: 0 });
     try {
-      const response = await fetch(`${API_BASE_URL}/llm/translate-dubbing-segments`, {
+      const response = await fetch(`${API_BASE_URL}/llm/translate-dubbing-segments/task`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           source: translationSource,
           target_language: translationTargetLanguage,
-          segments: remappedAlignments.map((item) => ({
-            id: String(item?.id || ""),
-            speaker: String(item?.speaker || "narrator"),
-            text: String(item?.text || ""),
-            start_ms: Number.isFinite(Number(item?.start_ms)) ? Number(item.start_ms) : null,
-            end_ms: Number.isFinite(Number(item?.end_ms)) ? Number(item.end_ms) : null,
-          })),
+          min_speed: 0.8,
+          max_speed: 1.2,
+          max_concurrency: ["openai", "gemini"].includes(translationSource) ? 4 : 1,
+          segments: normalizedAlignments,
         }),
       });
       if (!response.ok) {
         const message = await readErrorMessage(response, `HTTP ${response.status}`);
         throw new Error(message);
       }
-      const payload = await response.json();
+      const queued = await response.json();
+      const taskId = String(queued?.task_id || "");
+      if (!taskId) {
+        throw new Error("翻译配音任务未返回 task_id。");
+      }
+      dubbingTaskIdRef.current = taskId;
+      setDubbingTask((current) => ({ ...current, taskId, status: "queued" }));
+
+      const payload = await runTaskChannel({
+        wsUrl: `${getWsBaseUrl()}/ws/llm-stream/${taskId}`,
+        timeoutMs: 40 * 60 * 1000,
+        maxReconnectRetries: 5,
+        baseDelayMs: 1000,
+        shouldReconnect: () => Boolean(dubbingTaskIdRef.current),
+        onConnectionStatus: () => {},
+        onOpen: async () => {},
+        syncTaskState: async ({ done, fail }) => {
+          try {
+            const stateResp = await fetch(`${API_BASE_URL}/llm/translate-dubbing-segments/task/${taskId}`);
+            if (!stateResp.ok) return false;
+            const body = await stateResp.json();
+            setDubbingTask((current) => ({
+              ...current,
+              status: String(body?.status || current.status || ""),
+              stageLabel: String(body?.stage_label || current.stageLabel || ""),
+              percent: Number(body?.stage_progress || current.percent || 0),
+            }));
+            if (body?.status === "done" && body?.result) {
+              done(body.result);
+              return true;
+            }
+            if (body?.status === "error") {
+              fail(new Error(String(body?.error || "翻译配音任务失败")));
+              return true;
+            }
+            if (body?.status === "canceled") {
+              fail(new Error("翻译配音任务已取消"));
+              return true;
+            }
+            return false;
+          } catch {
+            return false;
+          }
+        },
+        onMessage: ({ msg, done, fail }) => {
+          if (!msg || typeof msg !== "object") return;
+          if (msg.type === "task_status") {
+            setDubbingTask((current) => ({ ...current, status: String(msg.status || current.status || "") }));
+            return;
+          }
+          if (msg.type === "dubbing_stage" || msg.type === "dubbing_progress" || msg.type === "progress") {
+            setDubbingTask((current) => ({
+              ...current,
+              stageLabel: String(msg.stage_label || msg.stageLabel || current.stageLabel || ""),
+              processed: Number(msg.processed ?? msg.current ?? current.processed ?? 0),
+              total: Number(msg.total ?? current.total ?? normalizedAlignments.length),
+              percent: Number(msg.percent ?? current.percent ?? 0),
+              cacheHits: Number(msg.cache_hits ?? current.cacheHits ?? 0),
+            }));
+            return;
+          }
+          if (msg.type === "cancel_requested") {
+            setDubbingTask((current) => ({ ...current, status: "cancel_requested", stageLabel: String(msg.message || "正在取消翻译配音任务...") }));
+            return;
+          }
+          if (msg.type === "canceled") {
+            fail(new Error(String(msg.message || "翻译配音任务已取消")));
+            return;
+          }
+          if (msg.type === "complete") {
+            done(msg.data || null);
+            return;
+          }
+          if (msg.type === "error") {
+            fail(new Error(String(msg.message || "翻译配音任务失败")));
+          }
+        },
+      });
       const translatedSegments = Array.isArray(payload?.segments) ? payload.segments : [];
       if (!translatedSegments.length) {
         throw new Error("未返回可用分段翻译结果。");
@@ -752,13 +1141,17 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       await selectProject(project.id, { suppressToast: true });
       await loadProjectScript(project.id);
       setTranslationResult(String(payload?.translated_text || "").trim());
+      setDubbingTask((current) => ({ ...current, status: "done", stageLabel: "翻译配音完成", percent: 100 }));
       useUiStore.getState().pushToast({ title: `已创建翻译配音项目：${nextProjectName}`, tone: "success" });
       onNavigate?.("script");
     } catch (err) {
       const message = err?.message || "创建翻译配音项目失败";
       setTranslationError(message);
-      useUiStore.getState().pushToast({ title: `创建失败：${message}`, tone: "error" });
+      const canceled = /取消|canceled/i.test(message);
+      setDubbingTask((current) => ({ ...current, status: canceled ? "canceled" : "error", stageLabel: message }));
+      useUiStore.getState().pushToast({ title: canceled ? "翻译配音任务已取消" : `创建失败：${message}`, tone: canceled ? "default" : "error" });
     } finally {
+      dubbingTaskIdRef.current = "";
       setIsBuildingDubbingProject(false);
     }
   }
@@ -1276,29 +1669,6 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           <audio controls preload="metadata" style={{ width: "100%" }} src={pendingAudio.url} />
         ) : null}
 
-        <div className="editorGrid two" style={{ marginTop: 8 }}>
-          <div className="formGroup">
-            <label className="formLabel">项目名称</label>
-            <input
-              className="textInput"
-              value={projectName}
-              onChange={(event) => setProjectName(event.target.value)}
-              placeholder="可留空，默认取音频文件名"
-              disabled={isTranscribing || isRecording || isCreatingProject}
-            />
-          </div>
-          <div className="formGroup" style={{ justifyContent: "flex-end", display: "flex", alignItems: "flex-end" }}>
-            <Button
-              variant="primary"
-              icon={FolderPlus}
-              onClick={handleCreateProjectFromAudio}
-              disabled={isTranscribing || isRecording || isCreatingProject || !pendingAudio?.blob || Boolean(asrUnavailableReason)}
-            >
-              {isCreatingProject ? "转项目中..." : "一键转项目"}
-            </Button>
-          </div>
-        </div>
-
         {isTranscribing ? <div className="statusBadge default">识别中...</div> : null}
         {isCreatingProject ? <div className="statusBadge default">正在分块转写并创建项目...</div> : null}
         {backendUsed ? <div className="muted">实际后端：{backendUsed}</div> : null}
@@ -1394,94 +1764,160 @@ export default function SpeechRecognitionPage({ onNavigate }) {
         </GlassCard>
 
         <GlassCard>
-        <h2 className="cardTitle">
-          <Languages size={16} />
-          翻译润色
-        </h2>
-        <p className="cardSubtitle">从识别预览读取文本，按选定来源执行“仅润色”或“翻译+润色”。</p>
+          <Tabs value={utilityTab} onValueChange={setUtilityTab}>
+            <TabsList>
+              <TabsTrigger value="translate">翻译润色</TabsTrigger>
+              <TabsTrigger value="subtitle">字幕配音</TabsTrigger>
+            </TabsList>
 
-        <div className="editorGrid three">
-          <div className="formGroup">
-            <label className="formLabel">来源</label>
-            <select className="textInput" value={translationSource} onChange={(e) => setTranslationSource(e.target.value)} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>
-              <option value="primary_local">模型1（主模型）</option>
-              <option value="secondary_local">模型2（小模型）</option>
-              <option value="openai">OpenAI API</option>
-              <option value="gemini">Gemini API</option>
-            </select>
-          </div>
-          <div className="formGroup">
-            <label className="formLabel">模式</label>
-            <select className="textInput" value={translationMode} onChange={(e) => setTranslationMode(e.target.value)} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>
-              <option value="polish_only">仅润色</option>
-              <option value="translate_polish">翻译+润色</option>
-            </select>
-          </div>
-          <div className="formGroup">
-            <label className="formLabel">目标语言</label>
-            <select className="textInput" value={translationTargetLanguage} onChange={(e) => setTranslationTargetLanguage(e.target.value)} disabled={translationMode !== "translate_polish" || isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>
-              <option value="中文">中文</option>
-              <option value="英文">英文</option>
-              <option value="日文">日文</option>
-            </select>
-          </div>
-        </div>
+            <TabsContent value="translate" className="speechUtilityTabContent">
+              <h2 className="cardTitle speechUtilityTitle"><Languages size={16} /> 翻译润色</h2>
+              <p className="cardSubtitle speechUtilitySubtitle">从识别预览读取文本，按选定来源执行“仅润色”或“翻译+润色”。</p>
+              <div className="editorGrid three">
+                <div className="formGroup">
+                  <label className="formLabel">来源</label>
+                  <select className="textInput" value={translationSource} onChange={(e) => setTranslationSource(e.target.value)} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>
+                    <option value="primary_local">模型1（主模型）</option>
+                    <option value="secondary_local">模型2（小模型）</option>
+                    <option value="openai">OpenAI API</option>
+                    <option value="gemini">Gemini API</option>
+                  </select>
+                </div>
+                <div className="formGroup">
+                  <label className="formLabel">模式</label>
+                  <select className="textInput" value={translationMode} onChange={(e) => setTranslationMode(e.target.value)} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>
+                    <option value="polish_only">仅润色</option>
+                    <option value="translate_polish">翻译+润色</option>
+                  </select>
+                </div>
+                <div className="formGroup">
+                  <label className="formLabel">目标语言</label>
+                  <select className="textInput" value={translationTargetLanguage} onChange={(e) => setTranslationTargetLanguage(e.target.value)} disabled={translationMode !== "translate_polish" || isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>
+                    <option value="中文">中文</option>
+                    <option value="英文">英文</option>
+                    <option value="日文">日文</option>
+                  </select>
+                </div>
+              </div>
+              <div className="controlRow speechUtilityActions">
+                <Button variant="secondary" onClick={handleLoadTranslationEngine} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>加载翻译引擎</Button>
+                <Button variant="secondary" onClick={handleUnloadTranslationEngine} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>卸载翻译引擎</Button>
+                <Button variant="primary" onClick={handleTranslatePolish} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject || !isTranslationEngineLoaded}>翻译润色</Button>
+                <Button variant="primary" icon={FolderPlus} onClick={handleCreateDubbingProject} disabled={!canBuildDubbingProject || isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>
+                  {isBuildingDubbingProject ? "创建配音项目中..." : "生成翻译配音项目"}
+                </Button>
+                <Button variant="danger" onClick={handleAbortTranslate} disabled={!isTranslating && !isBuildingDubbingProject}>
+                  {isBuildingDubbingProject ? "终止配音翻译" : "终止翻译"}
+                </Button>
+              </div>
+              <div className="muted">引擎状态：{translationEngineStatus?.loaded ? "已加载" : "未加载"} · 来源：{translationEngineStatus?.source || "未选择"} · 后端：{translationEngineStatus?.backend || "unknown"}</div>
+              {translationEngineStatus?.model_name ? <div className="muted">模型：{translationEngineStatus.model_name}</div> : null}
+              {!isQwen3Backend ? <div className="muted">翻译配音会按 Whisper 时间轴分段，并自动写入每段 speed/duration。</div> : null}
+              {isQwen3Backend ? <div className="muted">Qwen3-ASR 当前为纯识别模式，不支持时间轴匹配配音项目创建。</div> : null}
+              {translationEngineStatus?.error ? <div className="errorText">{translationEngineStatus.error}</div> : null}
+              {translationError ? <div className="errorText">{translationError}</div> : null}
+              {isBuildingDubbingProject || dubbingTask.stageLabel ? (
+                <div className="muted">
+                  配音翻译：{dubbingTask.stageLabel || dubbingTask.status || "处理中"}
+                  {dubbingTask.total ? ` · ${dubbingTask.processed}/${dubbingTask.total}` : ""}
+                  {dubbingTask.percent ? ` · ${Math.round(dubbingTask.percent)}%` : ""}
+                  {dubbingTask.cacheHits ? ` · 缓存命中 ${dubbingTask.cacheHits}` : ""}
+                </div>
+              ) : null}
+              <textarea className="textArea" style={{ minHeight: 220 }} value={translationResult} onChange={(event) => setTranslationResult(event.target.value)} placeholder="翻译润色结果将显示在这里。" />
+              <div className="controlRow">
+                <Button variant="primary" onClick={handleAppendTranslationToText} disabled={!canInsertTranslation}>追加到文本输入</Button>
+                <Button variant="secondary" onClick={handleReplaceTranslationToText} disabled={!canInsertTranslation}>替换文本输入</Button>
+                <Button variant="ghost" onClick={clearTranslationResult} disabled={!translationResult}>清空翻译结果</Button>
+              </div>
+            </TabsContent>
 
-        <div className="controlRow">
-          <Button variant="secondary" onClick={handleLoadTranslationEngine} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>
-            加载翻译引擎
-          </Button>
-          <Button variant="secondary" onClick={handleUnloadTranslationEngine} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>
-            卸载翻译引擎
-          </Button>
-          <Button
-            variant="primary"
-            onClick={handleTranslatePolish}
-            disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject || !isTranslationEngineLoaded}
-          >
-            翻译润色
-          </Button>
-          <Button variant="danger" onClick={handleAbortTranslate} disabled={!isTranslating || isBuildingDubbingProject}>
-            终止翻译
-          </Button>
-          <Button
-            variant="primary"
-            icon={FolderPlus}
-            onClick={handleCreateDubbingProject}
-            disabled={!canBuildDubbingProject || isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}
-          >
-            {isBuildingDubbingProject ? "创建配音项目中..." : "生成翻译配音项目"}
-          </Button>
-        </div>
-
-        <div className="muted">
-          引擎状态：{translationEngineStatus?.loaded ? "已加载" : "未加载"} · 来源：{translationEngineStatus?.source || "未选择"} · 后端：{translationEngineStatus?.backend || "unknown"}
-        </div>
-        {translationEngineStatus?.model_name ? <div className="muted">模型：{translationEngineStatus.model_name}</div> : null}
-        {!isQwen3Backend ? <div className="muted">翻译配音会按 Whisper 时间轴分段，并自动写入每段 speed/duration。</div> : null}
-        {isQwen3Backend ? <div className="muted">Qwen3-ASR 当前为纯识别模式，不支持时间轴匹配配音项目创建。</div> : null}
-        {translationEngineStatus?.error ? <div className="errorText">{translationEngineStatus.error}</div> : null}
-        {translationError ? <div className="errorText">{translationError}</div> : null}
-
-        <textarea
-          className="textArea"
-          style={{ minHeight: 220 }}
-          value={translationResult}
-          onChange={(event) => setTranslationResult(event.target.value)}
-          placeholder="翻译润色结果将显示在这里。"
-        />
-
-        <div className="controlRow">
-          <Button variant="primary" onClick={handleAppendTranslationToText} disabled={!canInsertTranslation}>
-            追加到文本输入
-          </Button>
-          <Button variant="secondary" onClick={handleReplaceTranslationToText} disabled={!canInsertTranslation}>
-            替换文本输入
-          </Button>
-          <Button variant="ghost" onClick={clearTranslationResult} disabled={!translationResult}>
-            清空翻译结果
-          </Button>
-        </div>
+            <TabsContent value="subtitle" className="speechUtilityTabContent">
+              <h2 className="cardTitle speechUtilityTitle"><FileText size={16} /> 字幕配音</h2>
+              <p className="cardSubtitle speechUtilitySubtitle">从 SRT/ASS 字幕创建带时间轴锁定的配音项目，翻译配音需先翻译并确认预览。</p>
+              <div className="editorGrid three">
+                <div className="formGroup">
+                  <label className="formLabel">字幕文件</label>
+                  <input className="textInput" type="file" accept=".srt,.ass,text/plain" onChange={handleSubtitleFileChange} disabled={isPreviewingSubtitle || isTranslatingSubtitle || isCreatingSubtitleProject} />
+                </div>
+                <div className="formGroup">
+                  <label className="formLabel">项目名称</label>
+                  <input className="textInput" value={subtitleProjectName} onChange={(event) => setSubtitleProjectName(event.target.value)} placeholder="留空按字幕文件命名" disabled={isCreatingSubtitleProject} />
+                </div>
+                <div className="formGroup">
+                  <label className="formLabel">配音模式</label>
+                  <select className="textInput" value={subtitleMode} onChange={(event) => handleSubtitleModeChange(event.target.value)} disabled={isPreviewingSubtitle || isTranslatingSubtitle || isCreatingSubtitleProject}>
+                    <option value="original">原文配音</option>
+                    <option value="translated">翻译配音</option>
+                  </select>
+                </div>
+              </div>
+              <div className="editorGrid three">
+                <div className="formGroup">
+                  <label className="formLabel">双语字幕行</label>
+                  <select className="textInput" value={subtitleLinePolicy} onChange={(event) => handleSubtitleLinePolicyChange(event.target.value)} disabled={isPreviewingSubtitle || isTranslatingSubtitle || isCreatingSubtitleProject}>
+                    <option value="auto">自动</option>
+                    <option value="first_line">第一行</option>
+                    <option value="second_line">第二行</option>
+                    <option value="all">全部</option>
+                  </select>
+                </div>
+                <div className="formGroup">
+                  <label className="formLabel">翻译来源</label>
+                  <select className="textInput" value={translationSource} onChange={(event) => setTranslationSource(event.target.value)} disabled={subtitleMode !== "translated" || isPreviewingSubtitle || isTranslatingSubtitle || isCreatingSubtitleProject}>
+                    <option value="primary_local">模型1（主模型）</option>
+                    <option value="secondary_local">模型2（小模型）</option>
+                    <option value="openai">OpenAI API</option>
+                    <option value="gemini">Gemini API</option>
+                  </select>
+                </div>
+                <div className="formGroup">
+                  <label className="formLabel">目标语言</label>
+                  <select className="textInput" value={translationTargetLanguage} onChange={(event) => setTranslationTargetLanguage(event.target.value)} disabled={subtitleMode !== "translated" || isPreviewingSubtitle || isTranslatingSubtitle || isCreatingSubtitleProject}>
+                    <option value="中文">中文</option>
+                    <option value="英文">英文</option>
+                    <option value="日文">日文</option>
+                  </select>
+                </div>
+              </div>
+              <div className="controlRow speechUtilityActions">
+                <Button variant="secondary" onClick={handleLoadTranslationEngine} disabled={subtitleMode !== "translated" || isLoadingTranslationEngine || isTranslatingSubtitle || isCreatingSubtitleProject}>加载翻译引擎</Button>
+                <Button variant="secondary" onClick={handleUnloadTranslationEngine} disabled={subtitleMode !== "translated" || isLoadingTranslationEngine || isTranslatingSubtitle || isCreatingSubtitleProject}>卸载翻译引擎</Button>
+                <Button variant="secondary" icon={Upload} onClick={() => previewSubtitleFile()} disabled={!subtitleFile || isPreviewingSubtitle || isTranslatingSubtitle || isCreatingSubtitleProject}>{isPreviewingSubtitle ? "解析中..." : "预览字幕"}</Button>
+                <Button variant="primary" onClick={handleTranslateSubtitle} disabled={subtitleMode !== "translated" || !subtitleFile || !isTranslationEngineLoaded || isTranslatingSubtitle || isCreatingSubtitleProject}>{isTranslatingSubtitle ? "翻译中..." : "翻译字幕"}</Button>
+                <Button variant="primary" icon={FolderPlus} onClick={handleCreateSubtitleDubbingProject} disabled={!canCreateSubtitleProject} title={subtitleCreateDisabledReason}>{isCreatingSubtitleProject ? "创建中..." : "创建字幕配音项目"}</Button>
+                <Button variant="danger" onClick={handleAbortSubtitleTranslate} disabled={!isTranslatingSubtitle}>终止字幕翻译</Button>
+              </div>
+              <div className="muted">翻译引擎：{translationEngineStatus?.loaded ? "已加载" : "未加载"} · 来源：{translationEngineStatus?.source || "未选择"} · 后端：{translationEngineStatus?.backend || "unknown"}</div>
+              {subtitleMode === "translated" && ["openai", "gemini"].includes(translationSource) ? <div className="muted">API 翻译预览会并发处理；本地模型为保护模型实例保持串行。</div> : null}
+              {isTranslatingSubtitle || subtitleTask.stageLabel ? (
+                <div className="muted">
+                  字幕翻译：{subtitleTask.stageLabel || subtitleTask.status || "处理中"}
+                  {subtitleTask.total ? ` · ${subtitleTask.processed}/${subtitleTask.total}` : ""}
+                  {subtitleTask.percent ? ` · ${Math.round(subtitleTask.percent)}%` : ""}
+                  {subtitleTask.cacheHits ? ` · 缓存命中 ${subtitleTask.cacheHits}` : ""}
+                </div>
+              ) : null}
+              {subtitleCreateDisabledReason && subtitleFile ? <div className="muted">{subtitleCreateDisabledReason}</div> : null}
+              {subtitleError ? <div className="errorText">{subtitleError}</div> : null}
+              {subtitlePreview ? (
+                <div className="listStack" style={{ marginTop: 10 }}>
+                  <div className="muted">格式：{String(subtitlePreview.format || "").toUpperCase()} · 分段：{subtitlePreview.segment_count || 0} · 说话人：{(subtitlePreview.speakers || []).join("、") || "narrator"}</div>
+                  {(subtitlePreview.warnings || []).slice(0, 4).map((warning, index) => <div key={`subtitle-warning-${index}`} className="muted">提示：{warning}</div>)}
+                  {(subtitlePreview.cues || []).slice(0, 8).map((cue) => (
+                    <div key={cue.id} className="segmentMetaRow" style={{ alignItems: "flex-start" }}>
+                      <span className="statusBadge">{formatTimestamp(cue.start_ms)} - {formatTimestamp(cue.end_ms)}</span>
+                      <span className="muted" style={{ minWidth: 72 }}>{cue.speaker || "narrator"}</span>
+                      <span style={{ flex: 1, whiteSpace: "pre-wrap" }}>
+                        {cue.text}
+                        {cue.translated_text ? <><br /><span className="muted">译文：</span>{cue.translated_text}</> : null}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </TabsContent>
+          </Tabs>
         </GlassCard>
       </div>
     </div>

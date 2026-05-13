@@ -83,6 +83,7 @@ export default function SynthesisPage() {
   const [expandedSynthesisPanel, setExpandedSynthesisPanel] = useState("synthesis");
   const [systemRuntimeStatus, setSystemRuntimeStatus] = useState(null);
   const [exportWizardOpen, setExportWizardOpen] = useState(false);
+  const forcedOmniBackendRef = useRef("");
   const updatedRowTimerRef = useRef(null);
   const { saveScript, isSaving: isScriptSaving, error: scriptError, script, sourceText } = useScriptStore();
   const setProjectSaveAction = useUiStore((state) => state.setProjectSaveAction);
@@ -145,6 +146,22 @@ export default function SynthesisPage() {
       setConfig(currentProject.synthesis_config);
     }
   }, [currentProject]);
+
+  const isDubbingSourceProject = useMemo(
+    () => Boolean(currentProject?.script?.metadata?.dubbing_source),
+    [currentProject?.script?.metadata?.dubbing_source],
+  );
+
+  useEffect(() => {
+    if (!isDubbingSourceProject) return;
+    if ((config?.tts_backend || "omnivoice") !== "voxcpm2") return;
+    setConfig({ tts_backend: "omnivoice" });
+    const key = String(currentProject?.id || "");
+    if (forcedOmniBackendRef.current !== key) {
+      pushToast({ title: "配音项目仅支持 OmniVoice，已自动切换。", tone: "warning" });
+      forcedOmniBackendRef.current = key;
+    }
+  }, [config?.tts_backend, currentProject?.id, isDubbingSourceProject, pushToast]);
 
   useEffect(() => {
     const projectId = currentProject?.id || null;
@@ -657,6 +674,45 @@ export default function SynthesisPage() {
     pushToast({ title: "已加入草稿，点击“保存剧本”后生效", tone: "default" });
   }
 
+  function handleApplySegmentSpeed(speed, scope = "all") {
+    const value = Number(speed);
+    if (!Number.isFinite(value) || value < 0.5 || value > 2) {
+      pushToast({ title: "speed 需要在 0.5 到 2.0 之间", tone: "error" });
+      return;
+    }
+    const selectedSet = new Set(selectedSegmentIds || []);
+    const applySelected = scope === "selected" && selectedSet.size > 0;
+    let changedCount = 0;
+    setDraftScript((current) => ({
+      ...current,
+      segments: (current.segments || []).map((segment, index) => {
+        const shouldUpdate = applySelected ? selectedSet.has(segment.id) : true;
+        if (!shouldUpdate) return { ...segment, index };
+        changedCount += 1;
+        return {
+          ...segment,
+          index,
+          tts_overrides: {
+            ...(segment.tts_overrides && typeof segment.tts_overrides === "object" && !Array.isArray(segment.tts_overrides) ? segment.tts_overrides : {}),
+            speed: value,
+          },
+        };
+      }),
+    }));
+    if (editingSegmentId && segmentDraft?.id === editingSegmentId) {
+      try {
+        const parsed = JSON.parse(segmentDraft.ttsOverridesText || "{}");
+        setSegmentDraft((current) => ({
+          ...(current || {}),
+          ttsOverridesText: JSON.stringify({ ...(parsed || {}), speed: value }, null, 2),
+        }));
+      } catch {
+        // Keep the visible JSON untouched if it is already invalid; save validation will report it.
+      }
+    }
+    pushToast({ title: `已为 ${changedCount} 个片段写入 speed=${value}，点击“保存剧本”后生效`, tone: "default" });
+  }
+
   async function handleSaveScript() {
     if (!currentProject?.id) {
       return;
@@ -924,11 +980,14 @@ export default function SynthesisPage() {
             onToggle={() => setExpandedSynthesisPanel((current) => (current === "synthesis" ? "" : "synthesis"))}
             config={config}
             currentProject={currentProject}
+            selectedSegmentCount={selectedSegmentIds.length}
             isRunning={isRunning}
             error={error}
             onSetConfig={setConfig}
+            onApplySegmentSpeed={handleApplySegmentSpeed}
             onStart={handleStart}
             onCancel={handleCancelSynthesis}
+            disableVoxcpm2={isDubbingSourceProject}
           />
           <SynthesisPostprocessCard
             expanded={expandedSynthesisPanel === "postprocess"}

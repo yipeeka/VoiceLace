@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 from typing import Any
 from uuid import uuid4
 
@@ -16,6 +15,7 @@ from backend.models import (
     TranslationEngineLoadRequest,
 )
 from backend.persistence import append_project_event, load_project, save_project
+from backend.services.dubbing_translation_service import translate_dubbing_segments_for_state
 from backend.state import get_app_state
 
 router = APIRouter()
@@ -211,56 +211,6 @@ def _build_translate_prompt(*, mode: str, target_language: str) -> str:
     )
 
 
-def _clamp(value: float, lower: float, upper: float) -> float:
-    return max(lower, min(upper, value))
-
-
-def _safe_duration_from_ms(start_ms: int | None, end_ms: int | None) -> float | None:
-    if start_ms is None or end_ms is None:
-        return None
-    delta = int(end_ms) - int(start_ms)
-    if delta <= 0:
-        return None
-    return max(0.3, min(60.0, delta / 1000.0))
-
-
-def _estimate_speaking_seconds(text: str) -> float:
-    raw = str(text or "").strip()
-    if not raw:
-        return 0.4
-    cjk_count = len(re.findall(r"[\u4e00-\u9fff]", raw))
-    latin_tokens = re.findall(r"[A-Za-z0-9']+", raw)
-    punctuation = re.findall(r"[，。！？；,.!?;:]", raw)
-    if cjk_count > 0:
-        base = cjk_count / 4.6
-    else:
-        base = max(1, len(latin_tokens)) / 2.8
-    pause = len(punctuation) * 0.08
-    return max(0.4, min(60.0, base + pause))
-
-
-def _build_dubbing_translate_prompt(*, target_language: str, target_duration_sec: float) -> str:
-    lang = (target_language or "").strip() or "中文"
-    return (
-        "你是配音翻译编辑。请将用户输入翻译成目标语言，结果用于旁白/对白配音。"
-        "要求：忠实原意、自然口语、尽量简洁，不要解释，不要注释。"
-        f"\n目标语言：{lang}"
-        f"\n目标口播时长：约 {target_duration_sec:.2f} 秒"
-        "\n只输出最终译文正文。"
-    )
-
-
-def _build_dubbing_compress_prompt(*, target_language: str, target_duration_sec: float) -> str:
-    lang = (target_language or "").strip() or "中文"
-    return (
-        "你是配音文本压缩编辑。请在保持原意的前提下，把文本压缩为更短的口播版本。"
-        "要求：自然顺口，不要丢失关键信息，不要解释。"
-        f"\n目标语言：{lang}"
-        f"\n目标口播时长：约 {target_duration_sec:.2f} 秒"
-        "\n只输出压缩后的正文。"
-    )
-
-
 @router.post("/translate-polish")
 async def translate_polish(payload: TranslatePolishRequest, state=Depends(get_app_state)):
     source = (payload.source or "").strip().lower()
@@ -302,113 +252,150 @@ async def translate_polish(payload: TranslatePolishRequest, state=Depends(get_ap
 
 @router.post("/translate-dubbing-segments")
 async def translate_dubbing_segments(payload: TranslateDubbingSegmentsRequest, state=Depends(get_app_state)):
-    source = (payload.source or "").strip().lower()
-    if source not in ALLOWED_TRANSLATION_SOURCES:
-        raise HTTPException(status_code=400, detail=f"Unsupported translation source: {payload.source}")
-    if not payload.segments:
-        raise HTTPException(status_code=400, detail="segments is required")
-    if payload.min_speed > payload.max_speed:
-        raise HTTPException(status_code=400, detail="min_speed must be <= max_speed")
+    return await translate_dubbing_segments_for_state(
+        state=state,
+        source=payload.source,
+        target_language=payload.target_language,
+        segments=payload.segments,
+        min_speed=payload.min_speed,
+        max_speed=payload.max_speed,
+        max_concurrency=payload.max_concurrency,
+    )
 
-    if not state.translation_llm_engine.is_loaded or state.translation_engine_source != source:
-        raise HTTPException(
-            status_code=400,
-            detail="Translation engine source mismatch or not loaded. Please load translation engine first.",
-        )
 
-    config = _build_translation_config(state, source)
-    translated_rows: list[dict[str, Any]] = []
-    combined_source: list[str] = []
-    combined_target: list[str] = []
+async def _run_translate_dubbing_task(task_id: str, payload: TranslateDubbingSegmentsRequest, state) -> None:
+    task = state.llm_tasks[task_id]
+    task["status"] = "running"
+    task["stage"] = "initializing"
+    task["stage_label"] = "正在初始化翻译配音任务"
+    task["stage_progress"] = 1
+    await _emit(state, task, task_id, {"type": "task_status", "status": "running", "task_kind": "translate_dubbing"})
+    await _emit(state, task, task_id, {"type": "progress", "current": 1, "total": 100, "percent": 1})
 
-    for idx, segment in enumerate(payload.segments):
-        source_text = str(segment.text or "").strip()
-        speaker = (str(segment.speaker or "").strip() or "narrator")
-        seg_id = str(segment.id or f"dub-seg-{idx + 1}").strip() or f"dub-seg-{idx + 1}"
-        start_ms = int(segment.start_ms) if segment.start_ms is not None else None
-        end_ms = int(segment.end_ms) if segment.end_ms is not None else None
+    try:
+        total_segments = len(payload.segments or [])
 
-        target_duration_sec = _safe_duration_from_ms(start_ms, end_ms)
-        if target_duration_sec is None:
-            target_duration_sec = _estimate_speaking_seconds(source_text)
-        target_duration_sec = _clamp(float(target_duration_sec), 0.3, 60.0)
-
-        translated_text = source_text
-        if source_text:
-            prompt = _build_dubbing_translate_prompt(
-                target_language=payload.target_language,
-                target_duration_sec=target_duration_sec,
-            )
-            translated_text = (
-                await state.translation_llm_engine.generate_text(
-                    text=source_text,
-                    system_prompt=prompt,
-                    llm_options=config["options"],
-                )
-            ).strip()
-
-            estimated_sec = _estimate_speaking_seconds(translated_text)
-            if estimated_sec > target_duration_sec * float(payload.max_speed):
-                compress_prompt = _build_dubbing_compress_prompt(
-                    target_language=payload.target_language,
-                    target_duration_sec=target_duration_sec,
-                )
-                compressed = (
-                    await state.translation_llm_engine.generate_text(
-                        text=translated_text,
-                        system_prompt=compress_prompt,
-                        llm_options=config["options"],
-                    )
-                ).strip()
-                if compressed:
-                    translated_text = compressed
-
-        estimated_target_sec = _estimate_speaking_seconds(translated_text)
-        if target_duration_sec <= 0:
-            suggested_speed = 1.0
-        else:
-            suggested_speed = estimated_target_sec / target_duration_sec
-        suggested_speed = _clamp(float(suggested_speed), float(payload.min_speed), float(payload.max_speed))
-
-        duration_ms: int | None = None
-        if start_ms is not None and end_ms is not None and end_ms >= start_ms:
-            duration_ms = int(end_ms - start_ms)
-
-        source_line = f"{speaker}：{source_text}" if source_text else ""
-        target_line = f"{speaker}：{translated_text}" if translated_text else ""
-        if source_line:
-            combined_source.append(source_line)
-        if target_line:
-            combined_target.append(target_line)
-
-        translated_rows.append(
-            {
-                "id": seg_id,
-                "index": idx,
-                "speaker": speaker,
-                "source_text": source_text,
-                "text": translated_text,
-                "start_ms": start_ms,
-                "end_ms": end_ms,
-                "duration_ms": duration_ms,
-                "target_duration_sec": round(float(target_duration_sec), 3),
-                "estimated_duration_sec": round(float(estimated_target_sec), 3),
-                "tts_overrides": {
-                    "duration": round(float(target_duration_sec), 3),
-                    "speed": round(float(suggested_speed), 3),
+        async def on_progress(event: dict[str, Any]) -> None:
+            stage = str(event.get("stage") or task.get("stage") or "running")
+            processed = int(event.get("processed") or 0)
+            total = int(event.get("total") or total_segments or 1)
+            percent = 5 if total <= 0 else max(5, min(98, int((processed / max(total, 1)) * 90) + 5))
+            if stage == "context":
+                percent = 5
+            elif stage == "compressing":
+                percent = max(percent, 92)
+            task["stage"] = stage
+            task["stage_label"] = str(event.get("stage_label") or task.get("stage_label") or "")
+            task["stage_progress"] = percent
+            await _emit(
+                state,
+                task,
+                task_id,
+                {
+                    **event,
+                    "type": event.get("type") or "dubbing_progress",
+                    "percent": percent,
+                    "task_kind": "translate_dubbing",
                 },
-            }
+            )
+            await _emit(state, task, task_id, {"type": "progress", "current": processed, "total": total, "percent": percent})
+
+        result = await translate_dubbing_segments_for_state(
+            state=state,
+            source=payload.source,
+            target_language=payload.target_language,
+            segments=payload.segments,
+            min_speed=payload.min_speed,
+            max_speed=payload.max_speed,
+            max_concurrency=payload.max_concurrency,
+            progress_callback=on_progress,
+            cancel_check=lambda: task.get("status") == "cancel_requested",
         )
 
-    state.translation_engine_error = ""
-    return {
-        "source": source,
-        "target_language": payload.target_language,
-        "backend": state.translation_llm_engine.backend_name,
-        "segments": translated_rows,
-        "source_text": "\n".join(combined_source),
-        "translated_text": "\n".join(combined_target),
+        task["status"] = "done"
+        task["result"] = result
+        task["stage"] = "done"
+        task["stage_label"] = "翻译配音完成"
+        task["stage_progress"] = 100
+        await _emit(state, task, task_id, {"type": "progress", "current": len(result.get("segments") or []), "total": len(result.get("segments") or []), "percent": 100})
+        await _emit(state, task, task_id, {"type": "task_status", "status": "done", "task_kind": "translate_dubbing"})
+        await _emit(state, task, task_id, {"type": "complete", "data": result})
+    except asyncio.CancelledError:
+        task["status"] = "canceled"
+        task["stage"] = "canceled"
+        task["stage_label"] = "翻译配音任务已取消"
+        task["stage_progress"] = task.get("stage_progress", 0)
+        await _emit(state, task, task_id, {"type": "task_status", "status": "canceled", "task_kind": "translate_dubbing"})
+        await _emit(state, task, task_id, {"type": "canceled", "message": "翻译配音任务已取消"})
+        raise
+    except Exception as exc:
+        task["status"] = "error"
+        task["error"] = str(exc)
+        task["stage"] = "error"
+        task["stage_label"] = "翻译配音失败"
+        await _emit(state, task, task_id, {"type": "task_status", "status": "error", "task_kind": "translate_dubbing"})
+        await _emit(state, task, task_id, {"type": "error", "message": str(exc)})
+    finally:
+        state.llm_task_handles.pop(task_id, None)
+
+
+@router.post("/translate-dubbing-segments/task")
+async def enqueue_translate_dubbing_segments_task(payload: TranslateDubbingSegmentsRequest, state=Depends(get_app_state)):
+    task_id = str(uuid4())
+    state.llm_tasks[task_id] = {
+        "task_id": task_id,
+        "task_kind": "translate_dubbing",
+        "status": "queued",
+        "stage": "queued",
+        "stage_label": "翻译配音任务排队中",
+        "stage_progress": 0,
+        "result": None,
+        "error": "",
+        "project_id": None,
+        "events": [{"type": "task_status", "status": "queued", "task_kind": "translate_dubbing"}],
     }
+    handle = asyncio.create_task(_run_translate_dubbing_task(task_id, payload, state))
+    state.llm_task_handles[task_id] = handle
+    return {"task_id": task_id}
+
+
+@router.get("/translate-dubbing-segments/task/{task_id}")
+async def get_translate_dubbing_segments_task(task_id: str, state=Depends(get_app_state)):
+    task = state.llm_tasks.get(task_id)
+    if task is None or task.get("task_kind") != "translate_dubbing":
+        raise HTTPException(status_code=404, detail="Translate dubbing task not found")
+    payload = {
+        "task_id": task_id,
+        "status": task.get("status", "queued"),
+        "stage": task.get("stage", ""),
+        "stage_label": task.get("stage_label", ""),
+        "stage_progress": task.get("stage_progress", 0),
+        "error": task.get("error", ""),
+    }
+    if task.get("status") == "done":
+        payload["result"] = task.get("result")
+        return payload
+    if task.get("status") in {"error", "canceled"}:
+        return payload
+    return JSONResponse(status_code=202, content=payload)
+
+
+@router.post("/translate-dubbing-segments/task/{task_id}/cancel")
+async def cancel_translate_dubbing_segments_task(task_id: str, state=Depends(get_app_state)):
+    task = state.llm_tasks.get(task_id)
+    if task is None or task.get("task_kind") != "translate_dubbing":
+        raise HTTPException(status_code=404, detail="Translate dubbing task not found")
+    if task["status"] in {"done", "error", "canceled"}:
+        return {"task_id": task_id, "status": task["status"]}
+    handle = state.llm_task_handles.get(task_id)
+    if handle is None:
+        task["status"] = "canceled"
+        await _emit(state, task, task_id, {"type": "canceled", "message": "翻译配音任务已取消"})
+        return {"task_id": task_id, "status": "canceled"}
+    task["status"] = "cancel_requested"
+    await _emit(state, task, task_id, {"type": "cancel_requested", "message": "正在取消翻译配音任务..."})
+    handle.cancel()
+    return {"task_id": task_id, "status": "cancel_requested"}
 
 
 async def _run_parse_task(task_id: str, payload: LlmParseRequest, state) -> None:

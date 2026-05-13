@@ -32,13 +32,19 @@ export function SynthesisGenerateCard({
   onToggle,
   config,
   currentProject,
+  selectedSegmentCount = 0,
   isRunning,
   error,
   onSetConfig,
+  onApplySegmentSpeed,
   onStart,
   onCancel,
+  disableVoxcpm2 = false,
 }) {
-  const ttsBackend = config.tts_backend || "omnivoice";
+  const [speedDraft, setSpeedDraft] = useState("1.0");
+  const requestedBackend = config.tts_backend || "omnivoice";
+  const ttsBackend = disableVoxcpm2 && requestedBackend === "voxcpm2" ? "omnivoice" : requestedBackend;
+  const showTimelineLock = ttsBackend !== "voxcpm2";
   const omnivoiceConfig = {
     num_step: Number(config?.omnivoice?.num_step ?? config.num_step ?? 32),
     guidance_scale: Number(config?.omnivoice?.guidance_scale ?? config.guidance_scale ?? 2),
@@ -67,7 +73,7 @@ export function SynthesisGenerateCard({
           <Tabs value={ttsBackend} onValueChange={(value) => onSetConfig({ tts_backend: value })}>
             <TabsList>
               <TabsTrigger value="omnivoice">OmniVoice</TabsTrigger>
-              <TabsTrigger value="voxcpm2">VoxCPM2</TabsTrigger>
+              {!disableVoxcpm2 ? <TabsTrigger value="voxcpm2">VoxCPM2</TabsTrigger> : null}
             </TabsList>
 
             <TabsContent value="omnivoice">
@@ -122,6 +128,7 @@ export function SynthesisGenerateCard({
               </div>
             </TabsContent>
 
+            {!disableVoxcpm2 ? (
             <TabsContent value="voxcpm2">
               <Slider
                 label="采样步数 (inference_timesteps)"
@@ -166,7 +173,9 @@ export function SynthesisGenerateCard({
                 </div>
               </div>
             </TabsContent>
+            ) : null}
           </Tabs>
+          {disableVoxcpm2 ? <div className="muted">当前为配音来源项目，合成后端固定为 OmniVoice。</div> : null}
 
           <Slider
             label="段间静音 (ms)"
@@ -178,6 +187,40 @@ export function SynthesisGenerateCard({
             unit="ms"
           />
 
+          <div className="formGroup">
+            <label className="formLabel">片段 speed（批量写入 tts_overrides）</label>
+            <div className="controlRow" style={{ alignItems: "center" }}>
+              <input
+                className="textInput"
+                type="number"
+                min="0.5"
+                max="2"
+                step="0.05"
+                value={speedDraft}
+                onChange={(event) => setSpeedDraft(event.target.value)}
+                style={{ maxWidth: 140 }}
+              />
+              <Button
+                variant="secondary"
+                disabled={isRunning || !currentProject?.id || !currentProject?.script?.segments?.length}
+                onClick={() => onApplySegmentSpeed?.(Number(speedDraft), "all")}
+              >
+                应用到全部片段
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={isRunning || !selectedSegmentCount}
+                onClick={() => onApplySegmentSpeed?.(Number(speedDraft), "selected")}
+              >
+                应用到选中片段{selectedSegmentCount ? ` (${selectedSegmentCount})` : ""}
+              </Button>
+            </div>
+            <div className="muted">
+              若项目已有每段 <code>duration</code>，模型通常会优先按 duration 控制时长；遇到吞音时可降低 speed 或删除过短片段的 duration 后重生成。
+            </div>
+          </div>
+
+          {showTimelineLock ? (
           <div className="formGroup">
             <label className="formLabel">时间轴锁定合成</label>
             <label className="controlRow" style={{ cursor: "pointer", padding: "8px 12px", background: "var(--bg-elevated)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-default)" }}>
@@ -192,6 +235,7 @@ export function SynthesisGenerateCard({
               </span>
             </label>
           </div>
+          ) : null}
 
           <div className="editorGrid">
             <div className="formGroup">
