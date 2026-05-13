@@ -196,6 +196,8 @@ async def unload_translation_engine(state=Depends(get_app_state)):
 
 
 def _build_translate_prompt(*, mode: str, target_language: str) -> str:
+    if mode == "passthrough":
+        return ""
     if mode == "translate_polish":
         lang = (target_language or "").strip() or "中文"
         return (
@@ -221,6 +223,14 @@ async def translate_polish(payload: TranslatePolishRequest, state=Depends(get_ap
         raise HTTPException(status_code=400, detail="text is required")
     if payload.mode == "translate_polish" and not (payload.target_language or "").strip():
         raise HTTPException(status_code=400, detail="target_language is required for translate_polish mode")
+    if payload.mode == "passthrough":
+        return {
+            "text": text,
+            "source": source,
+            "mode": payload.mode,
+            "target_language": payload.target_language,
+            "backend": "passthrough",
+        }
 
     if not state.translation_llm_engine.is_loaded or state.translation_engine_source != source:
         raise HTTPException(
@@ -255,6 +265,7 @@ async def translate_dubbing_segments(payload: TranslateDubbingSegmentsRequest, s
     return await translate_dubbing_segments_for_state(
         state=state,
         source=payload.source,
+        mode=payload.mode,
         target_language=payload.target_language,
         segments=payload.segments,
         min_speed=payload.min_speed,
@@ -303,6 +314,7 @@ async def _run_translate_dubbing_task(task_id: str, payload: TranslateDubbingSeg
         result = await translate_dubbing_segments_for_state(
             state=state,
             source=payload.source,
+            mode=payload.mode,
             target_language=payload.target_language,
             segments=payload.segments,
             min_speed=payload.min_speed,

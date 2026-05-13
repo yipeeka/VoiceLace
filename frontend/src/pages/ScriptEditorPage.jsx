@@ -1,7 +1,7 @@
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Combine, GripVertical, Pencil, Plus, Redo2, Save, Scissors, Settings2, Trash2, Undo2 } from "lucide-react";
+import { Combine, FileDown, GripVertical, Pencil, Plus, Redo2, Save, Scissors, Settings2, Trash2, Undo2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import CharacterBadge, { getCharColor } from "../components/shared/CharacterBadge";
@@ -116,6 +116,43 @@ function formatTimelineMs(ms) {
   const ssText = String(ss).padStart(2, "0");
   const mmmText = String(mmm).padStart(3, "0");
   return `${hhText}:${mmText}:${ssText}.${mmmText}`;
+}
+
+function formatSrtTimestamp(ms) {
+  return formatTimelineMs(ms).replace(".", ",");
+}
+
+function safeDownloadName(value, fallback = "script") {
+  const raw = String(value || fallback).trim() || fallback;
+  return raw.replace(/[\\/:|*?"<>]/g, "_");
+}
+
+function buildSrtTextFromSegments(segments) {
+  const rows = (Array.isArray(segments) ? segments : [])
+    .map((segment) => {
+      const startMs = Number(segment?.source_start_ms);
+      const endMs = Number(segment?.source_end_ms);
+      const text = String(segment?.text || "").trim();
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs < 0 || endMs <= startMs || !text) {
+        return null;
+      }
+      const speaker = String(segment?.speaker || "").trim();
+      return {
+        startMs,
+        endMs,
+        text: speaker ? `${speaker}：${text}` : text,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
+
+  return rows
+    .map((row, index) => [
+      String(index + 1),
+      `${formatSrtTimestamp(row.startMs)} --> ${formatSrtTimestamp(row.endMs)}`,
+      row.text,
+    ].join("\n"))
+    .join("\n\n");
 }
 
 function SortableSegmentCard({
@@ -503,6 +540,14 @@ export default function ScriptEditorPage() {
     () => visibleSegments.filter((segment) => effectiveQcHighlightBySegmentId[segment.id]).length,
     [visibleSegments, effectiveQcHighlightBySegmentId]
   );
+  const timelineSegmentCount = useMemo(
+    () => (draftScript?.segments || []).filter((segment) => {
+      const startMs = Number(segment?.source_start_ms);
+      const endMs = Number(segment?.source_end_ms);
+      return Number.isFinite(startMs) && Number.isFinite(endMs) && startMs >= 0 && endMs > startMs && String(segment?.text || "").trim();
+    }).length,
+    [draftScript?.segments]
+  );
   const isFilterActive = activeSpeakerFilter !== "all";
   const insertAfterLabel = useMemo(
     () => getInsertAnchorLabel(segments, insertAfterSegmentId),
@@ -711,6 +756,24 @@ export default function ScriptEditorPage() {
     link.remove();
     URL.revokeObjectURL(url);
     useUiStore.getState().pushToast({ title: "已导出剧本 JSON", tone: "success" });
+  }
+
+  function handleExportSrt() {
+    const srtText = buildSrtTextFromSegments(draftScript?.segments || []);
+    if (!srtText.trim()) {
+      useUiStore.getState().pushToast({ title: "当前剧本没有可导出的时间轴片段", tone: "warning" });
+      return;
+    }
+    const blob = new Blob([`${srtText}\n`], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${safeDownloadName(currentProject?.name || draftScript?.title || "script")}.srt`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    useUiStore.getState().pushToast({ title: `已导出 SRT（${timelineSegmentCount} 段）`, tone: "success" });
   }
 
   const handleSaveProjectFile = useCallback(async (options = {}) => {
@@ -987,6 +1050,10 @@ export default function ScriptEditorPage() {
             </Button>
             <Button variant="secondary" onClick={handleExportJson} disabled={!script?.segments?.length}>
               导出 JSON
+            </Button>
+            <Button variant="secondary" onClick={handleExportSrt} disabled={!timelineSegmentCount}>
+              <FileDown size={14} />
+              导出 SRT
             </Button>
             <Button variant="secondary" onClick={() => fileInputRef.current?.click()} disabled={!canEdit}>
               导入 JSON

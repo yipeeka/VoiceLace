@@ -248,8 +248,8 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     return "Whisper + pyannote 会自动使用时间轴进行说话人标签对齐。";
   }, [speakerLabels, asrBackendConfigured]);
   const canBuildDubbingProject = useMemo(
-    () => Boolean(isTranslationEngineLoaded && remappedAlignments.length && !isQwen3Backend),
-    [isTranslationEngineLoaded, remappedAlignments.length, isQwen3Backend],
+    () => Boolean((translationMode === "passthrough" || isTranslationEngineLoaded) && remappedAlignments.length && !isQwen3Backend),
+    [isTranslationEngineLoaded, remappedAlignments.length, isQwen3Backend, translationMode],
   );
   const subtitleTranslationReady = useMemo(
     () => subtitleMode !== "translated" || (isTranslationEngineLoaded && translationEngineStatus?.source === translationSource),
@@ -904,7 +904,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   }
 
   async function handleTranslatePolish() {
-    if (!isTranslationEngineLoaded) {
+    if (translationMode !== "passthrough" && !isTranslationEngineLoaded) {
       setTranslationError("请先加载翻译引擎。");
       return;
     }
@@ -918,6 +918,11 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     const controller = new AbortController();
     translateAbortRef.current = controller;
     try {
+      if (translationMode === "passthrough") {
+        setTranslationResult(input);
+        useUiStore.getState().pushToast({ title: "已直通复制识别文本", tone: "success" });
+        return;
+      }
       const response = await fetch(`${API_BASE_URL}/llm/translate-polish`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -968,7 +973,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   }
 
   async function handleCreateDubbingProject() {
-    if (!isTranslationEngineLoaded) {
+    if (translationMode !== "passthrough" && !isTranslationEngineLoaded) {
       setTranslationError("请先加载翻译引擎。");
       return;
     }
@@ -991,13 +996,15 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     }
     setIsBuildingDubbingProject(true);
     setTranslationError("");
-    setDubbingTask({ taskId: "", status: "queued", stageLabel: "翻译配音任务排队中", processed: 0, total: normalizedAlignments.length, percent: 0, cacheHits: 0 });
+    const taskLabel = translationMode === "passthrough" ? "直通配音任务排队中" : (translationMode === "polish_only" ? "润色配音任务排队中" : "翻译配音任务排队中");
+    setDubbingTask({ taskId: "", status: "queued", stageLabel: taskLabel, processed: 0, total: normalizedAlignments.length, percent: 0, cacheHits: 0 });
     try {
       const response = await fetch(`${API_BASE_URL}/llm/translate-dubbing-segments/task`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           source: translationSource,
+          mode: translationMode,
           target_language: translationTargetLanguage,
           min_speed: 0.8,
           max_speed: 1.2,
@@ -1094,7 +1101,8 @@ export default function SpeechRecognitionPage({ onNavigate }) {
 
       const audioStem = String(pendingAudio?.fileName || "").replace(/\.[^.]+$/, "");
       const baseName = (projectName || "").trim() || audioStem || "翻译配音";
-      const nextProjectName = `${baseName}-翻译配音`;
+      const modeProjectSuffix = translationMode === "passthrough" ? "直通配音" : (translationMode === "polish_only" ? "润色配音" : "翻译配音");
+      const nextProjectName = `${baseName}-${modeProjectSuffix}`;
       const project = await createProject(nextProjectName);
 
       const scriptPayload = {
@@ -1103,6 +1111,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
         metadata: {
           asr_source: true,
           dubbing_source: true,
+          dubbing_mode: String(payload?.mode || translationMode),
           dubbing_target_language: String(translationTargetLanguage || "中文"),
           dubbing_source_backend: String(translationSource || ""),
           dubbing_segment_count: Number(translatedSegments.length),
@@ -1786,6 +1795,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
                 <div className="formGroup">
                   <label className="formLabel">模式</label>
                   <select className="textInput" value={translationMode} onChange={(e) => setTranslationMode(e.target.value)} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>
+                    <option value="passthrough">直通</option>
                     <option value="polish_only">仅润色</option>
                     <option value="translate_polish">翻译+润色</option>
                   </select>
@@ -1802,7 +1812,9 @@ export default function SpeechRecognitionPage({ onNavigate }) {
               <div className="controlRow speechUtilityActions">
                 <Button variant="secondary" onClick={handleLoadTranslationEngine} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>加载翻译引擎</Button>
                 <Button variant="secondary" onClick={handleUnloadTranslationEngine} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>卸载翻译引擎</Button>
-                <Button variant="primary" onClick={handleTranslatePolish} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject || !isTranslationEngineLoaded}>翻译润色</Button>
+                <Button variant="primary" onClick={handleTranslatePolish} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject || (translationMode !== "passthrough" && !isTranslationEngineLoaded)}>
+                  {translationMode === "passthrough" ? "直通预览" : "翻译润色"}
+                </Button>
                 <Button variant="primary" icon={FolderPlus} onClick={handleCreateDubbingProject} disabled={!canBuildDubbingProject || isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>
                   {isBuildingDubbingProject ? "创建配音项目中..." : "生成翻译配音项目"}
                 </Button>
@@ -1812,7 +1824,8 @@ export default function SpeechRecognitionPage({ onNavigate }) {
               </div>
               <div className="muted">引擎状态：{translationEngineStatus?.loaded ? "已加载" : "未加载"} · 来源：{translationEngineStatus?.source || "未选择"} · 后端：{translationEngineStatus?.backend || "unknown"}</div>
               {translationEngineStatus?.model_name ? <div className="muted">模型：{translationEngineStatus.model_name}</div> : null}
-              {!isQwen3Backend ? <div className="muted">翻译配音会按 Whisper 时间轴分段，并自动写入每段 speed/duration。</div> : null}
+              {!isQwen3Backend && translationMode === "passthrough" ? <div className="muted">直通配音会按 Whisper 时间轴分段，并自动写入每段 speed/duration，不调用翻译引擎。</div> : null}
+              {!isQwen3Backend && translationMode !== "passthrough" ? <div className="muted">配音项目会按 Whisper 时间轴分段，并自动写入每段 speed/duration。</div> : null}
               {isQwen3Backend ? <div className="muted">Qwen3-ASR 当前为纯识别模式，不支持时间轴匹配配音项目创建。</div> : null}
               {translationEngineStatus?.error ? <div className="errorText">{translationEngineStatus.error}</div> : null}
               {translationError ? <div className="errorText">{translationError}</div> : null}

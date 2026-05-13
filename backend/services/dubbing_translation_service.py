@@ -10,7 +10,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import HTTPException
 
 ALLOWED_TRANSLATION_SOURCES = {"primary_local", "secondary_local", "openai", "gemini"}
-PROMPT_VERSION = "dubbing-batch-v1"
+PROMPT_VERSION = "dubbing-batch-v2"
 TIMELINE_DURATION_BUFFER_SEC = 0.1
 TARGET_DURATION_MIN_SEC = 0.3
 TARGET_DURATION_MAX_SEC = 60.0
@@ -18,8 +18,8 @@ DEFAULT_MIN_SPEED = 0.8
 DEFAULT_MAX_SPEED = 1.2
 LOCAL_BATCH_SEGMENT_LIMIT = 12
 LOCAL_BATCH_CHAR_LIMIT = 2200
-API_BATCH_SEGMENT_LIMIT = 24
-API_BATCH_CHAR_LIMIT = 5000
+API_BATCH_SEGMENT_LIMIT = 48
+API_BATCH_CHAR_LIMIT = 10000
 
 ProgressCallback = Callable[[dict[str, Any]], Awaitable[None] | None]
 CancelCheck = Callable[[], bool]
@@ -77,12 +77,22 @@ def estimate_speaking_seconds(text: str) -> float:
 
 def build_dubbing_translate_prompt(
     *,
+    mode: str,
     target_language: str,
     target_duration_sec: float,
     context_hints: str = "",
 ) -> str:
     lang = (target_language or "").strip() or "中文"
     hints_block = f"\n术语与纠错参考：\n{context_hints}" if context_hints else ""
+    if mode == "polish_only":
+        return (
+            "你是配音文本润色编辑。请先修正文中明显识别错漏，在保持原语言和原意不变的前提下润色。"
+            "要求：自然口语、适合旁白/对白配音、尽量简洁，不要解释，不要注释。"
+            f"\n目标口播时长：约 {target_duration_sec:.2f} 秒"
+            "\n时长优先级：先保证语义，再尽量贴近时长。若略超时，请使用更短句式或省略可省略修饰。"
+            f"{hints_block}"
+            "\n只输出润色后的正文。"
+        )
     return (
         "你是配音翻译编辑。请先修正文中明显识别错漏，再翻译成目标语言，结果用于旁白/对白配音。"
         "要求：忠实原意、自然口语、尽量简洁，不要解释，不要注释。"
@@ -105,9 +115,18 @@ def build_dubbing_compress_prompt(*, target_language: str, target_duration_sec: 
     )
 
 
-def build_dubbing_batch_translate_prompt(*, target_language: str, context_hints: str = "") -> str:
+def build_dubbing_batch_translate_prompt(*, mode: str, target_language: str, context_hints: str = "") -> str:
     lang = (target_language or "").strip() or "中文"
     hints_block = f"\n术语与纠错参考：\n{context_hints}" if context_hints else ""
+    if mode == "polish_only":
+        return (
+            "你是配音文本润色编辑。请把用户给出的 JSON 数组逐项润色。"
+            "每项包含 id、speaker、text、target_duration_sec。"
+            "要求：先修正文中明显识别错漏；保持原语言和原意不变；自然口语、尽量简洁；"
+            "尽量贴近 target_duration_sec 对应的口播时长。"
+            f"{hints_block}"
+            '\n只输出 JSON 数组，不要解释。格式：[{"id":"原 id","text":"润色后文本"}]'
+        )
     return (
         "你是配音翻译编辑。请把用户给出的 JSON 数组逐项翻译为目标语言。"
         "每项包含 id、speaker、text、target_duration_sec。"
@@ -334,6 +353,7 @@ def _build_result_row(
 def _segment_cache_key(
     *,
     source: str,
+    mode: str,
     target_language: str,
     config: dict[str, Any],
     context_hints: str,
@@ -345,6 +365,7 @@ def _segment_cache_key(
         {
             "version": PROMPT_VERSION,
             "source": source,
+            "mode": mode,
             "target_language": target_language,
             "backend": config.get("backend"),
             "model": config.get("model_path") or config.get("api_model") or "",
@@ -508,6 +529,7 @@ async def translate_dubbing_segments_for_state(
     source: str,
     target_language: str,
     segments: list[Any],
+    mode: str = "translate_polish",
     min_speed: float = DEFAULT_MIN_SPEED,
     max_speed: float = DEFAULT_MAX_SPEED,
     max_concurrency: int = 1,
@@ -515,7 +537,10 @@ async def translate_dubbing_segments_for_state(
     cancel_check: CancelCheck | None = None,
 ) -> dict[str, Any]:
     source = (source or "").strip().lower()
-    if source not in ALLOWED_TRANSLATION_SOURCES:
+    mode = (mode or "translate_polish").strip().lower()
+    if mode not in {"passthrough", "polish_only", "translate_polish"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported dubbing translation mode: {mode}")
+    if mode != "passthrough" and source not in ALLOWED_TRANSLATION_SOURCES:
         raise HTTPException(status_code=400, detail=f"Unsupported translation source: {source}")
     if not segments:
         raise HTTPException(status_code=400, detail="segments is required")
@@ -526,13 +551,13 @@ async def translate_dubbing_segments_for_state(
     if min_speed > max_speed:
         min_speed = max_speed
 
-    if not state.translation_llm_engine.is_loaded or state.translation_engine_source != source:
+    if mode != "passthrough" and (not state.translation_llm_engine.is_loaded or state.translation_engine_source != source):
         raise HTTPException(
             status_code=400,
             detail="Translation engine source mismatch or not loaded. Please load translation engine first.",
         )
 
-    config = build_translation_config(state, source)
+    config = build_translation_config(state, source) if mode != "passthrough" else {"backend": "passthrough", "options": {}}
     normalized_segments, dropped_empty = _normalize_input_segments(segments)
     if not normalized_segments:
         raise HTTPException(status_code=400, detail="segments 中没有可用文本（空白片段已过滤）")
@@ -540,6 +565,40 @@ async def translate_dubbing_segments_for_state(
     if config["backend"] == "llama_cpp":
         effective_concurrency = 1
     _check_canceled(cancel_check)
+    if mode == "passthrough":
+        translated_rows = [
+            _build_result_row(
+                row=row,
+                translated_text=str(row.get("source_text") or "").strip(),
+                min_speed=min_speed,
+                max_speed=max_speed,
+            )
+            for row in normalized_segments
+        ]
+        combined_source = []
+        for row in translated_rows:
+            speaker = str(row.get("speaker") or "").strip()
+            source_text = str(row.get("source_text") or "").strip()
+            if source_text:
+                combined_source.append(f"{speaker}：{source_text}" if speaker else source_text)
+        return {
+            "source": source or "passthrough",
+            "mode": mode,
+            "target_language": target_language,
+            "backend": "passthrough",
+            "max_concurrency": 1,
+            "normalized_segment_count": len(normalized_segments),
+            "dropped_empty_segment_count": dropped_empty,
+            "cache_hits": 0,
+            "translated_segment_count": 0,
+            "chunk_count": 0,
+            "fallback_chunk_count": 0,
+            "over_time_segment_count": 0,
+            "context_hints": "",
+            "segments": translated_rows,
+            "source_text": "\n".join(combined_source),
+            "translated_text": "\n".join(combined_source),
+        }
     await _maybe_emit(
         progress_callback,
         {
@@ -562,6 +621,7 @@ async def translate_dubbing_segments_for_state(
         source_text = str(row.get("source_text") or "").strip()
         target_duration_sec = _target_duration_for_row(row)
         prompt = build_dubbing_translate_prompt(
+            mode=mode,
             target_language=target_language,
             target_duration_sec=target_duration_sec,
             context_hints=context_hints,
@@ -583,6 +643,7 @@ async def translate_dubbing_segments_for_state(
     async def translate_batch(chunk: list[dict[str, Any]]) -> list[dict[str, Any]]:
         _check_canceled(cancel_check)
         prompt = build_dubbing_batch_translate_prompt(
+            mode=mode,
             target_language=target_language,
             context_hints=context_hints,
         )
@@ -650,6 +711,7 @@ async def translate_dubbing_segments_for_state(
     for row in normalized_segments:
         key = _segment_cache_key(
             source=source,
+            mode=mode,
             target_language=target_language,
             config=config,
             context_hints=context_hints,
@@ -785,6 +847,7 @@ async def translate_dubbing_segments_for_state(
     state.translation_engine_error = ""
     return {
         "source": source,
+        "mode": mode,
         "target_language": target_language,
         "backend": state.translation_llm_engine.backend_name,
         "max_concurrency": effective_concurrency,

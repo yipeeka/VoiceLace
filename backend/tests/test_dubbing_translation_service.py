@@ -89,6 +89,22 @@ class DubbingTranslationServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(float(row["tts_overrides"]["speed"]), 0.8)
         self.assertLessEqual(float(row["tts_overrides"]["speed"]), 1.2)
 
+    async def test_passthrough_mode_skips_llm_and_keeps_source_text(self) -> None:
+        state = _build_state()
+        state.translation_llm_engine.is_loaded = False
+        result = await translate_dubbing_segments_for_state(
+            state=state,
+            source="secondary_local",
+            mode="passthrough",
+            target_language="中文",
+            segments=[{"id": "a", "speaker": "旁白", "text": "雾未散", "start_ms": 0, "end_ms": 2000}],
+        )
+        self.assertEqual(result["mode"], "passthrough")
+        self.assertEqual(result["backend"], "passthrough")
+        self.assertEqual(result["segments"][0]["text"], "雾未散")
+        self.assertEqual(result["segments"][0]["source_text"], "雾未散")
+        self.assertAlmostEqual(float(result["segments"][0]["tts_overrides"]["duration"]), 1.9, places=3)
+
     async def test_clamps_speed_window_to_expected_range(self) -> None:
         state = _build_state()
         result = await translate_dubbing_segments_for_state(
