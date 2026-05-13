@@ -229,6 +229,9 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     : (speakerLabels
       ? mappedTranscript
       : (asrBackendConfigured === "whisper" ? collapseWhisperSegments(plainText) : plainText));
+  const translationPlainInputText = speakerLabels
+    ? mappedTranscript
+    : (asrBackendConfigured === "whisper" ? collapseWhisperSegments(plainText) : plainText);
   const canInsert = useMemo(() => Boolean((previewText || "").trim()), [previewText]);
   const canInsertTranslation = useMemo(() => Boolean((translationResult || "").trim()), [translationResult]);
   const isQwen3Backend = asrBackendConfigured === "qwen3_crispasr";
@@ -908,7 +911,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       setTranslationError("请先加载翻译引擎。");
       return;
     }
-    const input = (previewText || "").trim();
+    const input = (translationPlainInputText || "").trim();
     if (!input) {
       setTranslationError("请先完成语音识别，或在识别预览中输入文本。");
       return;
