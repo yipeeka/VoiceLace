@@ -7,6 +7,7 @@ import {
   ShieldCheck,
   Mic,
   Music,
+  Power,
   Save,
   Settings,
   SlidersHorizontal,
@@ -15,6 +16,7 @@ import {
   Volume2,
 } from "lucide-react";
 import { Tooltip } from "../ui/Tooltip";
+import { useSettingsStore } from "../../stores/useSettingsStore";
 import { useUiStore } from "../../stores/useUiStore";
 
 const NAV_ITEMS = [
@@ -29,6 +31,7 @@ const NAV_ITEMS = [
 
 export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCollapse, completedPages = [] }) {
   const projectSaveAction = useUiStore((state) => state.projectSaveAction);
+  const manualUnloadAll = useSettingsStore((state) => state.manualUnloadAll);
   const canShowProjectSave = ["speech", "text", "script", "voice", "music", "synth"].includes(activePage);
   const canSaveProject = typeof projectSaveAction === "function";
 
@@ -172,6 +175,26 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
         })}
 
         <div className="sidebarDivider" />
+
+        {collapsed ? (
+          <Tooltip content="一键卸载" side="right">
+            <button
+              className="navItem navItemSubAction navItemDangerAction"
+              onClick={() => manualUnloadAll?.()}
+              title="一键卸载"
+            >
+              <Power className="navItemIcon" size={18} />
+            </button>
+          </Tooltip>
+        ) : (
+          <button
+            className="navItem navItemSubAction navItemDangerAction"
+            onClick={() => manualUnloadAll?.()}
+          >
+            <Power className="navItemIcon" size={16} />
+            <span className="navItemLabel">一键卸载</span>
+          </button>
+        )}
 
         {/* Settings */}
         {collapsed ? (

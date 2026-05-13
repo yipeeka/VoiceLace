@@ -7,6 +7,7 @@ export default function SynthesisFullAudioCard({
   audioVariant = "raw",
   segments,
   gapDurationMs,
+  useSourceTimeline = false,
   onCurrentTimeChange,
 }) {
   if (!fullAudioUrl) {
@@ -21,6 +22,7 @@ export default function SynthesisFullAudioCard({
         audioVariant={audioVariant}
         segments={segments}
         gapDurationMs={gapDurationMs}
+        useSourceTimeline={useSourceTimeline}
         height={80}
         onCurrentTimeChange={onCurrentTimeChange}
       />

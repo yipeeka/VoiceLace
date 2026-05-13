@@ -300,6 +300,22 @@ async def unload_asr(state=Depends(get_app_state)):
     return {"status": "ok"}
 
 
+@router.post("/unload-all")
+async def unload_all_models(state=Depends(get_app_state)):
+    await state.orchestrator.unload_all()
+    state.asr_engine.last_error = ""
+    if state.translation_llm_engine.is_loaded:
+        await state.translation_llm_engine.unload_model()
+    state.translation_engine_source = ""
+    state.translation_engine_error = ""
+    if state.music_assist_llm_engine.is_loaded:
+        await state.music_assist_llm_engine.unload_model()
+    state.music_assist_engine_source = ""
+    state.music_assist_engine_error = ""
+    state.orchestrator.release_cuda_memory()
+    return {"status": "ok"}
+
+
 @router.post("/files/browse")
 async def browse_files(payload: FileBrowseRequest, state=Depends(get_app_state)):
     base = Path(payload.path).expanduser().resolve()

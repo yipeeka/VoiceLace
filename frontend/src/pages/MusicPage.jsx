@@ -20,7 +20,7 @@ const DEFAULT_FORM = {
   lyrics: "",
   audio_duration: 30,
   vocal_language: "unknown",
-  num_inference_steps: 50,
+  num_inference_steps: 8,
   seed: "",
   source_asset_name: "",
   reference_asset_name: "",
@@ -405,6 +405,7 @@ export default function MusicPage({ onNavigate }) {
     setIsValidating(true);
     try {
       await api.post("/music/model/select", { model_variant: nextVariant });
+      setForm((prev) => ({ ...prev, num_inference_steps: nextVariant === "base" ? 50 : 8 }));
       const report = await api.get("/music/model/validate");
       setValidation(report || null);
       await refreshSystemStatus();

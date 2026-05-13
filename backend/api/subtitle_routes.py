@@ -12,6 +12,15 @@ from backend.state import get_app_state
 router = APIRouter()
 
 
+async def _read_subtitle_payload(file: UploadFile | None, subtitle_text: str | None) -> tuple[bytes, str | None]:
+    edited_text = str(subtitle_text or "").strip()
+    if edited_text:
+        return edited_text.encode("utf-8"), "edited.srt"
+    if file is None:
+        raise ValueError("请上传字幕文件或提供 subtitle_text。")
+    return await file.read(), file.filename
+
+
 async def _emit(state, task: dict, task_id: str, message: dict) -> None:
     task.setdefault("events", []).append(message)
     await state.realtime.publish("llm", task_id, message)
@@ -90,14 +99,16 @@ async def _run_translate_subtitle_task(
 
 @router.post("/preview")
 async def preview_subtitle(
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    subtitle_text: str | None = Form(None),
     mode: str = Form("original"),
     line_policy: str = Form("auto"),
 ):
     try:
+        data, filename = await _read_subtitle_payload(file, subtitle_text)
         return parse_subtitle_bytes(
-            await file.read(),
-            filename=file.filename,
+            data,
+            filename=filename,
             line_policy=line_policy,
             mode=mode,
         )
@@ -109,7 +120,8 @@ async def preview_subtitle(
 
 @router.post("/create-dubbing-project")
 async def create_subtitle_dubbing_project(
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    subtitle_text: str | None = Form(None),
     project_name: str | None = Form(None),
     mode: str = Form("original"),
     target_language: str = Form("中文"),
@@ -119,10 +131,11 @@ async def create_subtitle_dubbing_project(
     state=Depends(get_app_state),
 ):
     try:
+        data, filename = await _read_subtitle_payload(file, subtitle_text)
         return await create_dubbing_project_from_subtitle(
             state=state,
-            data=await file.read(),
-            filename=file.filename,
+            data=data,
+            filename=filename,
             project_name=project_name,
             mode=mode,
             target_language=target_language,
@@ -140,7 +153,8 @@ async def create_subtitle_dubbing_project(
 
 @router.post("/translate-preview")
 async def translate_subtitle(
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    subtitle_text: str | None = Form(None),
     target_language: str = Form("中文"),
     translation_source: str = Form("secondary_local"),
     line_policy: str = Form("auto"),
@@ -148,10 +162,11 @@ async def translate_subtitle(
     state=Depends(get_app_state),
 ):
     try:
+        data, filename = await _read_subtitle_payload(file, subtitle_text)
         return await translate_subtitle_preview(
             state=state,
-            data=await file.read(),
-            filename=file.filename,
+            data=data,
+            filename=filename,
             target_language=target_language,
             translation_source=translation_source,
             line_policy=line_policy,
@@ -168,13 +183,18 @@ async def translate_subtitle(
 
 @router.post("/translate-preview/task")
 async def enqueue_translate_subtitle_task(
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    subtitle_text: str | None = Form(None),
     target_language: str = Form("中文"),
     translation_source: str = Form("secondary_local"),
     line_policy: str = Form("auto"),
     max_concurrency: int = Form(1),
     state=Depends(get_app_state),
 ):
+    try:
+        data, filename = await _read_subtitle_payload(file, subtitle_text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     task_id = str(uuid4())
     state.llm_tasks[task_id] = {
         "task_id": task_id,
@@ -192,8 +212,8 @@ async def enqueue_translate_subtitle_task(
         _run_translate_subtitle_task(
             task_id,
             state=state,
-            data=await file.read(),
-            filename=file.filename,
+            data=data,
+            filename=filename,
             target_language=target_language,
             translation_source=translation_source,
             line_policy=line_policy,

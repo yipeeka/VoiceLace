@@ -151,6 +151,10 @@ export default function SynthesisPage() {
     () => Boolean(currentProject?.script?.metadata?.dubbing_source),
     [currentProject?.script?.metadata?.dubbing_source],
   );
+  const useSourceTimeline = useMemo(
+    () => Boolean(config?.timeline_lock_enabled || currentProject?.script?.metadata?.dubbing_source),
+    [config?.timeline_lock_enabled, currentProject?.script?.metadata?.dubbing_source],
+  );
 
   useEffect(() => {
     if (!isDubbingSourceProject) return;
@@ -422,6 +426,9 @@ export default function SynthesisPage() {
         text: segment.text,
         type: segment.type || "dialogue",
         emotion: segment.emotion || "neutral",
+        source_start_ms: segment.source_start_ms,
+        source_end_ms: segment.source_end_ms,
+        source_duration_ms: segment.source_duration_ms,
         status: baseStatus,
         display_status: displayStatus,
         workflow_status: resolveWorkflowStatus(displayStatus),
@@ -533,13 +540,19 @@ export default function SynthesisPage() {
       const durationMs = Number(seg.duration_ms || 0) > 0
         ? Number(seg.duration_ms || 0)
         : Number(resolvedSegmentDurations[seg.segment_id] || 0);
-      const start = cursor;
-      const end = cursor + durationMs;
-      timings[seg.segment_id] = { start, end };
-      cursor = end + gapMs;
+      let start = cursor;
+      if (useSourceTimeline) {
+        const sourceStartMs = Number(seg.source_start_ms);
+        if (Number.isFinite(sourceStartMs) && sourceStartMs >= 0) {
+          start = sourceStartMs;
+        }
+      }
+      const resolvedEnd = start + durationMs;
+      timings[seg.segment_id] = { start, end: resolvedEnd };
+      cursor = useSourceTimeline ? Math.max(cursor, resolvedEnd) : resolvedEnd + gapMs;
     });
     return timings;
-  }, [segments, config.gap_duration_ms, resolvedSegmentDurations]);
+  }, [segments, config.gap_duration_ms, resolvedSegmentDurations, useSourceTimeline]);
 
   const { isAutoPlay, currentSegmentId, playFrom, stop } = usePlaybackQueue(visibleSegments);
   const fullAudioCurrentSegmentId = useMemo(() => {
@@ -1050,6 +1063,7 @@ export default function SynthesisPage() {
         audioVariant={audioVariant}
         segments={segments}
         gapDurationMs={Number(config.gap_duration_ms || 300)}
+        useSourceTimeline={useSourceTimeline}
         onCurrentTimeChange={setFullAudioCurrentTime}
       />
 

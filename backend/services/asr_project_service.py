@@ -220,6 +220,7 @@ async def create_project_from_audio(
     project_name: str | None,
     speaker_labels: bool,
     asr_backend: str = "whisper",
+    language: str = "auto",
     enable_timestamps: bool = False,
     parse_mode: str,
     auto_parse: bool,
@@ -239,6 +240,25 @@ async def create_project_from_audio(
         if on_progress is None:
             return
         await on_progress(event)
+
+    async def transcribe_with_language(target_path: Path) -> dict[str, Any]:
+        try:
+            return await state.asr_engine.transcribe(
+                str(target_path),
+                backend=asr_backend,
+                language=language,
+                speaker_labels=speaker_labels,
+                enable_timestamps=enable_timestamps,
+            )
+        except TypeError as exc:
+            if "language" not in str(exc) or "unexpected keyword" not in str(exc):
+                raise
+            return await state.asr_engine.transcribe(
+                str(target_path),
+                backend=asr_backend,
+                speaker_labels=speaker_labels,
+                enable_timestamps=enable_timestamps,
+            )
 
     await emit({"type": "chunk_total", "total": total_chunks})
     orchestrator = getattr(state, "orchestrator", None)
@@ -265,12 +285,7 @@ async def create_project_from_audio(
                     target_path = chunk_path
                 else:
                     target_path = audio_path
-                result = await state.asr_engine.transcribe(
-                    str(target_path),
-                    backend=asr_backend,
-                    speaker_labels=speaker_labels,
-                    enable_timestamps=enable_timestamps,
-                )
+                result = await transcribe_with_language(target_path)
                 raw_alignments = result.get("alignments") if isinstance(result, dict) else []
                 normalized: list[dict[str, Any]] = []
                 if isinstance(raw_alignments, list):

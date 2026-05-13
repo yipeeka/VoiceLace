@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import csv
 from dataclasses import asdict, dataclass
 from enum import Enum
+import gc
+import io
+import os
+import subprocess
+import time
 from typing import Awaitable, Callable
 
 from backend.config import settings
@@ -92,8 +98,13 @@ class GpuInfo:
     total_vram_mb: int = 0
     used_vram_mb: int = 0
     free_vram_mb: int = 0
+    system_used_vram_mb: int = 0
+    system_free_vram_mb: int = 0
+    process_used_vram_mb: int = 0
     torch_allocated_mb: int = 0
     torch_reserved_mb: int = 0
+    system_vram_source: str = "torch"
+    process_vram_source: str = "torch"
 
 
 Listener = Callable[[dict], Awaitable[None]]
@@ -109,6 +120,7 @@ class ModelOrchestrator:
         self._lock = asyncio.Lock()
         self._listeners: list[Listener] = []
         self._config = OrchestratorConfig()
+        self._windows_process_vram_cache: tuple[float, int, str] = (0.0, 0, "")
 
     @property
     def state(self) -> ModelState:
@@ -177,6 +189,138 @@ class ModelOrchestrator:
         self._state = state
         await self._emit({"type": "model_state_changed", "engine": engine, "state": state.value, "vram": self.get_gpu_info()})
 
+    @staticmethod
+    def release_cuda_memory() -> None:
+        gc.collect()
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+        except Exception:
+            pass
+
+    def _read_nvidia_smi_gpu_info(self, device_index: int) -> dict | None:
+        try:
+            proc = subprocess.run(
+                [
+                    "nvidia-smi",
+                    f"--id={int(device_index)}",
+                    "--query-gpu=name,memory.total,memory.used,memory.free",
+                    "--format=csv,noheader,nounits",
+                ],
+                capture_output=True,
+                check=False,
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+                timeout=3,
+            )
+        except Exception:
+            return None
+        if proc.returncode != 0:
+            return None
+        raw = (proc.stdout or "").strip().splitlines()
+        if not raw:
+            return None
+        parts = [part.strip() for part in raw[0].split(",")]
+        if len(parts) < 4:
+            return None
+        try:
+            return {
+                "name": ",".join(parts[:-3]).strip(),
+                "total": int(float(parts[-3])),
+                "used": int(float(parts[-2])),
+                "free": int(float(parts[-1])),
+            }
+        except Exception:
+            return None
+
+    def _read_nvidia_smi_process_vram_mb(self) -> int:
+        try:
+            proc = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-compute-apps=pid,used_memory",
+                    "--format=csv,noheader,nounits",
+                ],
+                capture_output=True,
+                check=False,
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+                timeout=3,
+            )
+        except Exception:
+            return 0
+        if proc.returncode != 0:
+            return 0
+        current_pid = os.getpid()
+        process_used = 0
+        for line in (proc.stdout or "").splitlines():
+            parts = [part.strip() for part in line.split(",")]
+            if len(parts) < 2:
+                continue
+            try:
+                pid = int(parts[0])
+            except Exception:
+                continue
+            if pid != current_pid:
+                continue
+            try:
+                process_used = max(process_used, int(float(parts[-1])))
+            except Exception:
+                continue
+        return process_used
+
+    def _read_windows_process_vram_mb(self, *, ttl_seconds: float = 15.0) -> tuple[int, str]:
+        if os.name != "nt":
+            return 0, ""
+        now = time.monotonic()
+        expires_at, cached_value, cached_source = self._windows_process_vram_cache
+        if now < expires_at:
+            return cached_value, cached_source
+        counter = f"\\GPU Process Memory(pid_{os.getpid()}*)\\Dedicated Usage"
+        try:
+            proc = subprocess.run(
+                ["typeperf", counter, "-sc", "1"],
+                capture_output=True,
+                check=False,
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+                timeout=6,
+            )
+        except Exception:
+            self._windows_process_vram_cache = (now + ttl_seconds, 0, "")
+            return 0, ""
+        if proc.returncode != 0:
+            self._windows_process_vram_cache = (now + ttl_seconds, 0, "")
+            return 0, ""
+        rows: list[list[str]] = []
+        try:
+            rows = list(csv.reader(io.StringIO(proc.stdout or "")))
+        except Exception:
+            rows = []
+        process_bytes = 0.0
+        for row in rows:
+            if len(row) < 2:
+                continue
+            if not str(row[0] or "").strip() or "PDH-CSV" in str(row[0]):
+                continue
+            for value in row[1:]:
+                try:
+                    process_bytes += max(0.0, float(str(value or "0").strip()))
+                except Exception:
+                    continue
+            if process_bytes > 0:
+                break
+        process_mb = int(process_bytes / 1024 / 1024) if process_bytes > 0 else 0
+        source = "windows-counter" if process_mb > 0 else ""
+        self._windows_process_vram_cache = (now + ttl_seconds, process_mb, source)
+        return process_mb, source
+
     async def update_config(self, payload: OrchestratorConfig) -> dict:
         self._config = self._normalize_music_config(payload)
         if hasattr(self._llm, "enable_llama_cpp_think_mode"):
@@ -202,9 +346,30 @@ class ModelOrchestrator:
                     total_vram_mb=int(total / 1024 / 1024),
                     used_vram_mb=int(used / 1024 / 1024),
                     free_vram_mb=int(free / 1024 / 1024),
+                    system_used_vram_mb=int(used / 1024 / 1024),
+                    system_free_vram_mb=int(free / 1024 / 1024),
+                    process_used_vram_mb=int(used / 1024 / 1024),
                     torch_allocated_mb=int(allocated / 1024 / 1024),
                     torch_reserved_mb=int(reserved / 1024 / 1024),
                 )
+                smi_info = self._read_nvidia_smi_gpu_info(int(dev))
+                if smi_info:
+                    info.name = str(smi_info.get("name") or info.name)
+                    info.device_name = info.name
+                    info.total_vram_mb = int(smi_info.get("total") or info.total_vram_mb)
+                    info.system_used_vram_mb = int(smi_info.get("used") or info.system_used_vram_mb)
+                    info.system_free_vram_mb = int(smi_info.get("free") or max(0, info.total_vram_mb - info.system_used_vram_mb))
+                    info.used_vram_mb = info.system_used_vram_mb
+                    info.free_vram_mb = info.system_free_vram_mb
+                    info.system_vram_source = "nvidia-smi"
+                    smi_process_used = self._read_nvidia_smi_process_vram_mb()
+                    if smi_process_used > 0:
+                        info.process_used_vram_mb = smi_process_used
+                        info.process_vram_source = "nvidia-smi"
+                windows_process_used, windows_process_source = self._read_windows_process_vram_mb()
+                if windows_process_used > 0:
+                    info.process_used_vram_mb = windows_process_used
+                    info.process_vram_source = windows_process_source
                 try:
                     import pynvml  # type: ignore
 
@@ -217,8 +382,30 @@ class ModelOrchestrator:
                     info.name = str(nvml_name or info.name)
                     info.device_name = info.name
                     info.total_vram_mb = int(int(mem_info.total) / 1024 / 1024)
-                    info.used_vram_mb = int(int(mem_info.used) / 1024 / 1024)
-                    info.free_vram_mb = int(int(mem_info.free) / 1024 / 1024)
+                    info.system_used_vram_mb = int(int(mem_info.used) / 1024 / 1024)
+                    info.system_free_vram_mb = int(int(mem_info.free) / 1024 / 1024)
+                    info.used_vram_mb = info.system_used_vram_mb
+                    info.free_vram_mb = info.system_free_vram_mb
+                    info.system_vram_source = "nvml"
+                    current_pid = os.getpid()
+                    process_used = 0
+                    try:
+                        processes = list(pynvml.nvmlDeviceGetComputeRunningProcesses(handle) or [])
+                        try:
+                            processes.extend(list(pynvml.nvmlDeviceGetGraphicsRunningProcesses(handle) or []))
+                        except Exception:
+                            pass
+                        for proc in processes:
+                            if int(getattr(proc, "pid", 0) or 0) != current_pid:
+                                continue
+                            used_gpu_memory = int(getattr(proc, "usedGpuMemory", 0) or 0)
+                            if used_gpu_memory > 0:
+                                process_used = max(process_used, int(used_gpu_memory / 1024 / 1024))
+                    except Exception:
+                        process_used = 0
+                    if process_used > 0:
+                        info.process_used_vram_mb = process_used
+                        info.process_vram_source = "nvml"
                 except Exception:
                     pass
                 return asdict(
@@ -233,12 +420,15 @@ class ModelOrchestrator:
             if self._music is not None and getattr(self._music, "is_loaded", False) and self._config.auto_serial:
                 await self._set_state(ModelState.UNLOADING_MUSIC, "music")
                 await self._music.unload_model()
+                self.release_cuda_memory()
             if self._asr is not None and getattr(self._asr, "is_loaded", False) and self._config.auto_serial:
                 await self._set_state(ModelState.UNLOADING_ASR, "asr")
                 await self._asr.unload_model()
+                self.release_cuda_memory()
             if self._tts.is_loaded and self._config.auto_serial:
                 await self._set_state(ModelState.UNLOADING_TTS, "tts")
                 await self._tts.unload_model()
+                self.release_cuda_memory()
             need_reload = False
             if getattr(self._llm, "is_loaded", False) and hasattr(self._llm, "needs_reload"):
                 need_reload = self._llm.needs_reload(
@@ -252,6 +442,7 @@ class ModelOrchestrator:
             if need_reload:
                 await self._set_state(ModelState.UNLOADING_LLM, "llm")
                 await self._llm.unload_model()
+                self.release_cuda_memory()
             if not self._llm.is_loaded:
                 await self._set_state(ModelState.LOADING_LLM, "llm")
                 await self._llm.load_model(
@@ -269,12 +460,15 @@ class ModelOrchestrator:
             if self._music is not None and getattr(self._music, "is_loaded", False) and self._config.auto_serial:
                 await self._set_state(ModelState.UNLOADING_MUSIC, "music")
                 await self._music.unload_model()
+                self.release_cuda_memory()
             if self._asr is not None and getattr(self._asr, "is_loaded", False) and self._config.auto_serial:
                 await self._set_state(ModelState.UNLOADING_ASR, "asr")
                 await self._asr.unload_model()
+                self.release_cuda_memory()
             if self._llm.is_loaded and self._config.auto_serial:
                 await self._set_state(ModelState.UNLOADING_LLM, "llm")
                 await self._llm.unload_model()
+                self.release_cuda_memory()
             backend = (tts_backend or "omnivoice").strip().lower()
             if backend not in {"omnivoice", "voxcpm2", "mock"}:
                 backend = "omnivoice"
@@ -294,6 +488,7 @@ class ModelOrchestrator:
             if need_reload:
                 await self._set_state(ModelState.UNLOADING_TTS, "tts")
                 await self._tts.unload_model()
+                self.release_cuda_memory()
 
             if not self._tts.is_loaded:
                 await self._set_state(ModelState.LOADING_TTS, "tts")
@@ -311,12 +506,15 @@ class ModelOrchestrator:
             if self._asr is not None and getattr(self._asr, "is_loaded", False) and self._config.auto_serial:
                 await self._set_state(ModelState.UNLOADING_ASR, "asr")
                 await self._asr.unload_model()
+                self.release_cuda_memory()
             if self._llm.is_loaded and self._config.auto_serial:
                 await self._set_state(ModelState.UNLOADING_LLM, "llm")
                 await self._llm.unload_model()
+                self.release_cuda_memory()
             if self._tts.is_loaded and self._config.auto_serial:
                 await self._set_state(ModelState.UNLOADING_TTS, "tts")
                 await self._tts.unload_model()
+                self.release_cuda_memory()
 
             need_reload = False
             if getattr(self._music, "is_loaded", False) and hasattr(self._music, "needs_reload"):
@@ -329,6 +527,7 @@ class ModelOrchestrator:
             if need_reload:
                 await self._set_state(ModelState.UNLOADING_MUSIC, "music")
                 await self._music.unload_model()
+                self.release_cuda_memory()
             if not getattr(self._music, "is_loaded", False):
                 await self._set_state(ModelState.LOADING_MUSIC, "music")
                 await self._music.load_model(
@@ -345,12 +544,15 @@ class ModelOrchestrator:
             if self._music is not None and getattr(self._music, "is_loaded", False) and self._config.auto_serial:
                 await self._set_state(ModelState.UNLOADING_MUSIC, "music")
                 await self._music.unload_model()
+                self.release_cuda_memory()
             if self._llm.is_loaded and self._config.auto_serial:
                 await self._set_state(ModelState.UNLOADING_LLM, "llm")
                 await self._llm.unload_model()
+                self.release_cuda_memory()
             if self._tts.is_loaded and self._config.auto_serial:
                 await self._set_state(ModelState.UNLOADING_TTS, "tts")
                 await self._tts.unload_model()
+                self.release_cuda_memory()
             need_reload = True
             if hasattr(self._asr, "needs_reload"):
                 need_reload = bool(
@@ -374,6 +576,7 @@ class ModelOrchestrator:
             if self._llm.is_loaded:
                 await self._set_state(ModelState.UNLOADING_LLM, "llm")
                 await self._llm.unload_model()
+            self.release_cuda_memory()
             await self._set_state(ModelState.IDLE, "llm")
 
     async def unload_tts(self) -> None:
@@ -381,6 +584,7 @@ class ModelOrchestrator:
             if self._tts.is_loaded:
                 await self._set_state(ModelState.UNLOADING_TTS, "tts")
             await self._tts.unload_model()
+            self.release_cuda_memory()
             await self._set_state(ModelState.IDLE, "tts")
 
     async def unload_music(self) -> None:
@@ -390,6 +594,7 @@ class ModelOrchestrator:
             if getattr(self._music, "is_loaded", False):
                 await self._set_state(ModelState.UNLOADING_MUSIC, "music")
             await self._music.unload_model()
+            self.release_cuda_memory()
             await self._set_state(ModelState.IDLE, "music")
 
     async def unload_asr(self) -> None:
@@ -399,7 +604,29 @@ class ModelOrchestrator:
             if getattr(self._asr, "is_loaded", False):
                 await self._set_state(ModelState.UNLOADING_ASR, "asr")
             await self._asr.unload_model()
+            self.release_cuda_memory()
             await self._set_state(ModelState.IDLE, "asr")
+
+    async def unload_all(self) -> None:
+        async with self._lock:
+            if getattr(self._llm, "is_loaded", False):
+                await self._set_state(ModelState.UNLOADING_LLM, "llm")
+                await self._llm.unload_model()
+                self.release_cuda_memory()
+            if getattr(self._tts, "is_loaded", False):
+                await self._set_state(ModelState.UNLOADING_TTS, "tts")
+                await self._tts.unload_model()
+                self.release_cuda_memory()
+            if self._music is not None and getattr(self._music, "is_loaded", False):
+                await self._set_state(ModelState.UNLOADING_MUSIC, "music")
+                await self._music.unload_model()
+                self.release_cuda_memory()
+            if self._asr is not None and getattr(self._asr, "is_loaded", False):
+                await self._set_state(ModelState.UNLOADING_ASR, "asr")
+                await self._asr.unload_model()
+                self.release_cuda_memory()
+            self.release_cuda_memory()
+            await self._set_state(ModelState.IDLE, "all")
 
     async def get_status(self) -> dict:
         self._config = self._normalize_music_config(self._config)

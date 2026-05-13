@@ -4,33 +4,64 @@ import hashlib
 import json
 
 
-def segment_cache_key(
+POSTPROCESS_CONFIG_KEYS = {
+    "postprocess_enabled",
+    "loudness_normalize",
+    "target_lufs",
+    "trim_silence_enabled",
+    "trim_threshold_db",
+    "trim_min_silence_ms",
+    "fade_in_ms",
+    "fade_out_ms",
+    "mp3_bitrate_kbps",
+    "chapter_markers",
+    "bgm_track",
+    "ambience_track",
+}
+
+
+def config_payload_for_segment_cache(config) -> dict:
+    if config is None:
+        return {}
+    try:
+        payload = config.model_dump()
+    except Exception:
+        payload = dict(config) if isinstance(config, dict) else {}
+    return {key: value for key, value in payload.items() if key not in POSTPROCESS_CONFIG_KEYS}
+
+
+def full_config_payload(config) -> dict:
+    if config is None:
+        return {}
+    try:
+        return config.model_dump()
+    except Exception:
+        return dict(config) if isinstance(config, dict) else {}
+
+
+def _preset_payload_for_backend(*, preset, tts_backend: str) -> dict:
+    if preset is None:
+        return {}
+    try:
+        backend = (tts_backend or "omnivoice").strip().lower()
+        if backend == "voxcpm2" and hasattr(preset, "resolved_voxcpm2_profile"):
+            return preset.resolved_voxcpm2_profile().model_dump(mode="json")
+        if backend == "omnivoice" and hasattr(preset, "resolved_omnivoice_profile"):
+            return preset.resolved_omnivoice_profile().model_dump(mode="json")
+        return preset.model_dump(mode="json")
+    except Exception:
+        return {"id": getattr(preset, "id", "")}
+
+
+def _segment_cache_key_from_payload(
     *,
     text: str,
-    preset,
-    config,
+    preset_payload: dict,
+    config_payload: dict,
     tts_backend: str,
     tts_model_path: str,
     tts_overrides: dict | None = None,
 ) -> str:
-    preset_payload = {}
-    if preset is not None:
-        try:
-            backend = (tts_backend or "omnivoice").strip().lower()
-            if backend == "voxcpm2" and hasattr(preset, "resolved_voxcpm2_profile"):
-                preset_payload = preset.resolved_voxcpm2_profile().model_dump(mode="json")
-            elif backend == "omnivoice" and hasattr(preset, "resolved_omnivoice_profile"):
-                preset_payload = preset.resolved_omnivoice_profile().model_dump(mode="json")
-            else:
-                preset_payload = preset.model_dump(mode="json")
-        except Exception:
-            preset_payload = {"id": getattr(preset, "id", "")}
-    config_payload = {}
-    if config is not None:
-        try:
-            config_payload = config.model_dump()
-        except Exception:
-            config_payload = {}
     blob = json.dumps(
         {
             "text": text,
@@ -44,6 +75,73 @@ def segment_cache_key(
         sort_keys=True,
     )
     return hashlib.md5(blob.encode("utf-8")).hexdigest()
+
+
+def segment_cache_key(
+    *,
+    text: str,
+    preset,
+    config,
+    tts_backend: str,
+    tts_model_path: str,
+    tts_overrides: dict | None = None,
+) -> str:
+    return _segment_cache_key_from_payload(
+        text=text,
+        preset_payload=_preset_payload_for_backend(preset=preset, tts_backend=tts_backend),
+        config_payload=config_payload_for_segment_cache(config),
+        tts_backend=tts_backend,
+        tts_model_path=tts_model_path,
+        tts_overrides=tts_overrides,
+    )
+
+
+def legacy_segment_cache_key_full_config(
+    *,
+    text: str,
+    preset,
+    config,
+    tts_backend: str,
+    tts_model_path: str,
+    tts_overrides: dict | None = None,
+) -> str:
+    return _segment_cache_key_from_payload(
+        text=text,
+        preset_payload=_preset_payload_for_backend(preset=preset, tts_backend=tts_backend),
+        config_payload=full_config_payload(config),
+        tts_backend=tts_backend,
+        tts_model_path=tts_model_path,
+        tts_overrides=tts_overrides,
+    )
+
+
+def legacy_segment_cache_key_default_postprocess_config(
+    *,
+    text: str,
+    preset,
+    config,
+    tts_backend: str,
+    tts_model_path: str,
+    tts_overrides: dict | None = None,
+) -> str:
+    payload = full_config_payload(config)
+    try:
+        default_payload = type(config)().model_dump() if config is not None else {}
+    except Exception:
+        default_payload = {}
+    for key in POSTPROCESS_CONFIG_KEYS:
+        if key in default_payload:
+            payload[key] = default_payload[key]
+        else:
+            payload.pop(key, None)
+    return _segment_cache_key_from_payload(
+        text=text,
+        preset_payload=_preset_payload_for_backend(preset=preset, tts_backend=tts_backend),
+        config_payload=payload,
+        tts_backend=tts_backend,
+        tts_model_path=tts_model_path,
+        tts_overrides=tts_overrides,
+    )
 
 
 def hash_payload(payload: dict) -> str:

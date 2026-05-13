@@ -257,4 +257,17 @@ export const useSettingsStore = create((set, get) => ({
       useUiStore.getState().pushToast({ title: formatError("卸载 Music 模型失败", message), tone: "error" });
     }
   },
+
+  manualUnloadAll: async () => {
+    try {
+      await api.post("/system/unload-all", {});
+      set({ settingsError: "" });
+      useUiStore.getState().pushToast({ title: "所有模型已卸载", tone: "success" });
+      await get().refreshSystemStatus();
+    } catch (error) {
+      const message = getErrorMessage(error, "卸载所有模型失败");
+      set({ settingsError: message });
+      useUiStore.getState().pushToast({ title: formatError("卸载所有模型失败", message), tone: "error" });
+    }
+  },
 }));

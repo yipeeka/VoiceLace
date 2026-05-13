@@ -45,14 +45,17 @@ export default function StatusBar() {
   const llmStatus = systemStatus?.llm_status ?? (systemStatus?.llm_loaded ? "ready" : "idle");
   const ttsStatus = systemStatus?.tts_status ?? (systemStatus?.tts_loaded ? "ready" : "idle");
   const gpu = systemStatus?.gpu;
+  const gpuTotal = Number(gpu?.total_vram_mb || 0);
+  const systemUsedVram = Number(gpu?.system_used_vram_mb ?? gpu?.used_vram_mb ?? 0);
+  const appUsedVram = Number(gpu?.process_used_vram_mb ?? gpu?.torch_reserved_mb ?? gpu?.used_vram_mb ?? 0);
+  const processSource = String(gpu?.process_vram_source || "torch");
+  const appLabel = processSource === "torch" ? "App(Torch)" : "App";
   const ratio = useMemo(() => {
-    const total = Number(gpu?.total_vram_mb || 0);
-    const used = Number(gpu?.used_vram_mb || 0);
-    if (total <= 0) {
+    if (gpuTotal <= 0) {
       return 0;
     }
-    return used / total;
-  }, [gpu?.total_vram_mb, gpu?.used_vram_mb]);
+    return systemUsedVram / gpuTotal;
+  }, [gpuTotal, systemUsedVram]);
   const lastWarnLevel = useRef(0);
 
   useEffect(() => {
@@ -134,7 +137,10 @@ export default function StatusBar() {
       </div>
 
       {gpu && (
-        <div className="statusBarItem">
+        <div
+          className="statusBarItem"
+          title={`本进程 ${((appUsedVram || 0) / 1024).toFixed(2)} GB（${processSource}），整卡 ${((systemUsedVram || 0) / 1024).toFixed(2)} GB / ${((gpuTotal || 0) / 1024).toFixed(1)} GB（${gpu?.system_vram_source || "torch"}）`}
+        >
           <MemoryStick size={12} style={{ color: "var(--text-muted)" }} />
           <span>VRAM</span>
           <span
@@ -144,7 +150,7 @@ export default function StatusBar() {
               fontFamily: "'JetBrains Mono', monospace",
             }}
           >
-            {(gpu.used_vram_mb / 1024).toFixed(1)}&thinsp;/&thinsp;{(gpu.total_vram_mb / 1024).toFixed(1)} GB
+            {appLabel} {(appUsedVram / 1024).toFixed(1)} GB · GPU {(systemUsedVram / 1024).toFixed(1)}&thinsp;/&thinsp;{(gpuTotal / 1024).toFixed(1)} GB
           </span>
         </div>
       )}

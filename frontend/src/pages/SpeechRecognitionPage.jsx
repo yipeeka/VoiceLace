@@ -68,6 +68,8 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const setTranslationTargetLanguage = useSpeechRecognitionStore((state) => state.setTranslationTargetLanguage);
   const asrBackend = useSpeechRecognitionStore((state) => state.asrBackend);
   const setAsrBackend = useSpeechRecognitionStore((state) => state.setAsrBackend);
+  const asrLanguage = useSpeechRecognitionStore((state) => state.asrLanguage);
+  const setAsrLanguage = useSpeechRecognitionStore((state) => state.setAsrLanguage);
   const asrEnableTimestamps = useSpeechRecognitionStore((state) => state.asrEnableTimestamps);
   const setAsrEnableTimestamps = useSpeechRecognitionStore((state) => state.setAsrEnableTimestamps);
   const translationResult = useSpeechRecognitionStore((state) => state.translationResult);
@@ -114,6 +116,8 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const [isPreviewingSubtitle, setIsPreviewingSubtitle] = useState(false);
   const [isTranslatingSubtitle, setIsTranslatingSubtitle] = useState(false);
   const [isCreatingSubtitleProject, setIsCreatingSubtitleProject] = useState(false);
+  const [editedPreviewText, setEditedPreviewText] = useState("");
+  const [editedSubtitleSrtText, setEditedSubtitleSrtText] = useState("");
   const [dubbingTask, setDubbingTask] = useState({ taskId: "", status: "", stageLabel: "", processed: 0, total: 0, percent: 0, cacheHits: 0 });
   const dubbingTaskIdRef = useRef("");
   const [subtitleTask, setSubtitleTask] = useState({ taskId: "", status: "", stageLabel: "", processed: 0, total: 0, percent: 0, cacheHits: 0 });
@@ -183,6 +187,72 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     return `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}.${pad3(mmm)}`;
   }, []);
 
+  const formatSrtTimestamp = useCallback((ms) => formatTimestamp(ms).replace(".", ","), [formatTimestamp]);
+
+  const renderCuesAsSrt = useCallback((cues) => (Array.isArray(cues) ? cues : [])
+    .map((cue, index) => {
+      const text = String(cue?.raw_text || cue?.text || "").trim();
+      const speaker = String(cue?.speaker || "").trim();
+      const body = speaker && speaker !== "narrator" && !/^\s*[^：:\n]{1,40}\s*[：:]/.test(text)
+        ? `${speaker}：${text}`
+        : text;
+      return [
+        String(index + 1),
+        `${formatSrtTimestamp(cue?.start_ms)} --> ${formatSrtTimestamp(cue?.end_ms)}`,
+        body,
+      ].join("\n");
+    })
+    .join("\n\n"), [formatSrtTimestamp]);
+
+  const parseTimestampMs = useCallback((value) => {
+    const raw = String(value || "").trim().replace(",", ".");
+    const match = raw.match(/^(\d{1,2}):(\d{2}):(\d{2})\.(\d{1,3})$/);
+    if (!match) return null;
+    const [, hh, mm, ss, ms] = match;
+    return ((Number(hh) * 60 + Number(mm)) * 60 + Number(ss)) * 1000 + Number(String(ms).padEnd(3, "0").slice(0, 3));
+  }, []);
+
+  const splitSpeakerText = useCallback((value, fallbackSpeaker = "narrator") => {
+    const raw = String(value || "").trim();
+    const match = raw.match(/^\s*([^：:\n]{1,40})\s*[：:]\s*(.+)$/s);
+    if (!match) {
+      return { speaker: fallbackSpeaker || "narrator", text: raw };
+    }
+    const speaker = String(match[1] || "").trim() || fallbackSpeaker || "narrator";
+    const text = String(match[2] || "").trim();
+    return { speaker, text };
+  }, []);
+
+  const validateEditedSubtitleSrt = useCallback((value) => {
+    const text = String(value || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+    if (!text) {
+      throw new Error("字幕预览为空，请先预览字幕或输入 SRT 内容。");
+    }
+    const blocks = text.split(/\n\s*\n+/).map((block) => block.trim()).filter(Boolean);
+    if (!blocks.length) {
+      throw new Error("未找到可用 SRT 字幕块。");
+    }
+    const timeRe = /^(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})/;
+    blocks.forEach((block, index) => {
+      const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+      const timeLineIndex = lines.findIndex((line) => timeRe.test(line));
+      if (timeLineIndex < 0) {
+        throw new Error(`第 ${index + 1} 个字幕块缺少有效时间轴。`);
+      }
+      const match = lines[timeLineIndex].match(timeRe);
+      const startMs = parseTimestampMs(match?.[1]);
+      const endMs = parseTimestampMs(match?.[2]);
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+        throw new Error(`第 ${index + 1} 个字幕块时间轴无效，需满足 start < end。`);
+      }
+      const body = lines.slice(timeLineIndex + 1).join("\n").trim();
+      if (!body) {
+        throw new Error(`第 ${index + 1} 个字幕块正文为空。`);
+      }
+    });
+    return `${text}\n`;
+  }, [parseTimestampMs]);
+
   const mappedTranscript = useMemo(() => {
     if (!speakerLabels) return transcript;
     if (!remappedAlignments.length) return transcript;
@@ -224,14 +294,27 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   }, []);
 
   const asrBackendConfigured = asrBackend === "qwen3_crispasr" ? "qwen3_crispasr" : "whisper";
-  const previewText = showTimeline && mappedTimelineText
+  const asrLanguageOptions = useMemo(() => [
+    { value: "auto", label: "自动" },
+    { value: "zh", label: "中文" },
+    { value: "en", label: "英文" },
+    { value: "ja", label: "日文" },
+    { value: "ko", label: "韩文" },
+    { value: "fr", label: "法文" },
+    { value: "de", label: "德文" },
+    { value: "es", label: "西班牙文" },
+    { value: "ru", label: "俄文" },
+  ], []);
+  const derivedPreviewText = showTimeline && mappedTimelineText
     ? mappedTimelineText
     : (speakerLabels
       ? mappedTranscript
       : (asrBackendConfigured === "whisper" ? collapseWhisperSegments(plainText) : plainText));
-  const translationPlainInputText = speakerLabels
-    ? mappedTranscript
-    : (asrBackendConfigured === "whisper" ? collapseWhisperSegments(plainText) : plainText);
+  const stripTimelineText = useCallback((text) => String(text || "")
+    .replace(/\[\d{2}:\d{2}:\d{2}[.,]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[.,]\d{3}\]\s*/g, "")
+    .trim(), []);
+  const previewText = editedPreviewText;
+  const translationPlainInputText = stripTimelineText(editedPreviewText);
   const canInsert = useMemo(() => Boolean((previewText || "").trim()), [previewText]);
   const canInsertTranslation = useMemo(() => Boolean((translationResult || "").trim()), [translationResult]);
   const isQwen3Backend = asrBackendConfigured === "qwen3_crispasr";
@@ -277,6 +360,67 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     (subtitleMode !== "translated" || Array.isArray(subtitlePreview?.translated_segments))
   );
 
+  const parseEditedPreviewDubbingSegments = useCallback(() => {
+    const usableTimeline = (remappedAlignments || [])
+      .map((item, index) => ({
+        id: String(item?.id || `asr-seg-${index + 1}`),
+        speaker: String(item?.speaker || "narrator").trim() || "narrator",
+        text: String(item?.text || "").trim(),
+        start_ms: Number.isFinite(Number(item?.start_ms)) ? Number(item.start_ms) : null,
+        end_ms: Number.isFinite(Number(item?.end_ms)) ? Number(item.end_ms) : null,
+      }))
+      .filter((item) => item.text && item.start_ms !== null && item.end_ms !== null && item.end_ms > item.start_ms);
+    if (!usableTimeline.length) {
+      throw new Error("请先完成 Whisper 识别并拿到可用时间轴片段。");
+    }
+    const lines = String(editedPreviewText || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (!lines.length) {
+      throw new Error("识别预览为空，请先编辑或完成识别。");
+    }
+    const timelineRe = /^\s*\[(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\]\s*(.+)$/s;
+    const hasTimelineLines = lines.some((line) => timelineRe.test(line));
+    if (hasTimelineLines) {
+      return lines.map((line, index) => {
+        const match = line.match(timelineRe);
+        if (!match) {
+          throw new Error(`第 ${index + 1} 行不是有效时间轴格式。`);
+        }
+        const startMs = parseTimestampMs(match[1]);
+        const endMs = parseTimestampMs(match[2]);
+        if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+          throw new Error(`第 ${index + 1} 行时间轴无效，需满足 start < end。`);
+        }
+        const base = usableTimeline[index] || {};
+        const parsed = splitSpeakerText(match[3], base.speaker || "narrator");
+        if (!parsed.text) {
+          throw new Error(`第 ${index + 1} 行文本为空。`);
+        }
+        return {
+          id: String(base.id || `asr-seg-${index + 1}`),
+          speaker: parsed.speaker,
+          text: parsed.text,
+          start_ms: startMs,
+          end_ms: endMs,
+        };
+      });
+    }
+    if (lines.length !== usableTimeline.length) {
+      throw new Error(`普通文本模式需要 ${usableTimeline.length} 行非空文本，目前为 ${lines.length} 行。请切换“显示时间轴”后按时间轴格式编辑，或保持逐段等行。`);
+    }
+    return lines.map((line, index) => {
+      const base = usableTimeline[index];
+      const parsed = splitSpeakerText(line, base.speaker);
+      if (!parsed.text) {
+        throw new Error(`第 ${index + 1} 行文本为空。`);
+      }
+      return {
+        ...base,
+        speaker: parsed.speaker,
+        text: parsed.text,
+      };
+    });
+  }, [editedPreviewText, parseTimestampMs, remappedAlignments, splitSpeakerText]);
+
   useEffect(() => {
     if (isQwen3Backend) {
       if (speakerLabels) setSpeakerLabels(false);
@@ -289,6 +433,10 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     }
   }, [isQwen3Backend, speakerLabels, showTimeline, asrBackendConfigured, asrEnableTimestamps, setAsrEnableTimestamps, setSpeakerLabels, setShowTimeline]);
 
+  useEffect(() => {
+    setEditedPreviewText(derivedPreviewText || "");
+  }, [derivedPreviewText]);
+
   async function readErrorMessage(response, fallback) {
     const raw = await response.text();
     if (!raw) return fallback;
@@ -300,7 +448,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     }
   }
 
-  async function previewSubtitleFile(nextFile = subtitleFile, nextMode = subtitleMode, nextLinePolicy = subtitleLinePolicy) {
+  async function previewSubtitleFile(nextFile = subtitleFile, nextMode = subtitleMode, nextLinePolicy = subtitleLinePolicy, useEditedText = false) {
     if (!nextFile) {
       setSubtitlePreview(null);
       return null;
@@ -310,6 +458,9 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     try {
       const formData = new FormData();
       formData.append("file", nextFile, nextFile.name || "subtitle.srt");
+      if (useEditedText && editedSubtitleSrtText.trim()) {
+        formData.append("subtitle_text", validateEditedSubtitleSrt(editedSubtitleSrtText));
+      }
       formData.append("mode", nextMode || "original");
       formData.append("line_policy", nextLinePolicy || "auto");
       const response = await fetch(`${API_BASE_URL}/subtitles/preview`, {
@@ -322,6 +473,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       }
       const payload = await response.json();
       setSubtitlePreview(payload);
+      setEditedSubtitleSrtText(renderCuesAsSrt(payload?.cues || []));
       return payload;
     } catch (err) {
       const message = err?.message || "字幕解析失败";
@@ -338,6 +490,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     setSubtitleFile(file);
     setSubtitleError("");
     setSubtitlePreview(null);
+    setEditedSubtitleSrtText("");
     if (file) {
       const stem = String(file.name || "").replace(/\.[^.]+$/, "");
       setSubtitleProjectName((current) => current || (stem ? `${stem}-字幕配音` : ""));
@@ -371,8 +524,10 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     setIsCreatingSubtitleProject(true);
     setSubtitleError("");
     try {
+      const subtitleText = validateEditedSubtitleSrt(editedSubtitleSrtText);
       const formData = new FormData();
       formData.append("file", subtitleFile, subtitleFile.name || "subtitle.srt");
+      formData.append("subtitle_text", subtitleText);
       formData.append("project_name", subtitleProjectName.trim());
       formData.append("mode", subtitleMode);
       formData.append("target_language", translationTargetLanguage);
@@ -431,8 +586,10 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     setSubtitleError("");
     setSubtitleTask({ taskId: "", status: "queued", stageLabel: "字幕翻译任务排队中", processed: 0, total: 0, percent: 0, cacheHits: 0 });
     try {
+      const subtitleText = validateEditedSubtitleSrt(editedSubtitleSrtText);
       const formData = new FormData();
       formData.append("file", subtitleFile, subtitleFile.name || "subtitle.srt");
+      formData.append("subtitle_text", subtitleText);
       formData.append("target_language", translationTargetLanguage);
       formData.append("translation_source", translationSource);
       formData.append("line_policy", subtitleLinePolicy);
@@ -701,6 +858,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       const formData = new FormData();
       formData.append("file", blob, fileName);
       formData.append("backend", asrBackendConfigured || "whisper");
+      formData.append("language", asrLanguage || "auto");
       formData.append("speaker_labels", String(!isQwen3Backend && Boolean(speakerLabels)));
       formData.append("enable_timestamps", String(Boolean(effectiveAsrEnableTimestamps)));
       const controller = new AbortController();
@@ -984,17 +1142,11 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       setTranslationError("Qwen3-ASR (CrispASR) 当前不提供可用时间轴，无法创建时间轴匹配配音项目。");
       return;
     }
-    const normalizedAlignments = (remappedAlignments || [])
-      .map((item, index) => ({
-        id: String(item?.id || `asr-seg-${index + 1}`),
-        speaker: String(item?.speaker || "narrator").trim() || "narrator",
-        text: String(item?.text || "").trim(),
-        start_ms: Number.isFinite(Number(item?.start_ms)) ? Number(item.start_ms) : null,
-        end_ms: Number.isFinite(Number(item?.end_ms)) ? Number(item.end_ms) : null,
-      }))
-      .filter((item) => item.text);
-    if (!normalizedAlignments.length) {
-      setTranslationError("请先完成 Whisper 识别并拿到时间轴片段。");
+    let normalizedAlignments = [];
+    try {
+      normalizedAlignments = parseEditedPreviewDubbingSegments();
+    } catch (err) {
+      setTranslationError(err?.message || "识别预览格式不符合翻译配音要求。");
       return;
     }
     setIsBuildingDubbingProject(true);
@@ -1181,6 +1333,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       formData.append("project_name", projectName.trim());
       formData.append("speaker_labels", String(!isQwen3Backend && Boolean(speakerLabels)));
       formData.append("backend", asrBackendConfigured || "whisper");
+      formData.append("language", asrLanguage || "auto");
       formData.append("enable_timestamps", String(Boolean(effectiveAsrEnableTimestamps)));
       formData.append("parse_mode", "verified_five_step_pipeline");
       formData.append("auto_parse", "true");
@@ -1620,7 +1773,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
 
         <div className="muted">ASR 后端：{asrBackendConfigured === "qwen3_crispasr" ? "Qwen3-ASR (CrispASR)" : "Whisper / Faster-Whisper"}</div>
 
-        <div className="editorGrid two" style={{ marginTop: 6 }}>
+        <div className="editorGrid three" style={{ marginTop: 6 }}>
           <div className="formGroup">
             <label className="formLabel">ASR 后端</label>
             <select
@@ -1631,6 +1784,19 @@ export default function SpeechRecognitionPage({ onNavigate }) {
             >
               <option value="whisper">Whisper / Faster-Whisper</option>
               <option value="qwen3_crispasr">Qwen3-ASR (CrispASR)</option>
+            </select>
+          </div>
+          <div className="formGroup">
+            <label className="formLabel">识别语言</label>
+            <select
+              className="textInput"
+              value={asrLanguage || "auto"}
+              onChange={(event) => setAsrLanguage(event.target.value)}
+              disabled={isTranscribing || isRecording || isCreatingProject}
+            >
+              {asrLanguageOptions.map((item) => (
+                <option key={item.value} value={item.value}>{item.label}</option>
+              ))}
             </select>
           </div>
           {showTimestampToggle ? (
@@ -1733,15 +1899,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           className="textArea"
           style={{ minHeight: 260 }}
           value={previewText}
-          readOnly={showTimeline || (speakerLabels && remappedAlignments.length > 0)}
-          onChange={(event) => {
-            if (speakerLabels) {
-              if (remappedAlignments.length) return;
-              setTranscript(event.target.value);
-            } else {
-              setPlainText(event.target.value);
-            }
-          }}
+          onChange={(event) => setEditedPreviewText(event.target.value)}
           placeholder="识别结果将显示在这里。"
         />
         {speakerLabels && Array.isArray(alignments) && alignments.length ? (
@@ -1899,7 +2057,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
               <div className="controlRow speechUtilityActions">
                 <Button variant="secondary" onClick={handleLoadTranslationEngine} disabled={subtitleMode !== "translated" || isLoadingTranslationEngine || isTranslatingSubtitle || isCreatingSubtitleProject}>加载翻译引擎</Button>
                 <Button variant="secondary" onClick={handleUnloadTranslationEngine} disabled={subtitleMode !== "translated" || isLoadingTranslationEngine || isTranslatingSubtitle || isCreatingSubtitleProject}>卸载翻译引擎</Button>
-                <Button variant="secondary" icon={Upload} onClick={() => previewSubtitleFile()} disabled={!subtitleFile || isPreviewingSubtitle || isTranslatingSubtitle || isCreatingSubtitleProject}>{isPreviewingSubtitle ? "解析中..." : "预览字幕"}</Button>
+                <Button variant="secondary" icon={Upload} onClick={() => previewSubtitleFile(subtitleFile, subtitleMode, subtitleLinePolicy, true)} disabled={!subtitleFile || isPreviewingSubtitle || isTranslatingSubtitle || isCreatingSubtitleProject}>{isPreviewingSubtitle ? "解析中..." : "预览字幕"}</Button>
                 <Button variant="primary" onClick={handleTranslateSubtitle} disabled={subtitleMode !== "translated" || !subtitleFile || !isTranslationEngineLoaded || isTranslatingSubtitle || isCreatingSubtitleProject}>{isTranslatingSubtitle ? "翻译中..." : "翻译字幕"}</Button>
                 <Button variant="primary" icon={FolderPlus} onClick={handleCreateSubtitleDubbingProject} disabled={!canCreateSubtitleProject} title={subtitleCreateDisabledReason}>{isCreatingSubtitleProject ? "创建中..." : "创建字幕配音项目"}</Button>
                 <Button variant="danger" onClick={handleAbortSubtitleTranslate} disabled={!isTranslatingSubtitle}>终止字幕翻译</Button>
@@ -1920,16 +2078,39 @@ export default function SpeechRecognitionPage({ onNavigate }) {
                 <div className="listStack" style={{ marginTop: 10 }}>
                   <div className="muted">格式：{String(subtitlePreview.format || "").toUpperCase()} · 分段：{subtitlePreview.segment_count || 0} · 说话人：{(subtitlePreview.speakers || []).join("、") || "narrator"}</div>
                   {(subtitlePreview.warnings || []).slice(0, 4).map((warning, index) => <div key={`subtitle-warning-${index}`} className="muted">提示：{warning}</div>)}
-                  {(subtitlePreview.cues || []).slice(0, 8).map((cue) => (
-                    <div key={cue.id} className="segmentMetaRow" style={{ alignItems: "flex-start" }}>
-                      <span className="statusBadge">{formatTimestamp(cue.start_ms)} - {formatTimestamp(cue.end_ms)}</span>
-                      <span className="muted" style={{ minWidth: 72 }}>{cue.speaker || "narrator"}</span>
-                      <span style={{ flex: 1, whiteSpace: "pre-wrap" }}>
-                        {cue.text}
-                        {cue.translated_text ? <><br /><span className="muted">译文：</span>{cue.translated_text}</> : null}
-                      </span>
+                  <textarea
+                    className="textArea"
+                    style={{ minHeight: 280 }}
+                    value={editedSubtitleSrtText}
+                    onChange={(event) => {
+                      setEditedSubtitleSrtText(event.target.value);
+                      setSubtitlePreview((current) => {
+                        if (!current?.translated_segments) return current;
+                        return {
+                          ...current,
+                          translated_segments: undefined,
+                          translated_text: "",
+                          cues: (current.cues || []).map((cue) => ({ ...cue, translated_text: "" })),
+                        };
+                      });
+                    }}
+                    placeholder="字幕全文预览将显示在这里，可直接按 SRT 格式编辑。"
+                    disabled={isPreviewingSubtitle || isTranslatingSubtitle || isCreatingSubtitleProject}
+                  />
+                  {(subtitlePreview.cues || []).some((cue) => cue?.translated_text) ? (
+                    <div className="listStack">
+                      {(subtitlePreview.cues || []).map((cue) => (
+                        <div key={cue.id} className="segmentMetaRow" style={{ alignItems: "flex-start" }}>
+                          <span className="statusBadge">{formatTimestamp(cue.start_ms)} - {formatTimestamp(cue.end_ms)}</span>
+                          <span className="muted" style={{ minWidth: 72 }}>{cue.speaker || "narrator"}</span>
+                          <span style={{ flex: 1, whiteSpace: "pre-wrap" }}>
+                            {cue.text}
+                            {cue.translated_text ? <><br /><span className="muted">译文：</span>{cue.translated_text}</> : null}
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  ) : null}
                 </div>
               ) : null}
             </TabsContent>

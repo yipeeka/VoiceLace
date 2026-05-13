@@ -22,6 +22,26 @@ def _parse_bool_form(val: str | None, default: bool = False) -> bool:
     return normalized in {"1", "true", "yes", "on"}
 
 
+async def _transcribe_with_optional_language(engine, audio_path: str, *, backend: str, language: str, speaker_labels: bool, enable_timestamps: bool):
+    try:
+        return await engine.transcribe(
+            audio_path,
+            backend=backend,
+            language=language,
+            speaker_labels=speaker_labels,
+            enable_timestamps=enable_timestamps,
+        )
+    except TypeError as exc:
+        if "language" not in str(exc) or "unexpected keyword" not in str(exc):
+            raise
+        return await engine.transcribe(
+            audio_path,
+            backend=backend,
+            speaker_labels=speaker_labels,
+            enable_timestamps=enable_timestamps,
+        )
+
+
 async def _emit_asr_event(state, task: dict, task_id: str, event: dict) -> None:
     task["events"].append(event)
     await state.realtime.publish("asr", task_id, event)
@@ -43,6 +63,7 @@ async def _run_project_from_audio_task(task_id: str, task_input: dict, state) ->
             project_name=task_input.get("project_name"),
             speaker_labels=bool(task_input.get("speaker_labels")),
             asr_backend=str(task_input.get("asr_backend") or "whisper"),
+            language=str(task_input.get("language") or "auto"),
             enable_timestamps=bool(task_input.get("enable_timestamps")),
             parse_mode=task_input.get("parse_mode") or "verified_five_step_pipeline",
             auto_parse=bool(task_input.get("auto_parse")),
@@ -68,6 +89,7 @@ async def _run_project_from_audio_task(task_id: str, task_input: dict, state) ->
 async def transcribe_file(
     file: UploadFile = File(...),
     backend: str = Form("whisper"),
+    language: str = Form("auto"),
     speaker_labels: str | None = Form(None),
     enable_timestamps: str | None = Form(None),
     state=Depends(get_app_state),
@@ -97,9 +119,11 @@ async def transcribe_file(
             tmp_path = Path(tmp_file.name)
 
         await state.orchestrator.ensure_asr_ready(backend=normalized_backend)
-        result = await state.asr_engine.transcribe(
+        result = await _transcribe_with_optional_language(
+            state.asr_engine,
             str(tmp_path),
             backend=normalized_backend,
+            language=language,
             speaker_labels=effective_speaker_labels,
             enable_timestamps=effective_timestamps,
         )
@@ -122,6 +146,7 @@ async def project_from_audio(
     project_name: str | None = Form(None),
     speaker_labels: str | None = Form(None),
     backend: str | None = Form(None),
+    language: str = Form("auto"),
     enable_timestamps: str | None = Form(None),
     parse_mode: str = Form("verified_five_step_pipeline"),
     auto_parse: str | None = Form(None),
@@ -154,6 +179,7 @@ async def project_from_audio(
             raise ValueError(f"Unsupported ASR backend: {backend}")
         task_input = {
             "asr_backend": chosen_backend,
+            "language": language,
             "enable_timestamps": _parse_bool_form(enable_timestamps, default=False),
             "tmp_path": str(tmp_path),
             "audio_name": file.filename,

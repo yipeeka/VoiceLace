@@ -15,6 +15,7 @@ export const useSpeechRecognitionStore = create((set) => ({
   translationMode: "polish_only",
   translationTargetLanguage: "中文",
   asrBackend: "whisper",
+  asrLanguage: "auto",
   asrEnableTimestamps: false,
   translationResult: "",
   translationError: "",
@@ -49,6 +50,10 @@ export const useSpeechRecognitionStore = create((set) => ({
     const val = String(asrBackend ?? "whisper").trim().toLowerCase();
     set({ asrBackend: val === "qwen3_crispasr" ? "qwen3_crispasr" : "whisper" });
   },
+  setAsrLanguage: (asrLanguage) => {
+    const val = String(asrLanguage ?? "auto").trim().toLowerCase();
+    set({ asrLanguage: val || "auto" });
+  },
   setAsrEnableTimestamps: (asrEnableTimestamps) => set({ asrEnableTimestamps: Boolean(asrEnableTimestamps) }),
   setTranslationResult: (translationResult) => set({ translationResult: String(translationResult ?? "") }),
   setTranslationError: (translationError) => set({ translationError: String(translationError ?? "") }),
@@ -81,5 +86,6 @@ export const useSpeechRecognitionStore = create((set) => ({
       translationResult: "",
       translationError: "",
       asrEnableTimestamps: false,
+      asrLanguage: "auto",
     }),
 }));

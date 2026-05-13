@@ -12,6 +12,7 @@ from backend.services.tts_stale_service import (
     resolve_segment_asset_path,
     resolve_segment_peaks_path,
 )
+from backend.services.tts_task_service import legacy_segment_cache_key_full_config, segment_cache_key
 
 
 def _hash_payload(payload: dict) -> str:
@@ -110,6 +111,135 @@ class TtsStaleServiceTest(unittest.TestCase):
             self.assertEqual(by_id["seg-a"]["status"], "ready")
             self.assertEqual(by_id["seg-a"]["reasons"], [])
             self.assertEqual(by_id["seg-b"]["status"], "missing")
+
+    def test_postprocess_config_changes_do_not_mark_segments_stale(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir)
+            project = Project(name="postprocess-not-stale")
+            project.script.segments = [
+                Segment(id="seg-a", index=0, type="narration", speaker="narrator", text="片段文本"),
+            ]
+            audio_rel = f"projects/{project.id}/segments/seg-a.wav"
+            audio_path = output_dir / audio_rel
+            audio_path.parent.mkdir(parents=True, exist_ok=True)
+            audio_path.write_bytes(b"RIFF-a")
+            source_config_hash = _hash_payload({
+                key: value
+                for key, value in project.synthesis_config.model_dump().items()
+                if key
+                not in {
+                    "postprocess_enabled",
+                    "loudness_normalize",
+                    "target_lufs",
+                    "trim_silence_enabled",
+                    "trim_threshold_db",
+                    "trim_min_silence_ms",
+                    "fade_in_ms",
+                    "fade_out_ms",
+                    "mp3_bitrate_kbps",
+                    "chapter_markers",
+                    "bgm_track",
+                    "ambience_track",
+                }
+            })
+            expected_fp = segment_cache_key(
+                text="片段文本",
+                preset=None,
+                config=project.synthesis_config,
+                tts_backend="mock",
+                tts_model_path="",
+                tts_overrides={},
+            )
+            project.audio_assets.segments["seg-a"] = SegmentAsset(
+                segment_id="seg-a",
+                audio_relpath=audio_rel,
+                source_text="片段文本",
+                source_speaker="narrator",
+                source_type="narration",
+                source_emotion="neutral",
+                source_tts_overrides={},
+                source_config_hash=source_config_hash,
+                source_tts_backend="mock",
+                source_tts_model_path="",
+                fingerprint=expected_fp,
+            )
+
+            project.synthesis_config.postprocess_enabled = True
+            project.synthesis_config.fade_in_ms = 800
+            project.synthesis_config.fade_out_ms = 1200
+            project.synthesis_config.target_lufs = -14.0
+            project.synthesis_config.bgm_track.relpath = "projects/demo/postprocess_assets/bgm.wav"
+            project.synthesis_config.bgm_track.gain_db = -8.0
+
+            report = build_stale_report(
+                output_dir=output_dir,
+                project=project,
+                presets=[],
+                config=project.synthesis_config,
+                tts_backend="mock",
+                tts_model_path="",
+                normalize_segment_tts_overrides=lambda segment, strict=False: segment.tts_overrides or {},
+                segment_cache_key=segment_cache_key,
+                hash_payload=_hash_payload,
+                debug_stale_report=False,
+                logger=None,
+            )
+
+            self.assertEqual(report["stale_count"], 0)
+            self.assertIn("seg-a", report["ready_segment_ids"])
+
+    def test_legacy_full_config_fingerprint_remains_ready_after_postprocess_change(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir)
+            project = Project(name="legacy-postprocess-not-stale")
+            project.script.segments = [
+                Segment(id="seg-a", index=0, type="narration", speaker="narrator", text="旧指纹片段"),
+            ]
+            audio_rel = f"projects/{project.id}/segments/seg-a.wav"
+            audio_path = output_dir / audio_rel
+            audio_path.parent.mkdir(parents=True, exist_ok=True)
+            audio_path.write_bytes(b"RIFF-a")
+            legacy_fp = legacy_segment_cache_key_full_config(
+                text="旧指纹片段",
+                preset=None,
+                config=project.synthesis_config,
+                tts_backend="mock",
+                tts_model_path="",
+                tts_overrides={},
+            )
+            project.audio_assets.segments["seg-a"] = SegmentAsset(
+                segment_id="seg-a",
+                audio_relpath=audio_rel,
+                source_text="旧指纹片段",
+                source_speaker="narrator",
+                source_type="narration",
+                source_emotion="neutral",
+                source_tts_overrides={},
+                source_config_hash=_hash_payload(project.synthesis_config.model_dump()),
+                source_tts_backend="mock",
+                source_tts_model_path="",
+                fingerprint=legacy_fp,
+            )
+
+            project.synthesis_config.postprocess_enabled = True
+            project.synthesis_config.ambience_track.relpath = "projects/demo/postprocess_assets/amb.wav"
+
+            report = build_stale_report(
+                output_dir=output_dir,
+                project=project,
+                presets=[],
+                config=project.synthesis_config,
+                tts_backend="mock",
+                tts_model_path="",
+                normalize_segment_tts_overrides=lambda segment, strict=False: segment.tts_overrides or {},
+                segment_cache_key=segment_cache_key,
+                hash_payload=_hash_payload,
+                debug_stale_report=False,
+                logger=None,
+            )
+
+            self.assertEqual(report["stale_count"], 0)
+            self.assertIn("seg-a", report["ready_segment_ids"])
 
 
 if __name__ == "__main__":

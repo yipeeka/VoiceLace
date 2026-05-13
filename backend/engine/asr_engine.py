@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 from pathlib import Path
 import re
 import subprocess
@@ -76,6 +77,15 @@ class ASREngine:
         self._diarization_pipeline = None
         self._pyannote_loaded = False
         self._pyannote_error = ""
+        gc.collect()
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+        except Exception:
+            pass
 
     def get_pyannote_status(self) -> dict[str, Any]:
         return {
@@ -90,6 +100,7 @@ class ASREngine:
         audio_path: str,
         *,
         backend: str = "whisper",
+        language: str | None = None,
         speaker_labels: bool = False,
         enable_timestamps: bool | None = None,
     ) -> dict[str, Any]:
@@ -99,15 +110,21 @@ class ASREngine:
 
         requested_backend = backend if str(backend or "").strip() else self.default_backend
         target_backend = self._normalize_backend(requested_backend)
+        requested_language = str(language or "auto").strip().lower() or "auto"
         if target_backend == "whisper":
-            raw_text, segments, backend_used = await self._transcribe_whisper_segments(target)
+            try:
+                raw_text, segments, backend_used = await self._transcribe_whisper_segments(target, language=requested_language)
+            except TypeError as exc:
+                if "language" not in str(exc) or "unexpected keyword" not in str(exc):
+                    raise
+                raw_text, segments, backend_used = await self._transcribe_whisper_segments(target)
         elif target_backend == "qwen3_crispasr":
             # Qwen3-ASR (CrispASR) is treated as text-only in this project for stability.
             # We explicitly disable speaker labeling and timeline behavior on this backend.
             speaker_labels = False
             enable_timestamps = False
             raw_text, segments, backend_used = await self._transcribe_crispasr_segments(
-                target, enable_timestamps_override=enable_timestamps
+                target, enable_timestamps_override=enable_timestamps, language_override=requested_language
             )
         else:
             raise ValueError(f"Unsupported ASR backend: {backend}")
@@ -239,17 +256,18 @@ class ASREngine:
         self.last_error = " | ".join(errors) if errors else "ASR backend unavailable"
         raise RuntimeError(self.last_error)
 
-    async def _transcribe_whisper_segments(self, target: Path) -> tuple[str, list[dict[str, Any]], str]:
+    async def _transcribe_whisper_segments(self, target: Path, *, language: str = "auto") -> tuple[str, list[dict[str, Any]], str]:
         if not self.is_loaded or self._model is None:
             await self.load_model(self.model_path, self.device, backend="whisper")
 
         segments: list[dict[str, Any]] = []
+        language_arg = None if str(language or "auto").strip().lower() in {"", "auto", "unknown"} else str(language).strip().lower()
         if self._backend == "openai-whisper":
             whisper_device, _, _ = self._parse_device(self.device)
-            result = self._model.transcribe(
-                str(target),
-                fp16=whisper_device.startswith("cuda"),
-            )
+            kwargs = {"fp16": whisper_device.startswith("cuda")}
+            if language_arg:
+                kwargs["language"] = language_arg
+            result = self._model.transcribe(str(target), **kwargs)
             raw_text = str(result.get("text", "")).strip()
             for seg in result.get("segments", []) or []:
                 text = str(seg.get("text", "")).strip()
@@ -263,7 +281,10 @@ class ASREngine:
                     }
                 )
         elif self._backend == "faster-whisper":
-            fw_segments, _ = self._model.transcribe(str(target), beam_size=5, vad_filter=True)
+            kwargs = {"beam_size": 5, "vad_filter": True}
+            if language_arg:
+                kwargs["language"] = language_arg
+            fw_segments, _ = self._model.transcribe(str(target), **kwargs)
             raw_parts: list[str] = []
             for seg in fw_segments:
                 text = str(getattr(seg, "text", "")).strip()
@@ -419,6 +440,7 @@ class ASREngine:
         target: Path,
         *,
         enable_timestamps_override: bool | None = None,
+        language_override: str | None = None,
     ) -> tuple[str, list[dict[str, Any]], str]:
         if not self.is_loaded or self._backend != "qwen3_crispasr":
             await self.load_model(self.model_path, self.device, backend="qwen3_crispasr")
@@ -426,7 +448,7 @@ class ASREngine:
 
         exe = str(Path(self.crispasr_exe).expanduser())
         model = str(Path(self.qwen3_model_path).expanduser())
-        language = str(self.qwen3_language or "auto").strip() or "auto"
+        language = str(language_override or self.qwen3_language or "auto").strip() or "auto"
         threads = int(self.qwen3_threads or 0)
         if enable_timestamps_override is None:
             use_timestamps = bool(self.qwen3_enable_timestamps)

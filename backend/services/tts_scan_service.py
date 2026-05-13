@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
+from .tts_task_service import config_payload_for_segment_cache
+
 
 def _preset_payload_for_backend(*, preset, tts_backend: str) -> dict:
     if preset is None:
@@ -45,10 +47,7 @@ def build_synthesis_scan_plan(
 
     config_payload = {}
     if config is not None:
-        try:
-            config_payload = config.model_dump()
-        except Exception:
-            config_payload = {}
+        config_payload = config_payload_for_segment_cache(config)
     config_hash = hash_payload(config_payload)
 
     for segment in run_segments:

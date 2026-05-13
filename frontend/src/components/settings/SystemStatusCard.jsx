@@ -310,15 +310,27 @@ export default function SystemStatusCard({
               <strong>{gpu.name ?? "Unknown"}</strong>
             </div>
             <div className="statRow">
-              <span>VRAM 已用</span>
+              <span>本进程 VRAM（{gpu.process_vram_source || "torch"}）</span>
               <strong style={{ fontFamily: "monospace" }}>
-                {(gpu.used_vram_mb / 1024).toFixed(1)} GB / {(gpu.total_vram_mb / 1024).toFixed(1)} GB
+                {((Number(gpu.process_used_vram_mb ?? gpu.torch_reserved_mb ?? 0)) / 1024).toFixed(2)} GB
               </strong>
             </div>
             <div className="statRow">
-              <span>VRAM 空闲</span>
+              <span>整卡 VRAM 已用（{gpu.system_vram_source || "torch"}）</span>
+              <strong style={{ fontFamily: "monospace" }}>
+                {((Number(gpu.system_used_vram_mb ?? gpu.used_vram_mb ?? 0)) / 1024).toFixed(1)} GB / {(gpu.total_vram_mb / 1024).toFixed(1)} GB
+              </strong>
+            </div>
+            <div className="statRow">
+              <span>整卡 VRAM 空闲</span>
               <strong style={{ fontFamily: "monospace", color: "var(--success)" }}>
-                {(gpu.free_vram_mb / 1024).toFixed(1)} GB
+                {((Number(gpu.system_free_vram_mb ?? gpu.free_vram_mb ?? 0)) / 1024).toFixed(1)} GB
+              </strong>
+            </div>
+            <div className="statRow">
+              <span>Torch allocated / reserved</span>
+              <strong style={{ fontFamily: "monospace" }}>
+                {Number(gpu.torch_allocated_mb ?? 0)} / {Number(gpu.torch_reserved_mb ?? 0)} MB
               </strong>
             </div>
           </>

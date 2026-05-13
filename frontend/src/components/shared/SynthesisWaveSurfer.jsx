@@ -53,6 +53,7 @@ export default function SynthesisWaveSurfer({
   audioVariant = "raw",
   segments = [],
   gapDurationMs = 300,
+  useSourceTimeline = false,
   height = 100,
   onCurrentTimeChange = null,
 }) {
@@ -130,24 +131,32 @@ export default function SynthesisWaveSurfer({
 
     return segments.map((seg, idx) => {
       const dur = (seg.duration_ms || 2000) / 1000;
+      let start = cursor;
+      if (useSourceTimeline) {
+        const sourceStartMs = Number(seg.source_start_ms);
+        if (Number.isFinite(sourceStartMs) && sourceStartMs >= 0) {
+          start = sourceStartMs / 1000;
+        }
+      }
+      const end = start + dur;
       if (!speakerColors[seg.speaker]) {
         speakerColors[seg.speaker] = colors[colorIndex % colors.length];
         colorIndex += 1;
       }
       const config = {
         id: seg.segment_id || `region-${idx}`,
-        start: cursor,
-        end: cursor + dur,
+        start,
+        end,
         content: document.createTextNode(`${seg.speaker}`),
         color: speakerColors[seg.speaker] || defaultColor,
         drag: false,
         resize: false,
         text: seg.text,
       };
-      cursor += dur + gapDurationMs / 1000;
+      cursor = useSourceTimeline ? Math.max(cursor, end) : end + gapDurationMs / 1000;
       return config;
     });
-  }, [segments, gapDurationMs]);
+  }, [segments, gapDurationMs, useSourceTimeline]);
 
   const precomputedChannelData = useMemo(
     () => buildChannelDataFromMinMax(waveformPayload.data),

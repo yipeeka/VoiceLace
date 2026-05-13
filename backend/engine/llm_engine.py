@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import inspect
 import logging
 import re
@@ -352,6 +353,15 @@ class LLMEngine:
         self.think_mode_support = "unknown"
         self.last_load_mode = ""
         self.handler_fallback_reason = ""
+        gc.collect()
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+        except Exception:
+            pass
 
     async def parse_text(self, text: str, prompt: str | None = None) -> Script:
         return await self.parse_text_stream(text, prompt, on_chunk=None, llm_options=None)

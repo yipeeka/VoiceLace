@@ -41,6 +41,27 @@ class SubtitleRoutesTest(unittest.TestCase):
         self.assertEqual(body["segment_count"], 1)
         self.assertEqual(body["cues"][0]["speaker"], "Narrator")
 
+    def test_preview_accepts_subtitle_text_without_file(self) -> None:
+        response = self.client.post(
+            "/api/v1/subtitles/preview",
+            data={
+                "mode": "original",
+                "line_policy": "auto",
+                "subtitle_text": "1\n00:00:00,000 --> 00:00:01,000\nEdited: hello\n",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["format"], "srt")
+        self.assertEqual(body["cues"][0]["speaker"], "Edited")
+
+    def test_preview_rejects_missing_file_and_text(self) -> None:
+        response = self.client.post(
+            "/api/v1/subtitles/preview",
+            data={"mode": "original", "line_policy": "auto"},
+        )
+        self.assertEqual(response.status_code, 400)
+
     def test_create_original_subtitle_dubbing_project_endpoint(self) -> None:
         project_id = ""
         content = b"1\n00:00:00,000 --> 00:00:01,200\nhello\n"
@@ -63,6 +84,30 @@ class SubtitleRoutesTest(unittest.TestCase):
             self.assertTrue(project["synthesis_config"]["timeline_lock_enabled"])
             self.assertTrue(project["script"]["metadata"]["subtitle_source"])
             self.assertEqual(project["script"]["segments"][0]["source_end_ms"], 1200)
+        finally:
+            if project_id:
+                self.client.delete(f"/api/v1/projects/{project_id}")
+
+    def test_create_original_project_uses_subtitle_text(self) -> None:
+        project_id = ""
+        try:
+            response = self.client.post(
+                "/api/v1/subtitles/create-dubbing-project",
+                data={
+                    "project_name": "subtitle-text-api",
+                    "mode": "original",
+                    "target_language": "中文",
+                    "translation_source": "secondary_local",
+                    "line_policy": "auto",
+                    "subtitle_text": "1\n00:00:00,000 --> 00:00:01,200\nedited line\n",
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+            body = response.json()
+            project_id = body["project_id"]
+            segment = body["project"]["script"]["segments"][0]
+            self.assertEqual(segment["text"], "edited line")
+            self.assertEqual(segment["source_text"], "edited line")
         finally:
             if project_id:
                 self.client.delete(f"/api/v1/projects/{project_id}")
@@ -128,8 +173,8 @@ class SubtitleRoutesTest(unittest.TestCase):
                     "translation_source": "secondary_local",
                     "line_policy": "auto",
                     "max_concurrency": "1",
+                    "subtitle_text": content.decode("utf-8"),
                 },
-                files={"file": ("demo.srt", content, "text/plain")},
             )
             self.assertEqual(response.status_code, 200)
             task_id = response.json()["task_id"]

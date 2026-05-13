@@ -234,6 +234,16 @@ pre, code {
   color: var(--accent-secondary);
 }
 
+.navItemDangerAction {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.navItemDangerAction:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 24%, transparent);
+  color: var(--danger);
+}
+
 .sidebar.collapsed .navItemSubAction {
   margin-left: 0;
   justify-content: center;

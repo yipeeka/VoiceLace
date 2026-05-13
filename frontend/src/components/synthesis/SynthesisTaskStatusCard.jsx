@@ -101,7 +101,9 @@ export default function SynthesisTaskStatusCard({
         </div>
         <div className="statRow taskStatusCell">
           <span>显存</span>
-          <strong>{gpu.used_vram_mb ?? 0} / {gpu.total_vram_mb ?? 0} MB</strong>
+          <strong>
+            App {gpu.process_used_vram_mb ?? gpu.torch_reserved_mb ?? 0} MB / GPU {gpu.system_used_vram_mb ?? gpu.used_vram_mb ?? 0} MB
+          </strong>
         </div>
         <div className="statRow taskStatusCell taskStatusCellWide">
           <span>Task ID</span>

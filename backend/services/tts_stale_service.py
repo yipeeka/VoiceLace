@@ -3,6 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
+from .tts_task_service import (
+    config_payload_for_segment_cache,
+    legacy_segment_cache_key_default_postprocess_config,
+    legacy_segment_cache_key_full_config,
+)
+
 
 def _preset_payload_for_backend(*, preset, tts_backend: str) -> dict:
     if preset is None:
@@ -78,10 +84,7 @@ def build_stale_report(
 
     config_payload = {}
     if config is not None:
-        try:
-            config_payload = config.model_dump()
-        except Exception:
-            config_payload = {}
+        config_payload = config_payload_for_segment_cache(config)
     current_config_hash = hash_payload(config_payload)
 
     for segment in project.script.segments:
@@ -91,6 +94,22 @@ def build_stale_report(
         preset_payload = _preset_payload_for_backend(preset=preset, tts_backend=tts_backend)
         current_preset_hash = hash_payload(preset_payload)
         expected_fingerprint = segment_cache_key(
+            text=segment.text,
+            preset=preset,
+            config=config,
+            tts_backend=tts_backend,
+            tts_model_path=tts_model_path,
+            tts_overrides=normalized_overrides,
+        )
+        legacy_expected_fingerprint = legacy_segment_cache_key_full_config(
+            text=segment.text,
+            preset=preset,
+            config=config,
+            tts_backend=tts_backend,
+            tts_model_path=tts_model_path,
+            tts_overrides=normalized_overrides,
+        )
+        legacy_default_postprocess_fingerprint = legacy_segment_cache_key_default_postprocess_config(
             text=segment.text,
             preset=preset,
             config=config,
@@ -154,7 +173,12 @@ def build_stale_report(
                         reasons.append("fingerprint_mismatch")
 
                     raw_reasons = list(reasons)
-                    if current_fingerprint and current_fingerprint == expected_fingerprint:
+                    fingerprint_matches = bool(
+                        current_fingerprint
+                        and current_fingerprint
+                        in {expected_fingerprint, legacy_expected_fingerprint, legacy_default_postprocess_fingerprint}
+                    )
+                    if fingerprint_matches:
                         reasons = [reason for reason in reasons if reason not in fingerprint_covered_reasons]
                         if raw_reasons and not reasons and debug_stale_report and logger:
                             logger.info(
@@ -217,6 +241,8 @@ def build_stale_report(
                 "reasons": reasons,
                 "expected_fingerprint": expected_fingerprint,
                 "current_fingerprint": current_fingerprint,
+                "legacy_expected_fingerprint": legacy_expected_fingerprint,
+                "legacy_default_postprocess_fingerprint": legacy_default_postprocess_fingerprint,
                 "has_audio_file": bool(asset and audio_path and audio_path.exists()),
             }
         )
