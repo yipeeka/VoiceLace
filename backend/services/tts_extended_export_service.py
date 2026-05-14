@@ -6,6 +6,8 @@ from io import StringIO
 from pathlib import Path
 from typing import Any
 
+from .tts_finalize_service import should_use_source_timeline
+
 
 def _normalized_variant(variant: str | None) -> str:
     value = (variant or "raw").strip().lower()
@@ -145,10 +147,7 @@ def _build_timeline_rows(project) -> list[dict[str, Any]]:
     }
     chapter_lookup = _build_chapter_lookup(project)
     gap_ms = max(0, int(getattr(project.synthesis_config, "gap_duration_ms", 300) or 300))
-    use_source_timeline = bool(
-        bool(getattr(project.synthesis_config, "timeline_lock_enabled", False))
-        or bool((getattr(project.script, "metadata", {}) or {}).get("dubbing_source"))
-    )
+    use_source_timeline = should_use_source_timeline(config=project.synthesis_config, project=project)
     cursor = 0
     rows: list[dict[str, Any]] = []
     for idx, segment in enumerate(ordered_segments):

@@ -5,6 +5,7 @@ import { Combine, FileDown, GripVertical, Pencil, Plus, Redo2, Save, Scissors, S
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import CharacterBadge, { getCharColor } from "../components/shared/CharacterBadge";
+import AudioPlayer from "../components/shared/AudioPlayer";
 import EmptyState from "../components/shared/EmptyState";
 import GlassCard from "../components/shared/GlassCard";
 import ScriptBatchToolsDrawer from "../components/script/ScriptBatchToolsDrawer";
@@ -390,6 +391,7 @@ export default function ScriptEditorPage() {
   const fileInputRef = useRef(null);
   const lastProjectIdRef = useRef(null);
   const segmentListRef = useRef(null);
+  const qcJumpCursorRef = useRef(-1);
 
   const [savedScript, setSavedScript] = useState(() => normalizeDraftScript(script));
   const [draftScript, setDraftScript] = useState(() => normalizeDraftScript(script));
@@ -407,6 +409,8 @@ export default function ScriptEditorPage() {
   const [batchToolsOpen, setBatchToolsOpen] = useState(false);
   const [sourceAudioCurrentTime, setSourceAudioCurrentTime] = useState(0);
   const [sourceAudioPlaying, setSourceAudioPlaying] = useState(false);
+  const [sourceAudioPlaySignal, setSourceAudioPlaySignal] = useState(0);
+  const [sourceAudioPauseSignal, setSourceAudioPauseSignal] = useState(0);
   const setProjectSaveAction = useUiStore((state) => state.setProjectSaveAction);
   const clearProjectSaveAction = useUiStore((state) => state.clearProjectSaveAction);
 
@@ -584,6 +588,12 @@ export default function ScriptEditorPage() {
     () => visibleSegments.filter((segment) => effectiveQcHighlightBySegmentId[segment.id]).length,
     [visibleSegments, effectiveQcHighlightBySegmentId]
   );
+  const visibleQcHighlightedIds = useMemo(
+    () => visibleSegments
+      .filter((segment) => effectiveQcHighlightBySegmentId[segment.id])
+      .map((segment) => segment.id),
+    [visibleSegments, effectiveQcHighlightBySegmentId]
+  );
   const timelineSegmentCount = useMemo(
     () => (draftScript?.segments || []).filter((segment) => {
       const startMs = Number(segment?.source_start_ms);
@@ -612,6 +622,10 @@ export default function ScriptEditorPage() {
   }, [focusSegmentId, visibleSegments.length]);
 
   useEffect(() => {
+    qcJumpCursorRef.current = -1;
+  }, [currentProject?.id, activeSpeakerFilter, visibleQcHighlightedIds.length]);
+
+  useEffect(() => {
     setSourceAudioCurrentTime(0);
     setSourceAudioPlaying(false);
   }, [sourceAudioUrl]);
@@ -632,6 +646,29 @@ export default function ScriptEditorPage() {
       behavior: "smooth",
     });
   }, [sourceActiveSegmentId, sourceAudioPlaying]);
+
+  useEffect(() => {
+    if (!sourceAudioUrl) {
+      return;
+    }
+    function isEditableTarget(target) {
+      const tagName = String(target?.tagName || "").toLowerCase();
+      return tagName === "input" || tagName === "textarea" || tagName === "select" || Boolean(target?.isContentEditable);
+    }
+    function onKeyDown(event) {
+      if (event.code !== "Space" || isEditableTarget(event.target)) {
+        return;
+      }
+      event.preventDefault();
+      if (sourceAudioPlaying) {
+        setSourceAudioPauseSignal((value) => value + 1);
+      } else {
+        setSourceAudioPlaySignal((value) => value + 1);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [sourceAudioPlaying, sourceAudioUrl]);
 
   useEffect(() => {
     if (activeSpeakerFilter === "all") {
@@ -1073,6 +1110,21 @@ export default function ScriptEditorPage() {
     await refreshCurrentProject(currentProject.id);
   }
 
+  function handleJumpToNextQcHighlight() {
+    if (!visibleQcHighlightedIds.length) {
+      return;
+    }
+    qcJumpCursorRef.current = (qcJumpCursorRef.current + 1) % visibleQcHighlightedIds.length;
+    const nextId = visibleQcHighlightedIds[qcJumpCursorRef.current];
+    setFocusSegmentId(nextId);
+    requestAnimationFrame(() => {
+      const node = segmentListRef.current?.querySelector(`[data-segment-id="${escapeSelectorValue(nextId)}"]`);
+      if (node) {
+        node.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    });
+  }
+
   return (
     <div className="pageGrid sidebarLayout">
       {/* Left: character panel */}
@@ -1141,7 +1193,14 @@ export default function ScriptEditorPage() {
             </p>
           </div>
           {visibleQcHighlightCount ? (
-            <span className="statusBadge warning">质检高亮 {visibleQcHighlightCount} 段</span>
+            <button
+              type="button"
+              className="statusBadge warning clickableBadge"
+              onClick={handleJumpToNextQcHighlight}
+              title="点击跳到下一条质检高亮片段"
+            >
+              质检高亮 {visibleQcHighlightCount} 段
+            </button>
           ) : null}
         </div>
 
@@ -1154,18 +1213,14 @@ export default function ScriptEditorPage() {
                 {sourceAudioEndMs > sourceAudioStartMs ? ` -> ${formatTimelineMs(sourceAudioEndMs)}` : ""}
               </span>
             </div>
-            <audio
-              key={sourceAudioUrl}
-              controls
-              preload="metadata"
-              src={sourceAudioUrl}
-              onTimeUpdate={(event) => setSourceAudioCurrentTime(event.currentTarget.currentTime)}
-              onPlay={(event) => {
-                setSourceAudioCurrentTime(event.currentTarget.currentTime);
-                setSourceAudioPlaying(true);
-              }}
-              onPause={() => setSourceAudioPlaying(false)}
-              onEnded={() => setSourceAudioPlaying(false)}
+            <AudioPlayer
+              audioUrl={sourceAudioUrl}
+              height={48}
+              compact
+              autoPlaySignal={sourceAudioPlaySignal}
+              pauseSignal={sourceAudioPauseSignal}
+              onTimeUpdate={setSourceAudioCurrentTime}
+              onPlayStateChange={setSourceAudioPlaying}
             />
           </div>
         ) : null}

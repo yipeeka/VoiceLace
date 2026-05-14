@@ -151,8 +151,14 @@ export default function SynthesisPage() {
     [currentProject?.script?.metadata?.dubbing_source],
   );
   const useSourceTimeline = useMemo(
-    () => Boolean(config?.timeline_lock_enabled || currentProject?.script?.metadata?.dubbing_source),
-    [config?.timeline_lock_enabled, currentProject?.script?.metadata?.dubbing_source],
+    () => {
+      const backend = String(config?.tts_backend || "omnivoice").trim().toLowerCase();
+      if (backend === "voxcpm2") {
+        return false;
+      }
+      return Boolean(config?.timeline_lock_enabled || currentProject?.script?.metadata?.dubbing_source);
+    },
+    [config?.tts_backend, config?.timeline_lock_enabled, currentProject?.script?.metadata?.dubbing_source],
   );
 
   useEffect(() => {

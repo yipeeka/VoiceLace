@@ -63,6 +63,8 @@ const TURBO_SHIFT_OPTIONS = [
 ];
 const BASE_MIN_INFERENCE_STEPS = 32;
 const BASE_MAX_INFERENCE_STEPS = 100;
+const TURBO_DEFAULT_INFERENCE_STEPS = 8;
+const BASE_DEFAULT_INFERENCE_STEPS = 50;
 const MUSIC_CATEGORY_ALL = "all";
 const MUSIC_CATEGORY_UNCATEGORIZED = "uncategorized";
 
@@ -156,6 +158,46 @@ function toNumberOrNull(value) {
   }
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
+}
+
+function getDefaultInferenceSteps(modelVariant) {
+  return String(modelVariant || "turbo").toLowerCase() === "base"
+    ? BASE_DEFAULT_INFERENCE_STEPS
+    : TURBO_DEFAULT_INFERENCE_STEPS;
+}
+
+function normalizeSelectOptionValue(value, options, fallback = "") {
+  const raw = String(value ?? "").trim();
+  if (!raw) return fallback;
+  const exact = options.find((item) => item.value === raw);
+  if (exact) return exact.value;
+  const normalized = raw.toLowerCase();
+  const matched = options.find((item) => String(item.value || "").toLowerCase() === normalized);
+  return matched ? matched.value : fallback;
+}
+
+function normalizeNearestNumericOptionValue(value, options, fallback = "") {
+  if (value === "" || value === null || value === undefined) {
+    return fallback;
+  }
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+  const candidates = options
+    .map((item) => Number(item.value))
+    .filter((item) => Number.isFinite(item));
+  if (candidates.length === 0) {
+    return fallback;
+  }
+  const nearest = candidates.reduce((best, item) => {
+    const bestDelta = Math.abs(best - numeric);
+    const itemDelta = Math.abs(item - numeric);
+    if (itemDelta < bestDelta) return item;
+    if (itemDelta === bestDelta && item < best) return item;
+    return best;
+  }, candidates[0]);
+  return String(nearest);
 }
 
 function formatFileSize(size) {
@@ -405,7 +447,7 @@ export default function MusicPage({ onNavigate }) {
     setIsValidating(true);
     try {
       await api.post("/music/model/select", { model_variant: nextVariant });
-      setForm((prev) => ({ ...prev, num_inference_steps: nextVariant === "base" ? 50 : 8 }));
+      setForm((prev) => ({ ...prev, num_inference_steps: getDefaultInferenceSteps(nextVariant) }));
       const report = await api.get("/music/model/validate");
       setValidation(report || null);
       await refreshSystemStatus();
@@ -624,7 +666,7 @@ export default function MusicPage({ onNavigate }) {
     if (current >= BASE_MIN_INFERENCE_STEPS && current <= BASE_MAX_INFERENCE_STEPS) {
       return;
     }
-    setForm((prev) => ({ ...prev, num_inference_steps: 50 }));
+    setForm((prev) => ({ ...prev, num_inference_steps: getDefaultInferenceSteps("base") }));
   }, [selectedModelVariant, form.num_inference_steps]);
 
   useEffect(() => {
@@ -869,10 +911,10 @@ export default function MusicPage({ onNavigate }) {
         prompt: String(result?.prompt || prev.prompt || ""),
         lyrics: String(result?.lyrics || ""),
         audio_duration: Number(result?.audio_duration || prev.audio_duration || 30),
-        vocal_language: String(result?.vocal_language || prev.vocal_language || "unknown"),
-        bpm: result?.bpm === null || result?.bpm === undefined ? "" : String(result.bpm),
-        keyscale: result?.keyscale || "",
-        timesignature: result?.timesignature || "",
+        vocal_language: normalizeSelectOptionValue(result?.vocal_language, LANGUAGE_OPTIONS, prev.vocal_language || "unknown"),
+        bpm: normalizeNearestNumericOptionValue(result?.bpm, BPM_OPTIONS, ""),
+        keyscale: normalizeSelectOptionValue(result?.keyscale, KEYSCALE_OPTIONS, ""),
+        timesignature: normalizeSelectOptionValue(result?.timesignature, TIMESIGNATURE_OPTIONS, ""),
       }));
       const helperLines = [];
       if (result?.notes) {

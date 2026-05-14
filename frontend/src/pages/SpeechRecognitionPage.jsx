@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import GlassCard from "../components/shared/GlassCard";
 import ProjectToolbarCard from "../components/text/ProjectToolbarCard";
 import Button from "../components/ui/Button";
+import { Dialog, DialogContent } from "../components/ui/Dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/Tabs";
 import { useProjectStore } from "../stores/useProjectStore";
 import { useSettingsStore } from "../stores/useSettingsStore";
@@ -21,6 +22,62 @@ import {
 } from "../utils/projectToolbar";
 import { runTaskChannel } from "../utils/taskChannel";
 import { appendSpeechText, replaceSpeechText } from "../utils/speechText";
+
+function DubbingProjectTargetDialog({
+  open,
+  kindLabel,
+  defaultName,
+  currentProject,
+  onCancel,
+  onCreateNew,
+  onUseCurrent,
+}) {
+  const [name, setName] = useState(defaultName || "");
+
+  useEffect(() => {
+    if (open) {
+      setName(defaultName || "");
+    }
+  }, [defaultName, open]);
+
+  const canUseCurrent = Boolean(currentProject?.id);
+  const projectName = name.trim() || defaultName || "配音项目";
+
+  return (
+    <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onCancel?.(); }}>
+      <DialogContent
+        title={kindLabel || "配音项目"}
+        description="请选择创建新项目，或继续使用当前项目。继续使用当前项目会覆盖当前项目的剧本片段。"
+      >
+        <div className="dialogFormStack">
+          <label className="fieldLabel">
+            新项目名称
+            <input
+              className="textInput"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder={defaultName || "配音项目"}
+            />
+          </label>
+          {canUseCurrent ? (
+            <div className="statusBadge warning" style={{ display: "block", textAlign: "left" }}>
+              当前项目：{currentProject.name}。选择“使用当前项目”会覆盖它的片段列表。
+            </div>
+          ) : (
+            <div className="muted">当前没有已选择项目，将创建新项目。</div>
+          )}
+          <div className="controlRow" style={{ justifyContent: "flex-end", gap: 8 }}>
+            <Button variant="ghost" onClick={onCancel}>取消</Button>
+            {canUseCurrent ? (
+              <Button variant="secondary" onClick={() => onUseCurrent?.()}>使用当前项目</Button>
+            ) : null}
+            <Button variant="primary" onClick={() => onCreateNew?.(projectName)}>创建新项目</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export default function SpeechRecognitionPage({ onNavigate }) {
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -116,6 +173,12 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const [isPreviewingSubtitle, setIsPreviewingSubtitle] = useState(false);
   const [isTranslatingSubtitle, setIsTranslatingSubtitle] = useState(false);
   const [isCreatingSubtitleProject, setIsCreatingSubtitleProject] = useState(false);
+  const [dubbingProjectDialog, setDubbingProjectDialog] = useState({
+    open: false,
+    kindLabel: "",
+    defaultName: "",
+    resolver: null,
+  });
   const [editedPreviewText, setEditedPreviewText] = useState("");
   const [editedSubtitleSrtText, setEditedSubtitleSrtText] = useState("");
   const [dubbingTask, setDubbingTask] = useState({ taskId: "", status: "", stageLabel: "", processed: 0, total: 0, percent: 0, cacheHits: 0 });
@@ -360,6 +423,29 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     (subtitleMode !== "translated" || Array.isArray(subtitlePreview?.translated_segments))
   );
 
+  const requestDubbingProjectTarget = useCallback(({ kindLabel, defaultName }) => (
+    new Promise((resolve) => {
+      setDubbingProjectDialog({
+        open: true,
+        kindLabel,
+        defaultName,
+        resolver: resolve,
+      });
+    })
+  ), []);
+
+  const resolveDubbingProjectTarget = useCallback((value) => {
+    setDubbingProjectDialog((current) => {
+      current.resolver?.(value);
+      return {
+        open: false,
+        kindLabel: "",
+        defaultName: "",
+        resolver: null,
+      };
+    });
+  }, []);
+
   const parseEditedPreviewDubbingSegments = useCallback(() => {
     const usableTimeline = (remappedAlignments || [])
       .map((item, index) => ({
@@ -524,11 +610,21 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     setIsCreatingSubtitleProject(true);
     setSubtitleError("");
     try {
+      const target = await requestDubbingProjectTarget({
+        kindLabel: "创建字幕配音项目",
+        defaultName: subtitleProjectName.trim() || "字幕配音",
+      });
+      if (!target) {
+        return;
+      }
       const subtitleText = validateEditedSubtitleSrt(editedSubtitleSrtText);
       const formData = new FormData();
       formData.append("file", subtitleFile, subtitleFile.name || "subtitle.srt");
       formData.append("subtitle_text", subtitleText);
-      formData.append("project_name", subtitleProjectName.trim());
+      formData.append("project_name", target.createNew ? (target.projectName || subtitleProjectName.trim()) : "");
+      if (!target.createNew && target.projectId) {
+        formData.append("target_project_id", target.projectId);
+      }
       formData.append("mode", subtitleMode);
       formData.append("target_language", translationTargetLanguage);
       formData.append("translation_source", translationSource);
@@ -560,7 +656,9 @@ export default function SpeechRecognitionPage({ onNavigate }) {
         speakers: payload?.speakers || current?.speakers || [],
       }));
       useUiStore.getState().pushToast({
-        title: `已创建字幕配音项目：${payload?.project?.name || subtitleProjectName || "字幕配音"}`,
+        title: target.createNew
+          ? `已创建字幕配音项目：${payload?.project?.name || target.projectName || subtitleProjectName || "字幕配音"}`
+          : `已更新当前项目：${payload?.project?.name || target.projectName || "当前项目"}`,
         tone: "success",
       });
       onNavigate?.("script");
@@ -1258,10 +1356,21 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       const baseName = (projectName || "").trim() || audioStem || "翻译配音";
       const modeProjectSuffix = translationMode === "passthrough" ? "直通配音" : (translationMode === "polish_only" ? "润色配音" : "翻译配音");
       const nextProjectName = `${baseName}-${modeProjectSuffix}`;
-      const project = await createProject(nextProjectName);
+      const target = await requestDubbingProjectTarget({
+        kindLabel: "生成翻译配音项目",
+        defaultName: nextProjectName,
+      });
+      if (!target) {
+        throw new Error("翻译配音项目创建已取消");
+      }
+      const finalProjectName = target.projectName || nextProjectName;
+      const project = target.createNew ? await createProject(finalProjectName) : currentProject;
+      if (!project?.id) {
+        throw new Error("没有可用项目。");
+      }
 
       const scriptPayload = {
-        title: nextProjectName,
+        title: target.createNew ? finalProjectName : (target.projectName || project.name || nextProjectName),
         source_text: String(payload?.translated_text || "").trim(),
         metadata: {
           asr_source: true,
@@ -1325,7 +1434,10 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       await loadProjectScript(project.id);
       setTranslationResult(String(payload?.translated_text || "").trim());
       setDubbingTask((current) => ({ ...current, status: "done", stageLabel: "翻译配音完成", percent: 100 }));
-      useUiStore.getState().pushToast({ title: `已创建翻译配音项目：${nextProjectName}`, tone: "success" });
+      useUiStore.getState().pushToast({
+        title: target.createNew ? `已创建翻译配音项目：${finalProjectName}` : `已更新当前项目：${project.name}`,
+        tone: "success",
+      });
       onNavigate?.("script");
     } catch (err) {
       const message = err?.message || "创建翻译配音项目失败";
@@ -2137,6 +2249,29 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           </Tabs>
         </GlassCard>
       </div>
+      <DubbingProjectTargetDialog
+        open={dubbingProjectDialog.open}
+        kindLabel={dubbingProjectDialog.kindLabel}
+        defaultName={dubbingProjectDialog.defaultName}
+        currentProject={currentProject}
+        onCancel={() => resolveDubbingProjectTarget(null)}
+        onUseCurrent={() => {
+          useUiStore.getState().pushToast({
+            title: `将继续使用当前项目：${currentProject?.name || "当前项目"}`,
+            tone: "warning",
+          });
+          resolveDubbingProjectTarget({
+            createNew: false,
+            projectId: currentProject?.id || "",
+            projectName: currentProject?.name || "",
+          });
+        }}
+        onCreateNew={(projectName) => resolveDubbingProjectTarget({
+          createNew: true,
+          projectId: "",
+          projectName,
+        })}
+      />
     </div>
   );
 }

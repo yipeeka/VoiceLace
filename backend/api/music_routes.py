@@ -26,6 +26,7 @@ from backend.models import (
 )
 from backend.persistence import load_project
 from backend.runtime_config import save_runtime_config
+from backend.services.music_assist_params import coerce_allowed_string, nearest_allowed_int
 from backend.services import bind_postprocess_asset_to_project
 from backend.state import get_app_state
 
@@ -530,20 +531,14 @@ def _normalize_music_assist_result(payload: dict[str, Any], fallback_form: dict[
     vocal_language = raw_lang if raw_lang in ALLOWED_VOCAL_LANGUAGES else "unknown"
 
     bpm = payload.get("bpm", fallback_form.get("bpm"))
-    try:
-        bpm_value = int(bpm) if bpm is not None else None
-    except Exception:
-        bpm_value = None
-    if bpm_value not in ALLOWED_BPMS:
-        bpm_value = None
+    bpm_value = None if bpm in (None, "") else nearest_allowed_int(bpm, ALLOWED_BPMS)
 
-    keyscale = str(payload.get("keyscale") or fallback_form.get("keyscale") or "").strip() or None
-    if keyscale not in ALLOWED_KEYSCALES:
-        keyscale = None
+    keyscale = coerce_allowed_string(payload.get("keyscale") or fallback_form.get("keyscale"), ALLOWED_KEYSCALES)
 
-    timesignature = str(payload.get("timesignature") or fallback_form.get("timesignature") or "").strip() or None
-    if timesignature not in ALLOWED_TIMESIGNATURES:
-        timesignature = None
+    timesignature = coerce_allowed_string(
+        payload.get("timesignature") or fallback_form.get("timesignature"),
+        ALLOWED_TIMESIGNATURES,
+    )
 
     notes = str(payload.get("notes") or "").strip()
     warnings_raw = payload.get("warnings")

@@ -126,6 +126,7 @@ export default function AudioPlayer({
   autoPlaySignal = 0,
   pauseSignal = 0,
   onPlayStateChange = null,
+  onTimeUpdate: onTimeUpdateProp = null,
 }) {
   const audioRef = useRef(null);
   const canvasRef = useRef(null);
@@ -163,10 +164,13 @@ export default function AudioPlayer({
       }
     };
     const onTimeUpdate = () => {
-      setCurrentTime(audio.currentTime || 0);
+      const nextTime = audio.currentTime || 0;
+      setCurrentTime(nextTime);
+      onTimeUpdateProp?.(nextTime);
     };
     const onEnded = () => {
       setIsPlaying(false);
+      onTimeUpdateProp?.(audio.duration || audio.currentTime || 0);
     };
 
     audio.addEventListener("loadedmetadata", onLoadedMetadata);
@@ -186,7 +190,7 @@ export default function AudioPlayer({
       setCurrentTime(0);
       setDuration(0);
     };
-  }, [audioUrl]);
+  }, [audioUrl, onTimeUpdateProp]);
 
   useEffect(() => {
     onPlayStateChange?.(isPlaying);
@@ -414,6 +418,7 @@ export default function AudioPlayer({
             const ratio = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
             audio.currentTime = Math.max(0, Math.min(duration, duration * ratio));
             setCurrentTime(audio.currentTime || 0);
+            onTimeUpdateProp?.(audio.currentTime || 0);
           }}
         />
       </div>

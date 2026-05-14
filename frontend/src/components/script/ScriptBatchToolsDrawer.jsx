@@ -158,7 +158,7 @@ export default function ScriptBatchToolsDrawer({
               <div className="controlRow" style={{ justifyContent: "flex-end" }}>
                 <Button
                   variant="primary"
-                  disabled={!canExecute || isSaving || !fromName || !toName || fromName === toName || renamePreviewCount <= 0}
+                  disabled={isSaving || !fromName || !toName || fromName === toName || renamePreviewCount <= 0}
                   onClick={() => onRenameCharacter?.({ fromName, toName })}
                 >
                   {isSaving ? "执行中..." : "执行改名"}
@@ -175,7 +175,7 @@ export default function ScriptBatchToolsDrawer({
               <div className="controlRow" style={{ justifyContent: "flex-end" }}>
                 <Button
                   variant="primary"
-                  disabled={!canExecute || isSaving || !mergeSourceName || !mergeTargetName || mergeSourceName === mergeTargetName || mergePreviewCount <= 0}
+                  disabled={isSaving || !mergeSourceName || !mergeTargetName || mergeSourceName === mergeTargetName || mergePreviewCount <= 0}
                   onClick={() => onMergeCharacter?.({ sourceName: mergeSourceName, targetName: mergeTargetName })}
                 >
                   {isSaving ? "执行中..." : "执行合并"}
@@ -221,7 +221,7 @@ export default function ScriptBatchToolsDrawer({
               <div className="controlRow" style={{ justifyContent: "flex-end" }}>
                 <Button
                   variant="primary"
-                  disabled={!canExecute || isSaving || (!targetEmotion && !targetType) || batchPreviewCount <= 0}
+                  disabled={isSaving || (!targetEmotion && !targetType) || batchPreviewCount <= 0}
                   onClick={() =>
                     onBatchUpdate?.({
                       segmentIds: batchCandidates.map((seg) => seg.id),
@@ -259,7 +259,7 @@ export default function ScriptBatchToolsDrawer({
               <div className="controlRow" style={{ justifyContent: "flex-end" }}>
                 <Button
                   variant="primary"
-                  disabled={!canExecute || isSaving || !findText || searchPreview.affectedCount <= 0}
+                  disabled={isSaving || !findText || searchPreview.affectedCount <= 0}
                   onClick={() => onSearchReplace?.({ find: findText, replace: replaceText, caseSensitive })}
                 >
                   {isSaving ? "执行中..." : "执行替换"}

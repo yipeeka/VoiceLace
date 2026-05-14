@@ -56,6 +56,9 @@ export default function SynthesisWaveSurfer({
   useSourceTimeline = false,
   height = 100,
   onCurrentTimeChange = null,
+  autoPlaySignal = 0,
+  pauseSignal = 0,
+  onPlayStateChange = null,
 }) {
   const containerRef = useRef(null);
   const wavesurferRef = useRef(null);
@@ -76,6 +79,10 @@ export default function SynthesisWaveSurfer({
       onCurrentTimeChange(currentTime);
     }
   }, [currentTime, onCurrentTimeChange]);
+
+  useEffect(() => {
+    onPlayStateChange?.(isPlaying);
+  }, [isPlaying, onPlayStateChange]);
 
   const requestedLevel = useMemo(() => pickWaveformLevel(zoom), [zoom]);
 
@@ -251,6 +258,8 @@ export default function SynthesisWaveSurfer({
 
     ws.on("audioprocess", () => setCurrentTime(ws.getCurrentTime()));
     ws.on("seeking", () => setCurrentTime(ws.getCurrentTime()));
+    ws.on("play", () => setIsPlaying(true));
+    ws.on("pause", () => setIsPlaying(false));
     ws.on("finish", () => setIsPlaying(false));
     ws.on("error", (err) => {
       const message = String(err?.message || err || "").toLowerCase();
@@ -297,13 +306,29 @@ export default function SynthesisWaveSurfer({
     if (!wavesurferRef.current || !isReady) return;
     try {
       await wavesurferRef.current.playPause();
-      setIsPlaying((v) => !v);
     } catch {
       setIsPlaying(false);
       setIsReady(false);
       setWaveformError("音频尚未就绪，请稍后重试。");
     }
   };
+
+  useEffect(() => {
+    if (!autoPlaySignal || !wavesurferRef.current || !isReady) {
+      return;
+    }
+    wavesurferRef.current.play().catch(() => {
+      setIsPlaying(false);
+      setWaveformError("音频尚未就绪，请稍后重试。");
+    });
+  }, [autoPlaySignal, isReady]);
+
+  useEffect(() => {
+    if (!pauseSignal || !wavesurferRef.current || !isReady) {
+      return;
+    }
+    wavesurferRef.current.pause();
+  }, [pauseSignal, isReady]);
 
   if (!audioUrl) return null;
 

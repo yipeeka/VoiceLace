@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from backend.models import Character, Project, Segment
-from backend.persistence import append_project_event, save_project
+from backend.persistence import append_project_event, load_project, save_project
+from backend.services.project_snapshot_service import create_project_snapshot
 from backend.services.dubbing_translation_service import (
     DEFAULT_MAX_SPEED,
     DEFAULT_MIN_SPEED,
@@ -388,6 +389,7 @@ async def create_dubbing_project_from_subtitle(
     translation_source: str,
     line_policy: str | None,
     translated_segments_json: str | None = None,
+    target_project_id: str | None = None,
 ) -> dict[str, Any]:
     normalized_mode = _normalize_mode(mode)
     parsed = parse_subtitle_bytes(data, filename=filename, line_policy=line_policy, mode=normalized_mode)
@@ -471,10 +473,20 @@ async def create_dubbing_project_from_subtitle(
         ]
         source_text = "\n".join(f"{cue.speaker}：{cue.text}" if cue.speaker else cue.text for cue in cues)
 
-    project = Project(name=_fallback_project_name(project_name, filename, normalized_mode))
+    target_id = str(target_project_id or "").strip()
+    if target_id:
+        project = load_project(state.settings.projects_dir, target_id)
+        create_project_snapshot(state.settings.projects_dir, project, reason="before_subtitle_dubbing_import")
+    else:
+        project = Project(name=_fallback_project_name(project_name, filename, normalized_mode))
     project.status = "parsed"
     project.synthesis_config.timeline_lock_enabled = True
-    project.script.title = project.name
+    if not target_id:
+        project.script.title = project.name
+    elif project_name and str(project_name).strip():
+        project.script.title = str(project_name).strip()
+    else:
+        project.script.title = project.name
     project.script.source_text = source_text
     project.script.metadata = {
         "subtitle_source": True,
@@ -498,8 +510,8 @@ async def create_dubbing_project_from_subtitle(
             "source": "project",
             "status": saved.status,
             "event": {
-                "type": "subtitle_dubbing_project_created",
-                "message": f"已从字幕创建配音项目，共 {len(segments)} 段",
+                "type": "subtitle_dubbing_project_updated" if target_id else "subtitle_dubbing_project_created",
+                "message": f"已从字幕{'更新当前项目' if target_id else '创建配音项目'}，共 {len(segments)} 段",
                 "subtitle_format": parsed["format"],
                 "dubbing_mode": normalized_mode,
                 "segment_count": len(segments),
@@ -509,7 +521,7 @@ async def create_dubbing_project_from_subtitle(
     return {
         "project_id": saved.id,
         "project": saved,
-        "status": "created",
+        "status": "updated" if target_id else "created",
         "format": parsed["format"],
         "mode": normalized_mode,
         "segment_count": len(segments),

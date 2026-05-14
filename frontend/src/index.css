@@ -916,6 +916,11 @@ select.textInput option {
   line-height: 1.6;
 }
 
+.dialogFormStack {
+  display: grid;
+  gap: 12px;
+}
+
 .batchToolsDrawer {
   left: auto;
   right: 0;
@@ -1416,11 +1421,6 @@ select.textInput option {
   background: var(--bg-elevated);
 }
 
-.scriptSourceAudioPanel audio {
-  width: 100%;
-  display: block;
-}
-
 .scriptSourceAudioMeta {
   display: flex;
   align-items: center;
@@ -1430,11 +1430,21 @@ select.textInput option {
 }
 
 .scriptSegmentScrollList {
-  max-height: min(72vh, 760px);
+  max-height: min(84vh, 980px);
   overflow-y: auto;
   padding-right: 4px;
   scroll-behavior: smooth;
   scrollbar-width: thin;
+}
+
+.clickableBadge {
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.clickableBadge:hover {
+  filter: brightness(1.08);
 }
 
 .segmentEditorFields {

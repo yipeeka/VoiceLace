@@ -12,6 +12,16 @@ from backend.services.tts_path_service import to_output_relpath
 from backend.services.tts_stale_service import from_output_relpath
 
 
+def should_use_source_timeline(*, config, project) -> bool:
+    backend = str(getattr(config, "tts_backend", "") or "").strip().lower()
+    if backend == "voxcpm2":
+        return False
+    return bool(
+        bool(getattr(config, "timeline_lock_enabled", False))
+        or bool((getattr(project.script, "metadata", {}) or {}).get("dubbing_source"))
+    )
+
+
 def timeline_from_segment_results(segment_results: list[dict], gap_ms: int) -> list[TimelineEntry]:
     timeline: list[TimelineEntry] = []
     cursor = 0

@@ -14,6 +14,7 @@ from backend.engine.waveform_peaks import build_peaks_payload
 from backend.models import PostprocessRequest
 from backend.persistence import append_project_event, load_project, save_project
 from .project_snapshot_service import create_project_snapshot
+from .tts_finalize_service import should_use_source_timeline
 from .tts_path_service import (
     project_postprocess_assets_dir,
     project_processed_chapters_dir,
@@ -59,10 +60,7 @@ def _build_segment_inputs(*, project, output_dir: Path) -> list[dict]:
 
 
 def _build_segment_timeline_ms(*, project, gap_duration_ms: int) -> list[dict]:
-    use_source_timeline = bool(
-        bool(getattr(project.synthesis_config, "timeline_lock_enabled", False))
-        or bool((getattr(project.script, "metadata", {}) or {}).get("dubbing_source"))
-    )
+    use_source_timeline = should_use_source_timeline(config=project.synthesis_config, project=project)
     timeline: list[dict] = []
     cursor = 0
     for idx, segment in enumerate(project.script.segments):
@@ -369,10 +367,7 @@ async def run_postprocess_task(*, task_id: str, payload: PostprocessRequest, sta
         rebuilt_audio = None
         if segment_inputs and len(segment_inputs) == len(project.script.segments):
             try:
-                use_source_timeline = bool(
-                    bool(getattr(config, "timeline_lock_enabled", False))
-                    or bool((project.script.metadata or {}).get("dubbing_source"))
-                )
+                use_source_timeline = should_use_source_timeline(config=config, project=project)
                 rebuilt_audio, _ = MixerEngine().mix_segments(
                     segment_inputs=segment_inputs,
                     gap_ms=int(config.gap_duration_ms),

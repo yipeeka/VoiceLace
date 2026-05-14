@@ -10,7 +10,7 @@ from backend.models import FailedSegmentAsset, SegmentAsset, SynthesizeRequest
 from backend.persistence import load_project, save_project
 from .project_snapshot_service import create_project_snapshot
 
-from .tts_finalize_service import finalize_rebuild_full, resolve_partial_final_format, update_project_audio_assets_after_synthesis
+from .tts_finalize_service import finalize_rebuild_full, resolve_partial_final_format, should_use_source_timeline, update_project_audio_assets_after_synthesis
 from .tts_path_service import (
     project_full_dir as build_project_full_dir,
     project_segment_waveforms_dir as build_project_segment_waveforms_dir,
@@ -335,10 +335,7 @@ async def run_synthesis_task(*, task_id: str, payload: SynthesizeRequest, state,
         full_peaks_path = project_waveforms_dir / "full.peaks.json"
 
         can_rebuild_full = rebuild_full and failed_count == 0
-        use_source_timeline = bool(
-            bool(getattr(config, "timeline_lock_enabled", False))
-            or bool((project.script.metadata or {}).get("dubbing_source"))
-        )
+        use_source_timeline = should_use_source_timeline(config=config, project=project)
         if can_rebuild_full:
             finalize = finalize_rebuild_full(
                 output_dir=state.settings.output_dir,
