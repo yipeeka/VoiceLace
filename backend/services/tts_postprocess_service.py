@@ -21,7 +21,18 @@ from .tts_path_service import (
     to_output_relpath,
 )
 from .tts_runtime_service import emit_task_event
-from .tts_task_service import public_task
+from .tts_task_service import config_payload_for_segment_cache, hash_payload, public_task
+
+
+def _refresh_segment_source_config_hashes_if_generation_config_unchanged(*, project, next_config) -> None:
+    previous_payload = config_payload_for_segment_cache(project.synthesis_config)
+    next_payload = config_payload_for_segment_cache(next_config)
+    if previous_payload != next_payload:
+        return
+    next_hash = hash_payload(next_payload)
+    for asset in (project.audio_assets.segments or {}).values():
+        if asset is not None and getattr(asset, "source_config_hash", ""):
+            asset.source_config_hash = next_hash
 
 
 def _build_segment_inputs(*, project, output_dir: Path) -> list[dict]:
@@ -311,6 +322,7 @@ async def run_postprocess_task(*, task_id: str, payload: PostprocessRequest, sta
     project = load_project(state.settings.projects_dir, payload.project_id)
     create_project_snapshot(state.settings.projects_dir, project, reason="before_postprocess_run")
     config = payload.config or project.synthesis_config
+    _refresh_segment_source_config_hashes_if_generation_config_unchanged(project=project, next_config=config)
     project.synthesis_config = config
     save_project(state.settings.projects_dir, project)
 

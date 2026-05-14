@@ -39,11 +39,11 @@ export function SynthesisGenerateCard({
   onApplySegmentSpeed,
   onStart,
   onCancel,
-  disableVoxcpm2 = false,
+  isDubbingSourceProject = false,
 }) {
   const [speedDraft, setSpeedDraft] = useState("1.0");
   const requestedBackend = config.tts_backend || "omnivoice";
-  const ttsBackend = disableVoxcpm2 && requestedBackend === "voxcpm2" ? "omnivoice" : requestedBackend;
+  const ttsBackend = requestedBackend;
   const showTimelineLock = ttsBackend !== "voxcpm2";
   const omnivoiceConfig = {
     num_step: Number(config?.omnivoice?.num_step ?? config.num_step ?? 32),
@@ -73,7 +73,7 @@ export function SynthesisGenerateCard({
           <Tabs value={ttsBackend} onValueChange={(value) => onSetConfig({ tts_backend: value })}>
             <TabsList>
               <TabsTrigger value="omnivoice">OmniVoice</TabsTrigger>
-              {!disableVoxcpm2 ? <TabsTrigger value="voxcpm2">VoxCPM2</TabsTrigger> : null}
+              <TabsTrigger value="voxcpm2">VoxCPM2</TabsTrigger>
             </TabsList>
 
             <TabsContent value="omnivoice">
@@ -128,8 +128,12 @@ export function SynthesisGenerateCard({
               </div>
             </TabsContent>
 
-            {!disableVoxcpm2 ? (
             <TabsContent value="voxcpm2">
+              {isDubbingSourceProject ? (
+                <div className="statusBadge warning" style={{ marginBottom: 10, display: "block", textAlign: "left" }}>
+                  VoxCPM2 可用于配音项目，但不保证与原始时间轴完全同步，可能出现声音时长不对齐。
+                </div>
+              ) : null}
               <Slider
                 label="采样步数 (inference_timesteps)"
                 value={[Number(voxcpm2Config.inference_timesteps)]}
@@ -173,9 +177,7 @@ export function SynthesisGenerateCard({
                 </div>
               </div>
             </TabsContent>
-            ) : null}
           </Tabs>
-          {disableVoxcpm2 ? <div className="muted">当前为配音来源项目，合成后端固定为 OmniVoice。</div> : null}
 
           <Slider
             label="段间静音 (ms)"
@@ -187,38 +189,40 @@ export function SynthesisGenerateCard({
             unit="ms"
           />
 
-          <div className="formGroup">
-            <label className="formLabel">片段 speed（批量写入 tts_overrides）</label>
-            <div className="controlRow" style={{ alignItems: "center" }}>
-              <input
-                className="textInput"
-                type="number"
-                min="0.5"
-                max="2"
-                step="0.05"
-                value={speedDraft}
-                onChange={(event) => setSpeedDraft(event.target.value)}
-                style={{ maxWidth: 140 }}
-              />
-              <Button
-                variant="secondary"
-                disabled={isRunning || !currentProject?.id || !currentProject?.script?.segments?.length}
-                onClick={() => onApplySegmentSpeed?.(Number(speedDraft), "all")}
-              >
-                应用到全部片段
-              </Button>
-              <Button
-                variant="secondary"
-                disabled={isRunning || !selectedSegmentCount}
-                onClick={() => onApplySegmentSpeed?.(Number(speedDraft), "selected")}
-              >
-                应用到选中片段{selectedSegmentCount ? ` (${selectedSegmentCount})` : ""}
-              </Button>
+          {ttsBackend !== "voxcpm2" ? (
+            <div className="formGroup">
+              <label className="formLabel">片段 speed（批量写入 tts_overrides）</label>
+              <div className="controlRow" style={{ alignItems: "center" }}>
+                <input
+                  className="textInput"
+                  type="number"
+                  min="0.5"
+                  max="2"
+                  step="0.05"
+                  value={speedDraft}
+                  onChange={(event) => setSpeedDraft(event.target.value)}
+                  style={{ maxWidth: 140 }}
+                />
+                <Button
+                  variant="secondary"
+                  disabled={isRunning || !currentProject?.id || !currentProject?.script?.segments?.length}
+                  onClick={() => onApplySegmentSpeed?.(Number(speedDraft), "all")}
+                >
+                  应用到全部片段
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={isRunning || !selectedSegmentCount}
+                  onClick={() => onApplySegmentSpeed?.(Number(speedDraft), "selected")}
+                >
+                  应用到选中片段{selectedSegmentCount ? ` (${selectedSegmentCount})` : ""}
+                </Button>
+              </div>
+              <div className="muted">
+                若项目已有每段 <code>duration</code>，模型通常会优先按 duration 控制时长；遇到吞音时可降低 speed 或删除过短片段的 duration 后重生成。
+              </div>
             </div>
-            <div className="muted">
-              若项目已有每段 <code>duration</code>，模型通常会优先按 duration 控制时长；遇到吞音时可降低 speed 或删除过短片段的 duration 后重生成。
-            </div>
-          </div>
+          ) : null}
 
           {showTimelineLock ? (
           <div className="formGroup">

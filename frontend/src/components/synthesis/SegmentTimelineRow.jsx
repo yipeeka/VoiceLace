@@ -49,6 +49,7 @@ export default function SegmentTimelineRow({
   return (
     <div
       ref={setNodeRef}
+      data-segment-id={seg.segment_id}
       className={`synthSegmentRow ${STATUS_ROW_CLS[segStatus] ?? "pending"} ${recentlyUpdatedSegmentId === seg.segment_id ? "updated" : ""}`}
       style={{
         transform: CSS.Transform.toString(transform),

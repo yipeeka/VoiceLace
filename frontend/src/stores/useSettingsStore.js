@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { api } from "../utils/api";
 import { formatError, getErrorMessage } from "../utils/errors";
+import { useSpeechRecognitionStore } from "./useSpeechRecognitionStore";
 import { useUiStore } from "./useUiStore";
 
 function normalizeOrchestratorConfig(raw) {
@@ -262,6 +263,13 @@ export const useSettingsStore = create((set, get) => ({
     try {
       await api.post("/system/unload-all", {});
       set({ settingsError: "" });
+      useSpeechRecognitionStore.getState().setTranslationEngineStatus({
+        loaded: false,
+        source: "",
+        backend: "unloaded",
+        model_name: "",
+        error: "",
+      });
       useUiStore.getState().pushToast({ title: "所有模型已卸载", tone: "success" });
       await get().refreshSystemStatus();
     } catch (error) {

@@ -1,5 +1,6 @@
 import { DndContext, closestCenter } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { useEffect, useRef } from "react";
 
 import EmptyState from "../shared/EmptyState";
 import GlassCard from "../shared/GlassCard";
@@ -46,12 +47,31 @@ export default function SynthesisTimelineCard({
   stop,
   pushToast,
 }) {
+  const timelineRef = useRef(null);
   const speakerOptions = [
     { value: "narrator", label: "narrator" },
     ...Array.from(new Set((segments || []).map((segment) => (segment.speaker || "").trim()).filter(Boolean)))
       .filter((name) => name !== "narrator")
       .map((name) => ({ value: name, label: name })),
   ];
+
+  useEffect(() => {
+    if (!currentSegmentId || !timelineRef.current) {
+      return;
+    }
+    const container = timelineRef.current;
+    const escapedId = typeof CSS !== "undefined" && typeof CSS.escape === "function"
+      ? CSS.escape(currentSegmentId)
+      : String(currentSegmentId).replace(/"/g, '\\"');
+    const row = container.querySelector(`[data-segment-id="${escapedId}"]`);
+    if (!row) {
+      return;
+    }
+    const containerRect = container.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    const targetTop = rowRect.top - containerRect.top + container.scrollTop;
+    container.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
+  }, [currentSegmentId, segments]);
 
   return (
     <GlassCard>
@@ -135,7 +155,7 @@ export default function SynthesisTimelineCard({
       {segments.length && shouldShowSegmentTimeline ? (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onTimelineDragEnd}>
           <SortableContext items={segments.map((seg) => seg.segment_id)} strategy={verticalListSortingStrategy}>
-            <div className="synthesisTimeline">
+            <div className="synthesisTimeline" ref={timelineRef}>
               {segments.map((seg) => {
                 const selected = selectedSegmentIds.includes(seg.segment_id);
                 const staleItem = staleItemBySegmentId[seg.segment_id];

@@ -50,25 +50,6 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _resolve_target_tts_backend(*, project, payload_config) -> str:
-    if payload_config is not None and hasattr(payload_config, "get_tts_backend"):
-        return payload_config.get_tts_backend()
-    if project is not None and getattr(project, "synthesis_config", None) is not None:
-        return project.synthesis_config.get_tts_backend()
-    return "omnivoice"
-
-
-def _ensure_dubbing_project_backend_supported(*, project, payload_config) -> None:
-    metadata = (getattr(project, "script", None) and getattr(project.script, "metadata", None)) or {}
-    is_dubbing_project = bool(metadata.get("dubbing_source"))
-    target_backend = _resolve_target_tts_backend(project=project, payload_config=payload_config)
-    if is_dubbing_project and target_backend == "voxcpm2":
-        raise HTTPException(
-            status_code=400,
-            detail="翻译/字幕配音项目仅支持 OmniVoice，请将合成后端切换为 OmniVoice。",
-        )
-
-
 async def _run_synthesis_task(task_id: str, payload: SynthesizeRequest, state) -> None:
     await run_synthesis_task(task_id=task_id, payload=payload, state=state, logger=logger)
 
@@ -177,7 +158,6 @@ async def _enqueue_tts_task(*, state, task_id: str) -> int:
 @router.post("/synthesize")
 async def synthesize(payload: SynthesizeRequest, state=Depends(get_app_state)):
     project = load_project(state.settings.projects_dir, payload.project_id)
-    _ensure_dubbing_project_backend_supported(project=project, payload_config=payload.config)
     task_id = str(uuid4())
     task = create_tts_task_record(task_id=task_id, project_id=payload.project_id, kind="synthesis")
     task["payload"] = payload

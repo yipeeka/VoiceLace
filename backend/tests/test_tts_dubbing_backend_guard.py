@@ -18,7 +18,7 @@ class TtsDubbingBackendGuardTest(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls._client_ctx.__exit__(None, None, None)
 
-    def test_dubbing_project_rejects_voxcpm2_backend(self) -> None:
+    def test_dubbing_project_allows_voxcpm2_backend(self) -> None:
         project_id = ""
         try:
             create_resp = self.client.post("/api/v1/projects", json={"name": f"dub-guard-{uuid.uuid4().hex[:8]}"})
@@ -57,8 +57,8 @@ class TtsDubbingBackendGuardTest(unittest.TestCase):
                     },
                 },
             )
-            self.assertEqual(synth_resp.status_code, 400)
-            self.assertIn("OmniVoice", synth_resp.text)
+            self.assertEqual(synth_resp.status_code, 200)
+            self.assertTrue(synth_resp.json().get("task_id"))
         finally:
             if project_id:
                 self.client.delete(f"/api/v1/projects/{project_id}")

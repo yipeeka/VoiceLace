@@ -1273,6 +1273,12 @@ select.textInput option {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  max-height: min(72vh, 760px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
 }
 
 .synthSegmentRow {

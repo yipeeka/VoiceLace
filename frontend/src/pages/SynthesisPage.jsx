@@ -83,7 +83,6 @@ export default function SynthesisPage() {
   const [expandedSynthesisPanel, setExpandedSynthesisPanel] = useState("synthesis");
   const [systemRuntimeStatus, setSystemRuntimeStatus] = useState(null);
   const [exportWizardOpen, setExportWizardOpen] = useState(false);
-  const forcedOmniBackendRef = useRef("");
   const updatedRowTimerRef = useRef(null);
   const { saveScript, isSaving: isScriptSaving, error: scriptError, script, sourceText } = useScriptStore();
   const setProjectSaveAction = useUiStore((state) => state.setProjectSaveAction);
@@ -155,17 +154,6 @@ export default function SynthesisPage() {
     () => Boolean(config?.timeline_lock_enabled || currentProject?.script?.metadata?.dubbing_source),
     [config?.timeline_lock_enabled, currentProject?.script?.metadata?.dubbing_source],
   );
-
-  useEffect(() => {
-    if (!isDubbingSourceProject) return;
-    if ((config?.tts_backend || "omnivoice") !== "voxcpm2") return;
-    setConfig({ tts_backend: "omnivoice" });
-    const key = String(currentProject?.id || "");
-    if (forcedOmniBackendRef.current !== key) {
-      pushToast({ title: "配音项目仅支持 OmniVoice，已自动切换。", tone: "warning" });
-      forcedOmniBackendRef.current = key;
-    }
-  }, [config?.tts_backend, currentProject?.id, isDubbingSourceProject, pushToast]);
 
   useEffect(() => {
     const projectId = currentProject?.id || null;
@@ -1000,7 +988,7 @@ export default function SynthesisPage() {
             onApplySegmentSpeed={handleApplySegmentSpeed}
             onStart={handleStart}
             onCancel={handleCancelSynthesis}
-            disableVoxcpm2={isDubbingSourceProject}
+            isDubbingSourceProject={isDubbingSourceProject}
           />
           <SynthesisPostprocessCard
             expanded={expandedSynthesisPanel === "postprocess"}

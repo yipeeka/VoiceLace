@@ -1508,6 +1508,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
 
   function handleClearResult() {
     clearResult();
+    setEditedPreviewText("");
     setProjectTask({ status: "", failedChunks: [], warnings: [], chunkProgress: null, parseTaskId: "" });
   }
 
@@ -1927,7 +1928,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           <Button variant="secondary" onClick={handleReplaceText} disabled={!canInsert}>
             替换文本输入
           </Button>
-          <Button variant="ghost" onClick={handleClearResult} disabled={!transcript && !plainText}>
+          <Button variant="ghost" onClick={handleClearResult} disabled={!transcript && !plainText && !previewText}>
             清空结果
           </Button>
         </div>
