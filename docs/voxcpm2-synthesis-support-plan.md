@@ -640,7 +640,7 @@ config: {
 - `.env.example`
   - 新增 `BV_VOXCPM_TTS_MODEL_PATH=openbmb/VoxCPM2`。
 
-- `backend/requirements-real.txt`
+- `backend/requirements.txt`
   - 增加 `voxcpm`，若官方包名不同，以实际安装包为准。
 
 ### 前端

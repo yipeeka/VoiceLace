@@ -1,133 +1,154 @@
 # VoiceLace
+### 本地多角色有声书工作台 / Local multi-role audiobook studio
 
-本项目是一个本地运行的多角色有声书工作台，核心流程是：
+语音识别、字幕导入、文本解析、剧本编辑、角色配音、音乐生成、局部重生成与工程导入导出，全都在你的电脑上完成。  
+Speech recognition, subtitle import, script parsing, script editing, voice casting, music generation, partial regeneration, and project import/export all run on your own machine.
 
-1. 文本输入（LLM 解析剧本）
-2. 剧本编辑（逐段改写/新增/删除）
-3. 声音配置（角色绑定预设）
-4. 合成导出（全量或局部重生成）
+默认优先本地运行：`llama-cpp-python` / `OmniVoice` / `Whisper` / `Qwen3-ASR` / `ACE-Step`，不依赖云端 API。  
+Local-first by default with `llama-cpp-python`, `OmniVoice`, `Whisper`, `Qwen3-ASR`, and `ACE-Step`, with cloud APIs optional.
 
-当前版本支持真实模型（`llama-cpp-python` / `OmniVoice` / `Whisper`），并提供 WebSocket 实时进度、任务取消、事件回放、工程导入导出。
+> [!WARNING]
+> 项目仍在快速迭代中，建议先按“源码启动”跑通，再切换自己的本地模型和声音预设。  
+> This project is moving quickly. Run the source workflow first, then switch to your own local models and voice presets.
+
+## Features / 功能
+
+| Feature / 功能 | What it does / 说明 |
+|---|---|
+| Speech Recognition / 语音识别 | Upload audio, transcribe with `Whisper` or `Qwen3-ASR (CrispASR)`, review text, and create a dubbing project directly. 上传音频，用 `Whisper` 或 `Qwen3-ASR (CrispASR)` 转写、校对，并直接创建配音项目。 |
+| Subtitle Workflow / 字幕工作流 | Preview subtitles, translate subtitle content, keep timeline cues, and create timeline-based dubbing projects. 预览字幕、翻译字幕、保留时间轴，并创建时间轴配音项目。 |
+| Local LLM Script Parsing / 本地 LLM 剧本解析 | Parse long text into speakers, narration, dialogue, emotion, and TTS-ready segments with `llama_cpp`, OpenAI, Gemini, or mock mode. 使用 `llama_cpp`、OpenAI、Gemini 或 mock 模式，把长文本解析为角色、旁白、对白、情绪和 TTS 片段。 |
+| Parse QC / 解析质检 | Inspect parsed structure before production and catch speaker/segment issues early. 在进入制作前检查解析结构，尽早发现说话人和分段问题。 |
+| Script Editor / 剧本编辑 | Edit segments, insert/delete lines, adjust speaker/type/text/emotion/TTS overrides, and save as project data. 编辑片段、增删行、调整角色/类型/文本/情绪/TTS 覆盖项，并保存为项目数据。 |
+| Voice Profiles / 声音配置 | Create, preview, sort, and bind character voices for narration, dialogue, and voice cloning workflows. 创建、试听、排序和绑定角色声音，支持旁白、对白和声音克隆流程。 |
+| TTS Synthesis / 语音合成 | Generate full projects or only changed segments with OmniVoice / VoxCPM2 backend selection and waveform previews. 使用 OmniVoice / VoxCPM2 全量合成或仅重生成改动片段，并预览波形。 |
+| Music Generation / 音乐生成 | Generate or upload music assets with local ACE-Step Diffusers models, use the AI music assistant, and bind tracks as `BGM` or `Ambience`. 使用本地 ACE-Step Diffusers 生成或上传音乐素材，通过 AI 音乐助手生成表单，并绑定为 `BGM` 或 `Ambience`。 |
+| Realtime Tasks / 实时任务 | Track LLM, ASR, TTS, and music jobs through WebSocket progress, cancellation, and event replay. 通过 WebSocket 跟踪 LLM、ASR、TTS 和音乐任务进度，支持取消和事件回放。 |
+| Project Management / 工程管理 | Import/export project files or archives, rename projects, clean duplicates, and keep runtime data local. 导入/导出项目文件或压缩包，重命名项目、清理重复项，并将运行时数据保存在本地。 |
 
 ---
 
-## 3 分钟上手（推荐先看）
+## Quickstart / 快速开始
 
-### 1) 启动
+### 1. Install dependencies / 安装依赖
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r backend\requirements.txt
-.\.venv\Scripts\python.exe -m pip install -r backend\requirements-real.txt
 cd frontend
 npm install
 cd ..
+```
+
+Notes / 说明：
+- `backend/requirements.txt` points `llama-cpp-python` to [JamePeng/llama-cpp-python](https://github.com/JamePeng/llama-cpp-python).  
+  `backend/requirements.txt` 中的 `llama-cpp-python` 已指向 [JamePeng/llama-cpp-python](https://github.com/JamePeng/llama-cpp-python)。
+- Dependencies have been merged into one file; there is no separate real-model requirements file anymore.  
+  依赖已合并为一个文件，不再区分基础依赖和真实模型依赖。
+- `ffmpeg` is recommended for audio/video workflows.  
+  音频/视频相关流程建议额外安装 `ffmpeg`。
+
+### 2. Configure models / 配置模型
+
+Check these items in Settings or `.env` / 请在系统设置页或 `.env` 中确认：
+
+- `LLM Backend / LLM 后端`: `llama_cpp`
+- `LLM Model Path / LLM 模型路径`: local GGUF model path / 本地 GGUF 模型路径
+- `TTS Model Directory / TTS 模型目录`: OmniVoice model directory / OmniVoice 模型目录
+- `ASR Model Path / ASR 模型路径`: choose by backend / 按识别后端填写
+- `Qwen3-ASR (CrispASR)`: install CrispASR first and configure its executable path / 使用前需先安装 CrispASR，并填写 CrispASR 可执行文件路径
+- `Music Generation / 音乐生成`: enable it and configure ACE-Step Turbo/Base Diffusers model directories / 如需使用，请开启并配置 ACE-Step Turbo/Base Diffusers 模型目录
+
+Starter config / 推荐起步配置：
+
+```env
+BV_LLM_BACKEND=llama_cpp
+BV_LLM_MODEL_PATH=E:\models\Qwen3.5-9B-UD-Q4_K_XL.gguf
+BV_LLM_CHAT_FORMAT=chatml
+BV_LLM_N_CTX=8192
+BV_LLM_N_GPU_LAYERS=-1
+
+BV_TTS_MODEL_PATH=E:\softs\BeautyVoiceTTS\models\OmniVoice
+BV_TTS_DEVICE=cuda:0
+
+BV_ASR_MODEL_PATH=base
+BV_ASR_DEVICE=cuda:0
+
+BV_MUSIC_ENABLED=false
+BV_MUSIC_MODEL_VARIANT=turbo
+BV_MUSIC_TURBO_MODEL_DIR=E:\models\ACE-Step\acestep-v15-xl-turbo-diffusers
+BV_MUSIC_BASE_MODEL_DIR=E:\models\ACE-Step\acestep-v15-xl-base-diffusers
+BV_MUSIC_DEVICE_MODE=cpu_offload
+```
+
+For higher quality, switch to / 如果更看重效果，可以换成：
+
+```env
+BV_LLM_MODEL_PATH=E:\models\Qwen3.5-27B-UD-IQ3_XXS.gguf
+```
+
+### 3. Start / 启动
+
+Recommended on Windows / Windows 推荐：
+
+```powershell
+.\run.bat
+```
+
+Equivalent command / 等价命令：
+
+```powershell
 .\.venv\Scripts\python.exe start.py
 ```
 
-启动后：
-- 前端默认 `http://127.0.0.1:5173`
-- 后端默认 `http://127.0.0.1:8000`
+Default URLs / 默认地址：
+- Frontend / 前端：`http://127.0.0.1:5173`
+- Backend / 后端：`http://127.0.0.1:8000`
 
-### 2) 系统设置页先配模型路径
-
-至少确认：
-- `LLM 后端`（`llama_cpp` / `openai` / `gemini` / `mock`）
-- `LLM 模型路径`（本地 GGUF 时）
-- `TTS 模型目录`
-- `ASR 模型目录/名称`
-
-说明：
-- 设置页保存到 `backend/data/config.json`
-- `.env` 只作为启动默认值和敏感项（API Key）
-- 设置页修改不会自动改写 `.env`
-
-### 3) 按页面顺序跑一次完整流程
-
-1. **文本输入**：新建项目 -> 粘贴文本 -> 选择解析模式 -> 开始解析  
-2. **剧本编辑**：检查分段和说话人，修改后记得保存  
-3. **声音配置**：给每个角色分配声音预设  
-4. **合成导出**：先全量合成一次；后续只重生成“需更新段落”  
-
-### 4) 日常高频操作
-
-- 打开项目文件：文本输入页 -> `打开项目文件`
-- 导入工程 ZIP：文本输入页 -> `导入工程 ZIP`
-- 项目改名：文本输入页工具栏 `项目新名称` + `改名`
-- 删除同名副本/清理重复：文本输入页工具栏 `更多`
-- 局部修音：合成导出页逐段 `重新生成` 或 `需更新段落重新生成`
-
----
-
-## 用户使用手册（详细）
-
-## 页面 1：文本输入
-
-- 项目工具栏支持：
-  - 项目切换
-  - 新建项目
-  - 改名
-  - 打开项目文件
-  - 导入工程 ZIP
-  - 更多菜单（删除当前项目、删除同名副本、清理重复项目）
-- 解析模式：
-  - `两步解析（推荐）`：更稳，适合复杂长文
-  - `经典单步解析`：更快，兼容旧行为
-- 自定义提示词：
-  - 仅对单步链路生效
-  - 两步链路使用内置 Step1/Step2 提示词
-
-## 页面 2：剧本编辑
-
-- 可逐段编辑：`speaker/type/text/emotion/tts_overrides`
-- 新增片段可插入指定位置
-- 任何添加/删除/修改都先进入草稿态，保存后才写入项目
-- 有未保存改动会有明确提示
-
-## 页面 3：声音配置
-
-- 角色分配列表按剧本真实角色聚合
-- 支持声音预设创建、试听、绑定
-- 预设支持排序与保存成功提示
-
-## 页面 4：合成导出
-
-- 显示每段状态：已同步 / 缺失音频 / 配置变化待重生成 / 已修改待重生成
-- 支持：
-  - 单段 `重新生成`
-  - 批量 `需更新段落重新生成`
-  - 从某段开始连播
-- 完整音频与分段音频都支持波形显示（后端预计算 peaks）
-
-## TTS 资产与后端选择
-
-`合成导出` 页的 `OmniVoice` / `VoxCPM2` tab 决定本次 TTS 引擎。这个选择同时影响全量合成、局部片段重生成、缓存命中和 stale 判断。
-
-- 全量合成：按当前 `tts_backend` 重建整本音频、字幕和波形资产
-- 局部重生成：通过 `segment_ids` 指定目标片段，`rebuild_full=false` 时只更新这些片段，不会重建整本完整音频
-- 工程 ZIP：只打包当前项目的最新合成资产，不会同时保存 OmniVoice 与 VoxCPM2 两套完整音频
-- 版本切换：如果先后用不同引擎合成，后一次结果会覆盖项目当前音频资产记录，旧引擎结果不会作为独立副本长期保留
-
----
-
-## 安装与配置（开发/部署）
-
-## 依赖安装
+Run separately / 分开启动：
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r backend\requirements.txt
-.\.venv\Scripts\python.exe -m pip install -r backend\requirements-real.txt
-cd frontend
-npm install
-cd ..
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload
 ```
 
-## `.env` 常用项
+```powershell
+cd frontend
+npm run dev
+```
 
-参考 [`.env.example`](/E:/softs/BeautyVoiceTTS/.env.example)。
+### 4. Workflow / 页面顺序
+
+1. **Speech Recognition / 语音识别**：upload audio or subtitles, transcribe/translate, and create a dubbing project / 上传音频或字幕，转写/翻译后创建配音项目
+2. **Text Input / 文本输入**：create a project from pasted text and parse it / 也可以粘贴文本新建项目并解析
+3. **Parse QC / 解析质检**：review structure before editing / 检查 LLM 拆分结构
+4. **Script Editor / 剧本编辑**：edit speakers, segments, emotion, and TTS overrides / 编辑分段、说话人、情绪和 TTS 覆盖项
+5. **Voice Profiles / 声音配置**：bind voices to characters / 给角色绑定声音预设
+6. **Music Generation / 音乐生成**：generate or upload music and bind it as `BGM` / `Ambience` / 生成或上传音乐素材，并绑定为 `BGM` / `Ambience`
+7. **Synthesis Export / 合成导出**：full synthesis first, then regenerate changed segments / 先全量合成，之后只重生成改动段落
+8. **Export / 工程导出**：export project files or ZIP archives / 按需导出项目文件或 ZIP
+
+---
+
+## Recommended Models / 推荐模型
+
+| Model / 模型 | Best for / 推荐场景 | Notes / 说明 |
+|---|---|---|
+| `Qwen3.5-27B-UD-IQ3_XXS.gguf` | Quality-first setups with more memory/VRAM / 追求效果、内存或显存更充足 | Better for complex text and higher quality parsing / 更适合复杂文本和更高质量解析 |
+| `Qwen3.5-9B-UD-Q4_K_XL.gguf` | Daily use on most machines / 大多数机器的日常使用 | Better balance of speed and quality / 速度和效果更均衡 |
+
+Suggestions / 建议：
+- Use both models through the `llama_cpp` backend. / 两个模型都按 `llama_cpp` 后端使用。
+- Use absolute paths for model files. / 模型文件可放任意位置，填写绝对路径即可。
+- If Settings asks for `clip_model_path`, configure `LLM CLIP Model Path`. / 如果系统设置提示需要 `clip_model_path`，请补上 `LLM CLIP 模型路径`。
+
+---
+
+## Configuration / 安装与配置
+
+### `.env` example / `.env` 常用项
+
+See [`.env.example`](./.env.example). / 参考 [`.env.example`](./.env.example)。
 
 ```env
 BV_LLM_BACKEND=llama_cpp
@@ -144,38 +165,219 @@ BV_LLM_MIN_P=0.0
 BV_LLM_PRESENCE_PENALTY=0.0
 BV_LLM_REPEAT_PENALTY=1.0
 BV_LLM_MAX_TOKENS=2048
+BV_ENABLE_LLAMA_CPP_THINK_MODE=true
 
-BV_OPENAI_API_KEY=your-openai-key
-BV_OPENAI_MODEL=gpt-4.1-mini
-BV_GEMINI_API_KEY=your-gemini-key
-BV_GEMINI_MODEL=gemini-2.5-flash
+BV_SECONDARY_LLM_MODEL_PATH=
+BV_SECONDARY_LLM_CLIP_MODEL_PATH=
+BV_SECONDARY_LLM_N_CTX=4096
+BV_SECONDARY_LLM_N_GPU_LAYERS=-1
+BV_SECONDARY_LLM_THREADS=0
+BV_SECONDARY_LLM_TEMPERATURE=0.2
+BV_SECONDARY_LLM_TOP_P=0.9
+BV_SECONDARY_LLM_TOP_K=40
+BV_SECONDARY_LLM_MIN_P=0.0
+BV_SECONDARY_LLM_PRESENCE_PENALTY=0.0
+BV_SECONDARY_LLM_REPEAT_PENALTY=1.0
+BV_SECONDARY_LLM_MAX_TOKENS=1024
+BV_SECONDARY_ENABLE_LLAMA_CPP_THINK_MODE=false
 
 BV_TTS_MODEL_PATH=E:\softs\BeautyVoiceTTS\models\OmniVoice
+BV_VOXCPM_TTS_MODEL_PATH=openbmb/VoxCPM2
 BV_TTS_DEVICE=cuda:0
 
+BV_MUSIC_ENABLED=false
+BV_MUSIC_MODEL_DIR=
+BV_MUSIC_TURBO_MODEL_DIR=
+BV_MUSIC_BASE_MODEL_DIR=
+BV_MUSIC_MODEL_VARIANT=turbo
+BV_MUSIC_DEVICE_MODE=cpu_offload
+
+BV_ASR_BACKEND=whisper
 BV_ASR_MODEL_PATH=base
 BV_ASR_DEVICE=cuda:0
+BV_QWEN3_ASR_CRISPASR_EXE=
+BV_QWEN3_ASR_MODEL_PATH=
+BV_QWEN3_ASR_FORCED_ALIGNER_MODEL_PATH=
+BV_QWEN3_ASR_THREADS=0
+BV_QWEN3_ASR_LANGUAGE=auto
+BV_QWEN3_ASR_ENABLE_TIMESTAMPS=false
+
+BV_PYANNOTE_MODEL_ID=pyannote/speaker-diarization-community-1
+BV_PYANNOTE_AUTH_TOKEN=
+BV_PYANNOTE_DEVICE=cuda:0
 
 BV_AUTO_SERIAL=true
 BV_AUTO_UNLOAD_LLM_AFTER_PARSE=true
 BV_AUTO_LOAD_TTS_BEFORE_SYNTH=true
+BV_DEBUG_STALE_REPORT=false
 BV_ALLOW_MOCK_FALLBACK=true
 ```
 
-说明：
-- `BV_LLM_BACKEND` 支持 `llama_cpp` / `openai` / `gemini` / `mock`
-- `BV_ALLOW_MOCK_FALLBACK=false` 时，模型加载失败会直接报错，不自动回退 mock
-- 若 `backend/data/config.json` 存在，运行时优先读该配置
+Notes / 说明：
+- `BV_ALLOW_MOCK_FALLBACK=false` makes model loading failures fail fast. / `BV_ALLOW_MOCK_FALLBACK=false` 时，模型加载失败会直接报错。
+- If `backend/data/config.json` exists, runtime settings from the UI take priority. / 如果存在 `backend/data/config.json`，运行时会优先读取系统设置页保存的配置。
+- `.env` is best for startup defaults and secrets; Settings is better for daily tuning. / `.env` 更适合启动默认值和敏感信息，系统设置页更适合日常调整。
 
-## 启动方式
+### Data directory / 数据位置
 
-一键：
+Runtime data lives under `backend/data`. / 运行时数据默认位于 `backend/data`：
+
+- `config.json`: runtime config / 运行时配置
+- `projects/`: project data / 项目数据
+- `voices/`: voice presets and reference audio / 声音预设和参考音频
+- `output/`: synthesis outputs and exports / 合成产物与导出文件
+- `output/music/`: generated music and asset library / 音乐生成结果和音乐素材库
+- `cache/tts/`: rebuildable TTS cache / 可重建 TTS 缓存
+
+---
+
+## Usage / 使用说明
+
+### Speech Recognition / 语音识别
+
+- The default entry page supports audio upload with `Whisper` or `Qwen3-ASR (CrispASR)`. / 默认入口页支持上传音频，并选择 `Whisper` 或 `Qwen3-ASR (CrispASR)`。
+- Supports transcription, timeline display, speaker labels, and text proofreading. / 支持普通转写、时间轴显示、说话人标签和文本校对。
+- Recognition results can create dubbing projects directly. / 可从识别结果直接创建配音项目。
+- Subtitle tools support preview, translation, and timeline-based project creation. / 字幕工具支持字幕预览、字幕翻译，并可创建时间轴配音项目。
+- `Qwen3-ASR (CrispASR)` requires CrispASR installed and `BV_QWEN3_ASR_CRISPASR_EXE` configured. / 使用 `Qwen3-ASR (CrispASR)` 前，需要先安装 CrispASR，并配置 `BV_QWEN3_ASR_CRISPASR_EXE`。
+
+### Text Input / 文本输入
+
+- Switch, create, rename, open, and import projects. / 支持项目切换、新建、改名、打开项目文件和导入工程 ZIP。
+- `Two-step parsing` is recommended for long or complex text. / `两步解析` 更稳，适合长文本和复杂对话。
+- `Classic single-pass parsing` is faster and keeps legacy behavior. / `经典单步解析` 更快，兼容旧行为。
+- Custom prompts mainly affect the single-pass path. / 自定义提示词主要影响单步链路。
+
+### Script Editor / 剧本编辑
+
+- Edit `speaker/type/text/emotion/tts_overrides` per segment. / 可逐段编辑 `speaker/type/text/emotion/tts_overrides`。
+- Insert new segments at specific positions. / 新增片段可插入指定位置。
+- Changes stay in draft state until saved. / 所有改动都会先进入草稿态，保存后才写入项目。
+
+### Voice Profiles / 声音配置
+
+- Character assignments are grouped by real speakers in the script. / 角色分配会按剧本真实说话人聚合。
+- Create, preview, bind, and sort voice presets. / 支持声音预设创建、试听、绑定与排序。
+- Designed for multi-character narration and dialogue. / 适合多角色、旁白和对白混合场景。
+
+### Music Generation / 音乐生成
+
+- Enable Music Generation in Settings and configure ACE-Step Turbo or Base Diffusers model directories. / 先在系统设置开启音乐生成，并配置 ACE-Step Turbo 或 Base Diffusers 模型目录。
+- `text2music` is for prompt-based background music; `cover` / `repaint` can reuse asset-library audio. / `text2music` 适合提示词生成背景音乐，`cover` / `repaint` 可复用素材库音频。
+- The AI music assistant can create music form suggestions from the current project text. / AI 音乐助手可根据当前项目文本生成音乐表单建议。
+- Generated tracks enter the music asset library and can be bound as `BGM` or `Ambience`. / 生成结果会进入音乐素材库，可绑定为当前项目的 `BGM` 或 `Ambience`。
+
+### Synthesis Export / 合成导出
+
+- Segment status shows synced, missing audio, and needs-regeneration states. / 每段会显示同步、缺失音频和待重生成状态。
+- Supports single-segment and batch regeneration. / 支持单段重生成和批量重生成。
+- Full audio and segment audio both support waveform preview. / 完整音频与分段音频都支持波形显示。
+- Bound `BGM` / `Ambience` assets are used in the post-processing area. / 若项目绑定了 `BGM` / `Ambience`，合成导出页会在后处理区域使用这些素材。
+
+### TTS Assets / TTS 资产
+
+- Full synthesis rebuilds complete audio, subtitles, and waveforms for the current `tts_backend`. / 全量合成会按当前 `tts_backend` 重建整本音频、字幕和波形。
+- Partial regeneration targets `segment_ids`; with `rebuild_full=false`, only selected segments are updated. / 局部重生成通过 `segment_ids` 定位片段，`rebuild_full=false` 时只更新目标片段。
+- If you switch engines, run a full synthesis again for consistent assets. / 如果切换过不同引擎，建议再做一次全量合成来保持资产一致。
+
+---
+
+## Troubleshooting / 故障排查
+
+### 1. Parse falls back to mock / 解析失败后回退到 mock
+
+Check system status / 先检查系统状态：
+
+```powershell
+curl "http://127.0.0.1:8000/api/v1/system/status"
+```
+
+Verify / 重点确认：
+- `llm_backend`
+- `llama_cpp_available`
+- model path exists / 模型路径是否存在
+- API key or model name is correct / API Key 或模型名是否正确
+
+### 2. Qwen3.5 model fails to load / Qwen3.5 模型加载报错
+
+- Make sure backend is `llama_cpp`. / 确认使用的是 `llama_cpp` 后端。
+- Make sure the GGUF path exists. / 确认 GGUF 路径存在。
+- If `Qwen35ChatHandler` asks for `clip_model_path`, configure `LLM CLIP Model Path`. / 如果提示 `Qwen35ChatHandler` 需要 `clip_model_path`，请在系统设置里补 `LLM CLIP 模型路径`。
+
+### 3. ASR unavailable / ASR 不可用
+
+- Check `BV_ASR_BACKEND`, `BV_ASR_MODEL_PATH`, and device settings. / 检查 `BV_ASR_BACKEND`、`BV_ASR_MODEL_PATH` 和设备配置。
+- For `qwen3_crispasr`, install CrispASR and verify `BV_QWEN3_ASR_CRISPASR_EXE` plus `BV_QWEN3_ASR_MODEL_PATH`. / 使用 `qwen3_crispasr` 时，确认系统已安装 CrispASR，且 `BV_QWEN3_ASR_CRISPASR_EXE` 与 `BV_QWEN3_ASR_MODEL_PATH` 都存在。
+- For speaker labels, verify `BV_PYANNOTE_AUTH_TOKEN` and model access. / 需要说话人标签时，确认 `BV_PYANNOTE_AUTH_TOKEN` 和 Pyannote 模型权限。
+
+### 4. Music generation unavailable / 音乐生成不可用
+
+- Set `BV_MUSIC_ENABLED=true`. / 确认 `BV_MUSIC_ENABLED=true`。
+- Use `turbo` or `base` for `BV_MUSIC_MODEL_VARIANT`. / 确认 `BV_MUSIC_MODEL_VARIANT` 是 `turbo` 或 `base`。
+- Configure `BV_MUSIC_TURBO_MODEL_DIR` or `BV_MUSIC_BASE_MODEL_DIR`. / 确认对应模型目录已配置。
+- For limited VRAM, prefer `BV_MUSIC_DEVICE_MODE=cpu_offload`. / 如果显存紧张，优先使用 `BV_MUSIC_DEVICE_MODE=cpu_offload`。
+
+### 5. Waveform issues / 波形异常
+
+- Confirm audio URLs/files are accessible. / 先确认音频文件可访问。
+- Refresh and retry. / 刷新页面后重试。
+- Playback usually remains available even if waveform rendering degrades. / 如果完整音频可播但波形异常，播放能力通常仍会保留。
+
+---
+
+## FAQ / 常见问题
+
+### Does this project require internet? / 这个项目一定要联网才能用吗？
+
+Not necessarily. The core workflow can run locally with GGUF LLMs, OmniVoice / VoxCPM2, Whisper or Qwen3-ASR, and local ACE-Step Diffusers models. Network access is only needed for OpenAI, Gemini, restricted Hugging Face models, or first-time model downloads.  
+不一定。核心工作流可以本地运行：LLM 用 GGUF，TTS 用 OmniVoice / VoxCPM2，ASR 用 Whisper 或 Qwen3-ASR，音乐生成用本地 ACE-Step Diffusers 模型。只有使用 OpenAI、Gemini、Hugging Face 权限模型或首次下载模型时才需要网络。
+
+### Which llama-cpp-python is used? / llama-cpp-python 用哪个版本？
+
+This project uses [JamePeng/llama-cpp-python](https://github.com/JamePeng/llama-cpp-python), already configured in `backend/requirements.txt`.  
+本项目使用 [JamePeng/llama-cpp-python](https://github.com/JamePeng/llama-cpp-python)，已在 `backend/requirements.txt` 中配置。
+
+### Which LLM model should I choose? / 推荐哪个 LLM 模型？
+
+Use `Qwen3.5-9B-UD-Q4_K_XL.gguf` for daily use and easier startup. Use `Qwen3.5-27B-UD-IQ3_XXS.gguf` when you have more resources and want better parsing quality.  
+日常优先用 `Qwen3.5-9B-UD-Q4_K_XL.gguf`，更容易跑起来。机器资源更充足时用 `Qwen3.5-27B-UD-IQ3_XXS.gguf`，复杂文本解析效果更好。
+
+### Can I try it without real models? / 没有真实模型能先试用吗？
+
+Yes. Keep `BV_ALLOW_MOCK_FALLBACK=true`; failed model loads will fall back to mock mode, which is useful for checking UI, project management, and basic interactions.  
+可以。保留 `BV_ALLOW_MOCK_FALLBACK=true`，模型加载失败时会回退到 mock 流程，适合检查 UI、项目管理和基础交互。
+
+### How are Speech Recognition and Text Input related? / 语音识别和文本输入是什么关系？
+
+Speech Recognition creates dubbing projects from audio or subtitles. Text Input creates projects from novels, scripts, or dialogue text. Both paths continue into Parse QC, Script Editor, Voice Profiles, and Synthesis Export.  
+语音识别页可以从音频或字幕直接创建配音项目；文本输入页适合从小说、剧本、对白文本创建项目。两条入口创建出的项目都会进入解析质检、剧本编辑、声音配置和合成导出流程。
+
+### Qwen3-ASR or Whisper? / Qwen3-ASR 和 Whisper 怎么选？
+
+Whisper is the safer default. Qwen3-ASR is useful when you have installed CrispASR and prepared both the CrispASR executable path and GGUF model. In this project, Qwen3-ASR is mainly used as a recognition flow; timeline and speaker behavior follow the UI hints.  
+Whisper 更适合作为默认起步方案；Qwen3-ASR 适合你已经安装 CrispASR，并准备好 CrispASR 可执行文件路径和 GGUF 模型时使用。当前 Qwen3-ASR 在项目中偏纯识别流程，时间轴和说话人能力以页面提示为准。
+
+### Why is Music Generation disabled by default? / 音乐生成为什么默认关闭？
+
+Music generation depends on local ACE-Step Diffusers models, which are large and need more memory/VRAM. Configure the model directory, set `BV_MUSIC_ENABLED=true`, then choose `turbo` or `base`.  
+音乐生成依赖本地 ACE-Step Diffusers 模型，模型体积和显存/内存需求更高。确认模型目录后，把 `BV_MUSIC_ENABLED=true`，再选择 `turbo` 或 `base` 模型变体。
+
+### Where are projects and audio saved? / 生成的项目和音频保存在哪里？
+
+Runtime data is stored in `backend/data`: projects in `backend/data/projects`, voice presets in `backend/data/voices`, synthesis outputs in `backend/data/output`, and music assets in `backend/data/output/music`.  
+运行时数据在 `backend/data`。项目在 `backend/data/projects`，声音预设在 `backend/data/voices`，合成产物在 `backend/data/output`，音乐素材在 `backend/data/output/music`。
+
+---
+
+## Command Reference / 启动命令速查
+
+```powershell
+.\run.bat
+```
 
 ```powershell
 .\.venv\Scripts\python.exe start.py
 ```
-
-分开启动：
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload
@@ -185,131 +387,3 @@ BV_ALLOW_MOCK_FALLBACK=true
 cd frontend
 npm run dev
 ```
-
----
-
-## API 与 WS 速查
-
-Base URL: `http://localhost:8000/api/v1`
-
-### API
-
-- 系统状态：`GET /system/status`
-- 工程导入：`POST /projects/import/archive`
-- 项目文件导入：`POST /projects/import/project-file`
-- 项目文件导出：`GET /projects/{project_id}/export/project-file`
-- 项目列表：`GET /projects`
-- 项目更新（含改名）：`PUT /projects/{project_id}`
-- LLM 解析：`POST /llm/parse`
-- LLM 状态：`GET /llm/parse/{task_id}`
-- LLM 取消：`POST /llm/parse/{task_id}/cancel`
-- TTS 合成：`POST /tts/synthesize`
-- TTS 局部重生成：`POST /tts/synthesize/segments`
-- TTS 状态：`GET /tts/synthesize/{task_id}`
-- TTS 取消：`POST /tts/synthesize/{task_id}/cancel`
-- 待重生成报告：`GET /tts/projects/{project_id}/stale-report`
-- 分段音频：`GET /tts/projects/{project_id}/segments/{segment_id}/audio`
-- 声音试听：`POST /voices/preview`
-- 参考音频转写：`POST /voices/transcribe`
-- 项目事件：`GET /projects/{project_id}/events`
-
-说明：
-- `tts_backend` 由 `OmniVoice` / `VoxCPM2` tab 决定
-- 局部生成时可用 `segment_ids` + `rebuild_full=false` 只替换目标片段
-- 如果希望整本音频、字幕和 ZIP 都保持一致，建议使用同一个 `tts_backend` 重新做一次全量合成
-
-### WebSocket
-
-- LLM 流：`/api/v1/ws/llm-stream/{task_id}`
-- TTS 进度：`/api/v1/ws/tts-progress/{task_id}`
-- 系统事件：`/api/v1/ws/system-events`
-
----
-
-## 测试与验收
-
-## 前端
-
-```powershell
-cd frontend
-npm test
-npm run build
-```
-
-## 后端核心回归
-
-```powershell
-.\.venv\Scripts\python.exe -m unittest backend.tests.test_api_smoke backend.tests.test_task_flows backend.tests.test_persistence
-.\.venv\Scripts\python.exe -m unittest backend.tests.test_llm_json_utils backend.tests.test_api_smoke backend.tests.test_task_flows backend.tests.test_persistence
-```
-
-## 阶段验收脚本
-
-```powershell
-.\.venv\Scripts\python.exe -m backend.tests.p2_acceptance_runner
-.\.venv\Scripts\python.exe -m backend.tests.phase3_acceptance_runner
-```
-
----
-
-## 常见问题（Troubleshooting）
-
-## 1) 解析失败后回退到 mock
-
-先看系统状态：
-
-```powershell
-curl "http://127.0.0.1:8000/api/v1/system/status"
-```
-
-重点确认：
-- `llm_backend`、`llama_cpp_available`
-- 模型路径是否存在
-- API Key / model 名是否正确
-
-## 2) Gemini 400/404
-
-- 先确认模型名是否可用（与你账号区域一致）
-- 对 Gemini/OpenAI 建议仅传 `temperature`，其余惩罚项不要传
-- 如果日志出现 `responseSchema unsupported`，当前实现会自动回退 `responseMimeType`
-
-## 3) WaveSurfer 初始化失败/波形异常
-
-- 先确认音频 URL 可访问
-- 刷新页面后重试
-- 若完整音频可播但波形异常，系统会保留播放能力并降级交互
-
-## 4) “项目删除不完”
-
-通常是同名不同 ID 的历史副本：
-- 用工具栏 `更多 -> 删除同名副本`
-- 或 `更多 -> 清理重复项目`
-
-## 5) ASR 不可用
-
-- 检查 `BV_ASR_MODEL_PATH` 与设备配置
-- 仅安装了一个 ASR 后端也可运行，系统会自动选择可用后端
-
----
-
-## 数据目录说明
-
-运行时数据位于 `backend/data`：
-
-- `config.json`：运行时配置
-- `projects/*.json`：项目数据
-- `projects/*.events.jsonl`：任务事件日志
-- `voices/`：声音预设与参考音频
-- `output/`：合成产物与导出文件
-- `cache/tts/`：可重建缓存
-- `tmp-tests/`：测试临时文件
-
-详细规则见：
-- [runtime-data-governance.md](/E:/softs/BeautyVoiceTTS/docs/runtime-data-governance.md)
-
----
-
-## 相关文档
-
-- [implementation03-acceptance-checklist.md](/E:/softs/BeautyVoiceTTS/docs/implementation03-acceptance-checklist.md)
-- [comprehensive-repair-improvement-plan.md](/E:/softs/BeautyVoiceTTS/docs/comprehensive-repair-improvement-plan.md)
