@@ -1,3 +1,5 @@
+import { getLanguage, translate } from "../i18n/core";
+
 const DEFAULT_SYNTHESIS_CONFIG = {
   num_step: 32,
   guidance_scale: 2,
@@ -73,7 +75,7 @@ export async function openProjectFileWithPicker() {
     multiple: false,
     types: [
       {
-        description: "VoiceLace Project",
+        description: translate("project.fileTypeDescription", {}, getLanguage()),
         accept: {
           "application/json": [".bvtproject.json", ".json"],
         },
@@ -108,7 +110,7 @@ export async function saveProjectFile({
       suggestedName: `${sanitizeFilename(preferredName)}.bvtproject.json`,
       types: [
         {
-          description: "VoiceLace Project",
+          description: translate("project.fileTypeDescription", {}, getLanguage()),
           accept: {
             "application/json": [".bvtproject.json"],
           },

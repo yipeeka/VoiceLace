@@ -23,6 +23,7 @@ import { buildSegmentEditorDraft, createSegmentDraft, normalizeSegmentFromEditor
 import { buildCharacterStats, buildSpeakerOptions, filterSegmentsBySpeaker, getInsertAnchorLabel } from "../utils/scriptSidebar";
 import { hasEditingDraftChanges } from "../utils/scriptEditorDirty";
 import { computeScriptDiff, normalizeDraftScript } from "../utils/scriptDiff";
+import { useI18n } from "../i18n/I18nProvider";
 
 const QC_FOCUS_SEGMENTS_KEY = "beautyvoice.qc.focus_segments";
 const QC_FOCUS_SEGMENT_LEGACY_KEY = "beautyvoice.qc.focus_segment_id";
@@ -187,6 +188,7 @@ function SortableSegmentCard({
   onSetInsertAnchor,
   onDelete,
 }) {
+  const { t } = useI18n();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: segment.id,
     disabled: !canReorder || isEditing || isSaving,
@@ -200,7 +202,7 @@ function SortableSegmentCard({
 
   const charColor = getCharColor(segment.speaker);
   const qcStyle = getQcHighlightStyle(qcSeverity);
-  const qcLabel = qcSeverity === "high" ? "高风险" : qcSeverity === "medium" ? "中风险" : qcSeverity === "low" ? "低风险" : "";
+  const qcLabel = qcSeverity === "high" ? t("script.qc.highRisk") : qcSeverity === "medium" ? t("script.qc.mediumRisk") : qcSeverity === "low" ? t("script.qc.lowRisk") : "";
   const sourceStartText = formatTimelineMs(segment?.source_start_ms);
   const sourceEndText = formatTimelineMs(segment?.source_end_ms);
   const hasSourceRange = Boolean(sourceStartText && sourceEndText);
@@ -233,8 +235,8 @@ function SortableSegmentCard({
       {canEdit && !isEditing && (
         <div
           className={`dragHandle ${canReorder ? "" : "disabled"}`}
-          title={canReorder ? "拖拽调整顺序" : "当前筛选状态下暂不支持拖拽排序"}
-          aria-label={canReorder ? "拖拽调整顺序" : "当前筛选状态下暂不支持拖拽排序"}
+          title={canReorder ? t("script.action.dragSort") : t("script.action.dragSortDisabled")}
+          aria-label={canReorder ? t("script.action.dragSort") : t("script.action.dragSortDisabled")}
           {...(canReorder ? { ...attributes, ...listeners } : {})}
         >
           <GripVertical size={15} />
@@ -263,19 +265,19 @@ function SortableSegmentCard({
                 disabled={isSaving || !draft?.text?.trim()}
                 onClick={() => onApplyDraft(segment.id)}
               >
-                {isSaving ? "处理中..." : "应用到草稿"}
+                {isSaving ? t("script.applying") : t("script.applyToDraft")}
               </Button>
               <Button variant="ghost" size="sm" onClick={() => onCancelEdit(segment.id)}>
-                取消
+                {t("common.cancel")}
               </Button>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => onSplitAtCursor(segment.id)}
-                title="按当前光标位置拆分"
+                title={t("script.action.splitAtCursor")}
               >
                 <Scissors size={13} />
-                拆分
+                {t("script.action.split")}
               </Button>
             </div>
           </>
@@ -283,7 +285,7 @@ function SortableSegmentCard({
           <>
             <div className="segmentHeader">
               <span className="segmentIndex">#{(segment.index ?? 0) + 1}</span>
-              <CharacterBadge name={segment.speaker || "旁白"} />
+              <CharacterBadge name={segment.speaker || t("script.narrator")} />
               {qcLabel ? (
                 <span
                   className="statusBadge"
@@ -314,8 +316,8 @@ function SortableSegmentCard({
             <p className="segmentText">{segment.text}</p>
             {hasSourceRange || sourceDurationSec || speedValue || durationValue ? (
               <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-                {hasSourceRange ? `时间轴 ${sourceStartText} -> ${sourceEndText}` : ""}
-                {sourceDurationSec ? ` · 目标时长 ${sourceDurationSec}s` : ""}
+                {hasSourceRange ? `${t("script.timeline")} ${sourceStartText} -> ${sourceEndText}` : ""}
+                {sourceDurationSec ? ` · ${t("script.targetDuration")} ${sourceDurationSec}s` : ""}
                 {durationValue ? ` · duration ${durationValue}s` : ""}
                 {speedValue ? ` · speed ${speedValue}` : ""}
               </div>
@@ -331,7 +333,7 @@ function SortableSegmentCard({
             className="btn btn-ghost btn-sm btn-icon"
             disabled={!canEdit || isSaving}
             onClick={() => onBeginEdit(segment)}
-            title="编辑"
+            title={t("common.edit")}
           >
             <Pencil size={13} />
           </button>
@@ -339,7 +341,7 @@ function SortableSegmentCard({
             className="btn btn-danger btn-sm btn-icon"
             disabled={!canEdit || isSaving}
             onClick={() => onDelete(segment.id)}
-            title="删除"
+            title={t("common.delete")}
           >
             <Trash2 size={13} />
           </button>
@@ -347,7 +349,7 @@ function SortableSegmentCard({
             className="btn btn-ghost btn-sm btn-icon"
             disabled={!canEdit || isSaving}
             onClick={() => onSetInsertAnchor(segment.id)}
-            title="新增片段插入到此段后"
+            title={t("script.action.insertAfter")}
           >
             <Plus size={13} />
           </button>
@@ -355,7 +357,7 @@ function SortableSegmentCard({
             className="btn btn-ghost btn-sm btn-icon"
             disabled={!canEdit || isSaving || !canMergeWithNext}
             onClick={() => onMergeWithNext(segment.id)}
-            title={canMergeWithNext ? "与下一段合并" : "没有下一段可合并"}
+            title={canMergeWithNext ? t("script.action.mergeWithNext") : t("script.action.noNextToMerge")}
           >
             <Combine size={13} />
           </button>
@@ -366,6 +368,7 @@ function SortableSegmentCard({
 }
 
 export default function ScriptEditorPage() {
+  const { t } = useI18n();
   const {
     currentProject,
     currentProjectFileHandle,
@@ -730,7 +733,7 @@ export default function ScriptEditorPage() {
     const normalized = normalizeSegmentFromEditorDraft(draft);
     if (!normalized.ok) {
       useUiStore.getState().pushToast({
-        title: `tts_overrides JSON 格式错误：${normalized.error}`,
+        title: t("synth.toast.ttsOverridesInvalid", { error: normalized.error }),
         tone: "error",
       });
       return;
@@ -744,7 +747,7 @@ export default function ScriptEditorPage() {
     }));
     cancelEdit(id);
     useUiStore.getState().pushToast({
-      title: "已加入草稿，点击“保存剧本”后生效",
+      title: t("synth.toast.addedToDraft"),
       tone: "default",
     });
   }
@@ -754,7 +757,7 @@ export default function ScriptEditorPage() {
     const normalized = normalizeSegmentFromEditorDraft(newSegment);
     if (!normalized.ok) {
       useUiStore.getState().pushToast({
-        title: `新增片段 tts_overrides JSON 格式错误：${normalized.error}`,
+        title: t("synth.toast.newSegmentTtsInvalid", { error: normalized.error }),
         tone: "error",
       });
       return;
@@ -779,7 +782,7 @@ export default function ScriptEditorPage() {
     setNewSegment(createSegmentDraft(segments.length + 1));
     setInsertAfterSegmentId(null);
     useUiStore.getState().pushToast({
-      title: "已加入草稿，点击“保存剧本”后生效",
+      title: t("synth.toast.addedToDraft"),
       tone: "default",
     });
   }
@@ -795,7 +798,7 @@ export default function ScriptEditorPage() {
     setSegmentDraft((current) => (current?.id === id ? null : current));
     setInsertAfterSegmentId((current) => (current === id ? null : current));
     useUiStore.getState().pushToast({
-      title: "已加入草稿，点击“保存剧本”后生效",
+      title: t("synth.toast.addedToDraft"),
       tone: "default",
     });
   }
@@ -807,7 +810,7 @@ export default function ScriptEditorPage() {
       const normalized = normalizeSegmentFromEditorDraft(segmentDraft);
       if (!normalized.ok) {
         useUiStore.getState().pushToast({
-          title: `当前编辑片段 tts_overrides JSON 格式错误：${normalized.error}`,
+          title: t("synth.toast.currentSegmentTtsInvalid", { error: normalized.error }),
           tone: "error",
         });
         return;
@@ -858,13 +861,13 @@ export default function ScriptEditorPage() {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-    useUiStore.getState().pushToast({ title: "已导出剧本 JSON", tone: "success" });
+    useUiStore.getState().pushToast({ title: t("script.toast.exportJson"), tone: "success" });
   }
 
   function handleExportSrt() {
     const srtText = buildSrtTextFromSegments(draftScript?.segments || []);
     if (!srtText.trim()) {
-      useUiStore.getState().pushToast({ title: "当前剧本没有可导出的时间轴片段", tone: "warning" });
+      useUiStore.getState().pushToast({ title: t("script.toast.noTimelineForSrt"), tone: "warning" });
       return;
     }
     const blob = new Blob([`${srtText}\n`], { type: "text/plain;charset=utf-8" });
@@ -876,7 +879,7 @@ export default function ScriptEditorPage() {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-    useUiStore.getState().pushToast({ title: `已导出 SRT（${timelineSegmentCount} 段）`, tone: "success" });
+    useUiStore.getState().pushToast({ title: t("script.toast.exportSrt", { count: timelineSegmentCount }), tone: "success" });
   }
 
   const handleSaveProjectFile = useCallback(async (options = {}) => {
@@ -900,14 +903,14 @@ export default function ScriptEditorPage() {
         bindCurrentProjectFile({ handle: result.handle, fileName: result.fileName || "" });
       }
       useUiStore.getState().pushToast({
-        title: forceSaveAs ? "项目文件已另存" : result?.mode === "inplace" ? "项目文件已保存" : "项目文件已导出",
+        title: forceSaveAs ? t("text.toast.projectSavedAs") : result?.mode === "inplace" ? t("text.toast.projectSaved") : t("text.toast.projectExported"),
         tone: "success",
       });
     } catch (error) {
       if (error?.name === "AbortError") {
         return;
       }
-      useUiStore.getState().pushToast({ title: formatError("保存项目失败", error), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("script.toast.saveProjectFailedTitle"), error), tone: "error" });
     }
   }, [currentProject, draftScript, script, currentProjectFileHandle, bindCurrentProjectFile]);
 
@@ -933,7 +936,7 @@ export default function ScriptEditorPage() {
       setCursorBySegmentId({});
       setNewSegment(createSegmentDraft(normalized.segments.length));
     } catch (err) {
-      useUiStore.getState().pushToast({ title: formatError("导入失败", err), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("script.toast.importFailedTitle"), err), tone: "error" });
     }
   }
 
@@ -978,7 +981,7 @@ export default function ScriptEditorPage() {
   async function handleGlobalRenameCharacter({ fromName, toName }) {
     if (!currentProject?.id) return;
     if (hasUnsavedChanges) {
-      useUiStore.getState().pushToast({ title: "请先保存当前草稿后再执行全局操作", tone: "warning" });
+      useUiStore.getState().pushToast({ title: t("script.toast.saveDraftBeforeGlobal"), tone: "warning" });
       return;
     }
     if (!fromName || !toName) return;
@@ -995,7 +998,7 @@ export default function ScriptEditorPage() {
   async function handleGlobalMergeCharacter({ sourceName, targetName }) {
     if (!currentProject?.id) return;
     if (hasUnsavedChanges) {
-      useUiStore.getState().pushToast({ title: "请先保存当前草稿后再执行全局操作", tone: "warning" });
+      useUiStore.getState().pushToast({ title: t("script.toast.saveDraftBeforeGlobal"), tone: "warning" });
       return;
     }
     if (!sourceName || !targetName) return;
@@ -1012,14 +1015,14 @@ export default function ScriptEditorPage() {
   async function handleBatchUpdate({ segmentIds = [], emotion = null, type = null } = {}) {
     if (!currentProject?.id) return;
     if (hasUnsavedChanges) {
-      useUiStore.getState().pushToast({ title: "请先保存当前草稿后再执行批量操作", tone: "warning" });
+      useUiStore.getState().pushToast({ title: t("script.toast.saveDraftBeforeBatch"), tone: "warning" });
       return;
     }
     const targetIds = Array.isArray(segmentIds) && segmentIds.length
       ? segmentIds
       : visibleSegments.map((segment) => segment.id);
     if (!targetIds.length) {
-      useUiStore.getState().pushToast({ title: "当前筛选结果没有可批量修改的片段", tone: "warning" });
+      useUiStore.getState().pushToast({ title: t("script.toast.noSegmentsForBatch"), tone: "warning" });
       return;
     }
     if (!emotion && !type) return;
@@ -1039,7 +1042,7 @@ export default function ScriptEditorPage() {
   async function handleSearchReplace({ find, replace, caseSensitive }) {
     if (!currentProject?.id) return;
     if (hasUnsavedChanges) {
-      useUiStore.getState().pushToast({ title: "请先保存当前草稿后再执行搜索替换", tone: "warning" });
+      useUiStore.getState().pushToast({ title: t("script.toast.saveDraftBeforeSearchReplace"), tone: "warning" });
       return;
     }
     if (!find) return;
@@ -1061,12 +1064,12 @@ export default function ScriptEditorPage() {
   async function handleSplitAtCursor(segmentId) {
     if (!currentProject?.id) return;
     if (hasUnsavedChanges) {
-      useUiStore.getState().pushToast({ title: "请先保存当前草稿后再执行拆分", tone: "warning" });
+      useUiStore.getState().pushToast({ title: t("script.toast.saveDraftBeforeSplit"), tone: "warning" });
       return;
     }
     const cursor = Number(cursorBySegmentId[segmentId] ?? -1);
     if (cursor < 0) {
-      useUiStore.getState().pushToast({ title: "请先在片段文本中点击定位光标", tone: "warning" });
+      useUiStore.getState().pushToast({ title: t("script.toast.placeCursorFirst"), tone: "warning" });
       return;
     }
     const updated = await splitSegment({
@@ -1092,7 +1095,7 @@ export default function ScriptEditorPage() {
   async function handleMergeWithNext(segmentId) {
     if (!currentProject?.id) return;
     if (hasUnsavedChanges) {
-      useUiStore.getState().pushToast({ title: "请先保存当前草稿后再执行合并", tone: "warning" });
+      useUiStore.getState().pushToast({ title: t("script.toast.saveDraftBeforeMerge"), tone: "warning" });
       return;
     }
     const nextSegmentId = findNextSegmentId(segmentId);
@@ -1148,33 +1151,33 @@ export default function ScriptEditorPage() {
             <div className="controlRow" style={{ gap: 8, flexWrap: "wrap" }}>
               <Button variant="ghost" onClick={handleUndo} disabled={!undoStack.length}>
                 <Undo2 size={14} />
-                撤销
+                {t("script.undo")}
               </Button>
               <Button variant="ghost" onClick={handleRedo} disabled={!redoStack.length}>
                 <Redo2 size={14} />
-                重做
+                {t("script.redo")}
               </Button>
             </div>
             <Button variant="primary" onClick={handleSaveScript} disabled={!canEdit || isSaving || !hasUnsavedChanges}>
               <Save size={14} />
-              {isSaving ? "保存中..." : hasUnsavedChanges ? "保存剧本" : "已保存"}
+              {isSaving ? t("synth.saving") : hasUnsavedChanges ? t("synth.saveScript") : t("synth.saved")}
             </Button>
             <Button variant="secondary" onClick={() => setDiffPreviewOpen(true)} disabled={!hasUnsavedChanges}>
-              查看差异
+              {t("synth.viewDiff")}
             </Button>
             <Button variant="secondary" onClick={() => setBatchToolsOpen(true)} disabled={!canEdit || isSaving}>
               <Settings2 size={14} />
-              批量工具
+              {t("script.batchTools")}
             </Button>
             <Button variant="secondary" onClick={handleExportJson} disabled={!script?.segments?.length}>
-              导出 JSON
+              {t("script.exportJson")}
             </Button>
             <Button variant="secondary" onClick={handleExportSrt} disabled={!timelineSegmentCount}>
               <FileDown size={14} />
-              导出 SRT
+              {t("script.exportSrt")}
             </Button>
             <Button variant="secondary" onClick={() => fileInputRef.current?.click()} disabled={!canEdit}>
-              导入 JSON
+              {t("script.importJson")}
             </Button>
             <input ref={fileInputRef} type="file" accept=".json" style={{ display: "none" }} onChange={handleImportJson} />
           </>
@@ -1185,11 +1188,15 @@ export default function ScriptEditorPage() {
       <GlassCard>
         <div className="sectionHeader">
           <div className="sectionHeaderLeft">
-            <h2 className="cardTitle">片段列表</h2>
+            <h2 className="cardTitle">{t("script.segmentList")}</h2>
             <p className="cardSubtitle">
               {isFilterActive
-                ? `当前按角色筛选显示，拖拽排序已暂时关闭。${hasUnsavedChanges ? "（当前有未保存改动）" : "（当前已保存）"}`
-                : `拖动左侧手柄可调整顺序，点击内容编辑片段。${hasUnsavedChanges ? "（当前有未保存改动）" : "（当前已保存）"}`}
+                ? t("script.subtitle.filtered", {
+                  state: hasUnsavedChanges ? t("script.subtitle.unsaved") : t("script.subtitle.saved"),
+                })
+                : t("script.subtitle.default", {
+                  state: hasUnsavedChanges ? t("script.subtitle.unsaved") : t("script.subtitle.saved"),
+                })}
             </p>
           </div>
           {visibleQcHighlightCount ? (
@@ -1197,9 +1204,9 @@ export default function ScriptEditorPage() {
               type="button"
               className="statusBadge warning clickableBadge"
               onClick={handleJumpToNextQcHighlight}
-              title="点击跳到下一条质检高亮片段"
+              title={t("script.qc.jumpNext")}
             >
-              质检高亮 {visibleQcHighlightCount} 段
+              {t("script.qcHighlightCount", { count: visibleQcHighlightCount })}
             </button>
           ) : null}
         </div>
@@ -1207,7 +1214,7 @@ export default function ScriptEditorPage() {
         {sourceAudioUrl ? (
           <div className="scriptSourceAudioPanel">
             <div className="scriptSourceAudioMeta">
-              <span className="statusBadge">识别原音频</span>
+              <span className="statusBadge">{t("script.sourceAudio")}</span>
               <span className="muted">
                 {formatTimelineMs(sourceAudioStartMs)}
                 {sourceAudioEndMs > sourceAudioStartMs ? ` -> ${formatTimelineMs(sourceAudioEndMs)}` : ""}
@@ -1259,13 +1266,13 @@ export default function ScriptEditorPage() {
           </DndContext>
         ) : segments.length ? (
           <EmptyState
-            title="该角色暂无段落"
-            description="点击左侧“总计”可恢复查看全部片段"
+            title={t("script.empty.noSegmentsForSpeaker")}
+            description={t("script.empty.noSegmentsForSpeakerDesc")}
           />
         ) : (
           <EmptyState
-            title="还没有剧本片段"
-            description="先在「文本输入」页完成 LLM 解析，或手动添加片段"
+            title={t("script.empty.noSegments")}
+            description={t("script.empty.noSegmentsDesc")}
           />
         )}
       </GlassCard>

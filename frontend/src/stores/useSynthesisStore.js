@@ -2,9 +2,18 @@ import { create } from "zustand";
 
 import { API_ORIGIN, api, getWsBaseUrl } from "../utils/api";
 import { formatError, getErrorMessage } from "../utils/errors";
+import { getLanguage } from "../i18n/core";
+import { MESSAGES } from "../i18n/messages";
 import { runTaskChannel } from "../utils/taskChannel";
 import { createTaskChannelBridge } from "../utils/taskChannelBridge";
 import { useUiStore } from "./useUiStore";
+
+function t(key, params = {}) {
+  const language = getLanguage();
+  const dict = MESSAGES[language] || MESSAGES.zh;
+  const template = dict[key] || MESSAGES.en?.[key] || key;
+  return String(template).replace(/\{(\w+)\}/g, (_, name) => String(params?.[name] ?? `{${name}}`));
+}
 
 const buildSegmentResult = (msg) => ({
   segment_id: msg.segment_id,
@@ -52,7 +61,7 @@ const runSynthesisFlow = async ({
     taskKind,
     status: "starting",
     connectionStatus: "connecting",
-    modelStatus: "正在建立连接...",
+    modelStatus: t("store.synth.status.connecting"),
     lastSyncError: "",
     error: "",
     progress: { current: 0, total: 0 },
@@ -125,7 +134,7 @@ const runSynthesisFlow = async ({
       exhaustedMessage,
       timeoutMessage,
       onReconnectOpenExtra: async () => {
-        set({ modelStatus: "连接已恢复，正在同步任务状态..." });
+        set({ modelStatus: t("store.synth.status.reconnectedSyncing") });
       },
       onExhaustedExtra: () => {
         set({
@@ -176,7 +185,7 @@ const runSynthesisFlow = async ({
           }
           set({
             status: state?.status || "running",
-            modelStatus: "任务状态同步中",
+            modelStatus: t("store.synth.status.syncing"),
             lastSyncError: "",
             progress: state?.progress || { current: 0, total: 0 },
             queuePosition: Number(state?.queue_position || 0),
@@ -208,7 +217,7 @@ const runSynthesisFlow = async ({
             }
             set({
               status: msg.status,
-              modelStatus: msg.status === "queued" ? "任务排队中" : `任务状态：${msg.status}`,
+              modelStatus: msg.status === "queued" ? t("store.synth.status.queued") : t("store.synth.status.taskState", { status: msg.status }),
               queuePosition: Number(msg.queue_position || 0),
             });
             break;
@@ -237,13 +246,13 @@ const runSynthesisFlow = async ({
           case "postprocess_stage":
             set({
               status: "running",
-              modelStatus: msg.message || "后期处理进行中",
+              modelStatus: msg.message || t("store.synth.status.postprocessing"),
             });
             break;
           case "segment_start":
             set({
               status: "running",
-              modelStatus: `正在${segmentVerb}第 ${msg.index + 1}/${msg.total} 段`,
+              modelStatus: t("store.synth.status.segmentProgress", { verb: segmentVerb, current: msg.index + 1, total: msg.total }),
             });
             break;
           case "segment_done":
@@ -400,18 +409,18 @@ export const useSynthesisStore = create((set) => ({
       resetSegmentResults: true,
       mergeSegmentResults: false,
       resetAudioUrls: true,
-      queueMessage: "任务已创建，等待执行",
-      segmentVerb: "合成",
-      exhaustedMessage: "合成连接已关闭（重连失败）",
-      timeoutMessage: "合成任务等待超时",
-      syncErrorMessage: "合成状态同步失败",
-      cancelRequestedMessage: "正在取消合成任务...",
-      canceledMessage: "合成任务已取消",
-      failureMessage: "合成失败",
+      queueMessage: t("store.synth.queue.created"),
+      segmentVerb: t("store.synth.verb.synthesize"),
+      exhaustedMessage: t("store.synth.error.connClosed"),
+      timeoutMessage: t("store.synth.error.timeout"),
+      syncErrorMessage: t("store.synth.error.syncFailed"),
+      cancelRequestedMessage: t("store.synth.status.canceling"),
+      canceledMessage: t("store.synth.status.canceled"),
+      failureMessage: t("store.synth.error.failed"),
       completeToastTitle: (result) =>
         result.status === "partial_failed"
-          ? `合成部分完成，失败 ${result.failed_count || 0} 段`
-          : `合成完成，共 ${result.progress?.total || 0} 段`,
+          ? t("store.synth.toast.partialDoneFailedCount", { count: result.failed_count || 0 })
+          : t("store.synth.toast.doneTotalCount", { count: result.progress?.total || 0 }),
     });
   },
   startPartialSynthesis: async ({ projectId, config, segmentIds, rebuildFull = true }) => {
@@ -434,18 +443,18 @@ export const useSynthesisStore = create((set) => ({
       resetSegmentResults: false,
       mergeSegmentResults: true,
       resetAudioUrls: true,
-      queueMessage: "局部任务已创建，等待执行",
-      segmentVerb: "处理",
-      exhaustedMessage: "局部合成连接已关闭（重连失败）",
-      timeoutMessage: "局部合成任务等待超时",
-      syncErrorMessage: "局部合成状态同步失败",
-      cancelRequestedMessage: "正在取消局部合成任务...",
-      canceledMessage: "局部合成任务已取消",
-      failureMessage: "局部合成失败",
+      queueMessage: t("store.synth.queue.partialCreated"),
+      segmentVerb: t("store.synth.verb.process"),
+      exhaustedMessage: t("store.synth.error.partialConnClosed"),
+      timeoutMessage: t("store.synth.error.partialTimeout"),
+      syncErrorMessage: t("store.synth.error.partialSyncFailed"),
+      cancelRequestedMessage: t("store.synth.status.partialCanceling"),
+      canceledMessage: t("store.synth.status.partialCanceled"),
+      failureMessage: t("store.synth.error.partialFailed"),
       completeToastTitle: (result) =>
         result.status === "partial_failed"
-          ? `局部重生成部分完成，失败 ${result.failed_count || 0} 段`
-          : `重新生成完成，重建 ${result.generated_count || 0} 段，复用 ${result.reused_count || 0} 段`,
+          ? t("store.synth.toast.partialRegenerateFailedCount", { count: result.failed_count || 0 })
+          : t("store.synth.toast.regenerateDone", { generated: result.generated_count || 0, reused: result.reused_count || 0 }),
     });
   },
   startPostprocess: async ({ projectId, config }) => {
@@ -463,15 +472,15 @@ export const useSynthesisStore = create((set) => ({
       resetSegmentResults: false,
       mergeSegmentResults: true,
       resetAudioUrls: false,
-      queueMessage: "后期处理任务已创建，等待执行",
-      segmentVerb: "后期处理",
-      exhaustedMessage: "后期处理连接已关闭（重连失败）",
-      timeoutMessage: "后期处理任务等待超时",
-      syncErrorMessage: "后期处理状态同步失败",
-      cancelRequestedMessage: "正在取消后期处理任务...",
-      canceledMessage: "后期处理任务已取消",
-      failureMessage: "后期处理失败",
-      completeToastTitle: () => "后期处理完成",
+      queueMessage: t("store.synth.queue.postprocessCreated"),
+      segmentVerb: t("store.synth.verb.postprocess"),
+      exhaustedMessage: t("store.synth.error.postprocessConnClosed"),
+      timeoutMessage: t("store.synth.error.postprocessTimeout"),
+      syncErrorMessage: t("store.synth.error.postprocessSyncFailed"),
+      cancelRequestedMessage: t("store.synth.status.postprocessCanceling"),
+      canceledMessage: t("store.synth.status.postprocessCanceled"),
+      failureMessage: t("store.synth.error.postprocessFailed"),
+      completeToastTitle: () => t("store.synth.toast.postprocessDone"),
     });
   },
   startRetryFailed: async ({ projectId, config }) => {
@@ -486,18 +495,18 @@ export const useSynthesisStore = create((set) => ({
       resetSegmentResults: false,
       mergeSegmentResults: true,
       resetAudioUrls: false,
-      queueMessage: "失败段重试任务已创建，等待执行",
-      segmentVerb: "重试",
-      exhaustedMessage: "失败段重试连接已关闭（重连失败）",
-      timeoutMessage: "失败段重试任务等待超时",
-      syncErrorMessage: "失败段重试状态同步失败",
-      cancelRequestedMessage: "正在取消失败段重试任务...",
-      canceledMessage: "失败段重试任务已取消",
-      failureMessage: "失败段重试失败",
+      queueMessage: t("store.synth.queue.retryFailedCreated"),
+      segmentVerb: t("store.synth.verb.retry"),
+      exhaustedMessage: t("store.synth.error.retryConnClosed"),
+      timeoutMessage: t("store.synth.error.retryTimeout"),
+      syncErrorMessage: t("store.synth.error.retrySyncFailed"),
+      cancelRequestedMessage: t("store.synth.status.retryCanceling"),
+      canceledMessage: t("store.synth.status.retryCanceled"),
+      failureMessage: t("store.synth.error.retryFailed"),
       completeToastTitle: (result) =>
         result.status === "partial_failed"
-          ? `失败段重试后仍有 ${result.failed_count || 0} 段失败`
-          : "失败段重试完成",
+          ? t("store.synth.toast.retryStillFailed", { count: result.failed_count || 0 })
+          : t("store.synth.toast.retryDone"),
     });
   },
   startResumeSynthesis: async ({ projectId, config }) => {
@@ -512,18 +521,18 @@ export const useSynthesisStore = create((set) => ({
       resetSegmentResults: false,
       mergeSegmentResults: true,
       resetAudioUrls: false,
-      queueMessage: "续跑任务已创建，等待执行",
-      segmentVerb: "续跑",
-      exhaustedMessage: "续跑连接已关闭（重连失败）",
-      timeoutMessage: "续跑任务等待超时",
-      syncErrorMessage: "续跑状态同步失败",
-      cancelRequestedMessage: "正在取消续跑任务...",
-      canceledMessage: "续跑任务已取消",
-      failureMessage: "续跑失败",
+      queueMessage: t("store.synth.queue.resumeCreated"),
+      segmentVerb: t("store.synth.verb.resume"),
+      exhaustedMessage: t("store.synth.error.resumeConnClosed"),
+      timeoutMessage: t("store.synth.error.resumeTimeout"),
+      syncErrorMessage: t("store.synth.error.resumeSyncFailed"),
+      cancelRequestedMessage: t("store.synth.status.resumeCanceling"),
+      canceledMessage: t("store.synth.status.resumeCanceled"),
+      failureMessage: t("store.synth.error.resumeFailed"),
       completeToastTitle: (result) =>
         result.status === "partial_failed"
-          ? `续跑部分完成，仍有 ${result.failed_count || 0} 段失败`
-          : "续跑完成",
+          ? t("store.synth.toast.resumeStillFailed", { count: result.failed_count || 0 })
+          : t("store.synth.toast.resumeDone"),
     });
   },
   fetchQueueSnapshot: async () => {
@@ -534,7 +543,7 @@ export const useSynthesisStore = create((set) => ({
   cancelSynthesis: async () => {
     const taskId = useSynthesisStore.getState().taskId;
     const taskKind = useSynthesisStore.getState().taskKind || "synthesis";
-    const taskLabel = taskKind === "postprocess" ? "后期处理任务" : "合成任务";
+    const taskLabel = taskKind === "postprocess" ? t("store.synth.label.postprocessTask") : t("store.synth.label.synthesisTask");
     if (!taskId) {
       return { status: "idle" };
     }
@@ -545,9 +554,9 @@ export const useSynthesisStore = create((set) => ({
         isRunning: false,
         status: "done",
         connectionStatus: "open",
-        modelStatus: "任务已完成",
+        modelStatus: t("store.synth.status.done"),
       });
-      useUiStore.getState().pushToast({ title: "任务已完成，无需取消", tone: "default" });
+      useUiStore.getState().pushToast({ title: t("store.synth.toast.alreadyDoneNoCancel"), tone: "default" });
       return result;
     }
     if (backendStatus === "canceled") {
@@ -555,9 +564,9 @@ export const useSynthesisStore = create((set) => ({
         isRunning: false,
         status: "canceled",
         connectionStatus: "open",
-        modelStatus: `${taskLabel}已取消`,
+        modelStatus: t("store.synth.status.taskCanceled", { task: taskLabel }),
       });
-      useUiStore.getState().pushToast({ title: `${taskLabel}已取消`, tone: "default" });
+      useUiStore.getState().pushToast({ title: t("store.synth.status.taskCanceled", { task: taskLabel }), tone: "default" });
       return result;
     }
     if (backendStatus === "error") {
@@ -566,9 +575,9 @@ export const useSynthesisStore = create((set) => ({
         status: "error",
         connectionStatus: "open",
         modelStatus: "",
-        error: result?.error || "任务取消失败",
+        error: result?.error || t("store.synth.error.cancelFailed"),
       });
-      useUiStore.getState().pushToast({ title: "取消失败，任务已报错", tone: "error" });
+      useUiStore.getState().pushToast({ title: t("store.synth.toast.cancelFailedTaskErrored"), tone: "error" });
       return result;
     }
 
@@ -576,9 +585,9 @@ export const useSynthesisStore = create((set) => ({
       isRunning: true,
       status: "cancel_requested",
       connectionStatus: "open",
-      modelStatus: "任务取消中...",
+      modelStatus: t("store.synth.status.cancelingTask"),
     });
-    useUiStore.getState().pushToast({ title: `已请求取消${taskLabel}`, tone: "default" });
+    useUiStore.getState().pushToast({ title: t("store.synth.toast.cancelRequested", { task: taskLabel }), tone: "default" });
     // Fallback: if WS event is missed, reconcile status once.
     setTimeout(async () => {
       const state = useSynthesisStore.getState();
@@ -591,14 +600,14 @@ export const useSynthesisStore = create((set) => ({
           set({
             isRunning: false,
             status: "canceled",
-            modelStatus: `${taskLabel}已取消`,
+            modelStatus: t("store.synth.status.taskCanceled", { task: taskLabel }),
             lastSyncError: "",
           });
         } else if (synced?.status === "done" || synced?.status === "partial_failed") {
           set({
             isRunning: false,
             status: synced?.status,
-            modelStatus: synced?.status === "partial_failed" ? "任务部分完成" : "任务已完成",
+            modelStatus: synced?.status === "partial_failed" ? t("store.synth.status.partialDone") : t("store.synth.status.done"),
             lastSyncError: "",
           });
         } else if (synced?.status === "error") {
@@ -606,7 +615,7 @@ export const useSynthesisStore = create((set) => ({
             isRunning: false,
             status: "error",
             modelStatus: "",
-            error: synced?.error || "合成失败",
+            error: synced?.error || t("store.synth.error.failed"),
             lastSyncError: "",
           });
         }

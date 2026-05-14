@@ -1,8 +1,10 @@
 import { useEffect, useRef } from "react";
 
 import { API_ORIGIN } from "../../utils/api";
+import { useI18n } from "../../i18n/I18nProvider";
 
 export default function SegmentResultList({ segments, activeSegmentId, onLocate }) {
+  const { t } = useI18n();
   const itemRefs = useRef(new Map());
 
   useEffect(() => {
@@ -16,7 +18,7 @@ export default function SegmentResultList({ segments, activeSegmentId, onLocate 
   }, [activeSegmentId]);
 
   if (!segments.length) {
-    return <div className="emptyState">还没有分段结果，先执行一次合成。</div>;
+    return <div className="emptyState">{t("synth.segmentResults.empty")}</div>;
   }
 
   return (
@@ -42,7 +44,7 @@ export default function SegmentResultList({ segments, activeSegmentId, onLocate 
           <p className="segmentText">{segment.text}</p>
           <div className="controlRow">
             <button type="button" className="primaryButton ghostButton segmentActionButton" onClick={() => onLocate?.(segment.segment_id)}>
-              定位到时间线
+              {t("synth.segmentResults.locateTimeline")}
             </button>
             <div style={{ flex: 1 }}>
               <audio

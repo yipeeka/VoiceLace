@@ -1,4 +1,13 @@
 import { parseCsvList, parseOverridesJson } from "../utils/segmentDraft";
+import { getLanguage } from "../i18n/core";
+import { MESSAGES } from "../i18n/messages";
+
+function t(key, params = {}) {
+  const language = getLanguage();
+  const dict = MESSAGES[language] || MESSAGES.zh;
+  const template = dict[key] || MESSAGES.en?.[key] || key;
+  return String(template).replace(/\{(\w+)\}/g, (_, name) => String(params?.[name] ?? `{${name}}`));
+}
 
 export function useSynthesisActions({
   currentProject,
@@ -71,7 +80,7 @@ export function useSynthesisActions({
     if (!ids.length || isRunning) {
       return;
     }
-    const ok = window.confirm(`确认重新生成已选 ${ids.length} 段？这会重建整本音频与字幕。`);
+    const ok = window.confirm(t("synth.confirm.regenerateSelected", { count: ids.length }));
     if (!ok) {
       return;
     }
@@ -85,8 +94,8 @@ export function useSynthesisActions({
     try {
       await importArchive(file);
     } catch (error) {
-      const message = String(error?.message || error || "导入失败");
-      pushToast({ title: `导入工程 ZIP 失败：${message}`, tone: "error" });
+      const message = String(error?.message || error || t("script.toast.importFailedTitle"));
+      pushToast({ title: t("synth.toast.importProjectZipFailed", { error: message }), tone: "error" });
     }
   }
 
@@ -94,8 +103,8 @@ export function useSynthesisActions({
     try {
       await cancelSynthesis();
     } catch (error) {
-      const message = String(error?.message || error || "取消失败");
-      pushToast({ title: `停止合成失败：${message}`, tone: "error" });
+      const message = String(error?.message || error || t("synth.toast.cancelFailedTitle"));
+      pushToast({ title: t("synth.toast.stopSynthesisFailed", { error: message }), tone: "error" });
     }
   }
 
@@ -123,13 +132,13 @@ export function useSynthesisActions({
     }
     const baseSegment = (currentProject.script?.segments || []).find((item) => item.id === segment.segment_id);
     if (!baseSegment) {
-      pushToast({ title: "找不到片段，无法保存", tone: "error" });
+      pushToast({ title: t("synth.toast.segmentNotFoundCannotSave"), tone: "error" });
       return;
     }
     const parsed = parseOverridesJson(segmentDraft.ttsOverridesText || "{}");
     if (!parsed.ok) {
       pushToast({
-        title: `tts_overrides JSON 格式错误：${parsed.error}`,
+        title: t("synth.toast.ttsOverridesInvalid", { error: parsed.error }),
         tone: "error",
       });
       return;
@@ -150,7 +159,7 @@ export function useSynthesisActions({
     });
     await refreshCurrentProject(currentProject.id);
     setSelectedSegmentIds((ids) => (ids.includes(segment.segment_id) ? ids : [...ids, segment.segment_id]));
-    pushToast({ title: "片段已修改，已加入待重新生成", tone: "success" });
+    pushToast({ title: t("synth.toast.segmentUpdatedQueued"), tone: "success" });
     cancelEditSegment();
   }
 

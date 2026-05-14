@@ -1,8 +1,17 @@
 import { create } from "zustand";
 import { api } from "../utils/api";
 import { formatError, getErrorMessage } from "../utils/errors";
+import { getLanguage } from "../i18n/core";
+import { MESSAGES } from "../i18n/messages";
 import { useSpeechRecognitionStore } from "./useSpeechRecognitionStore";
 import { useUiStore } from "./useUiStore";
+
+function t(key, params = {}) {
+  const language = getLanguage();
+  const dict = MESSAGES[language] || MESSAGES.zh;
+  const template = dict[key] || MESSAGES.en?.[key] || key;
+  return String(template).replace(/\{(\w+)\}/g, (_, name) => String(params?.[name] ?? `{${name}}`));
+}
 
 function normalizeOrchestratorConfig(raw) {
   if (!raw) {
@@ -138,7 +147,7 @@ export const useSettingsStore = create((set, get) => ({
       set({ systemStatus: status, settingsError: "" });
       return status;
     } catch (error) {
-      const message = getErrorMessage(error, "系统状态刷新失败");
+      const message = getErrorMessage(error, t("store.settings.error.refreshStatus"));
       set({ settingsError: message });
       return null;
     }
@@ -151,9 +160,9 @@ export const useSettingsStore = create((set, get) => ({
       set({ orchestratorConfig: config, settingsError: "" });
       return config;
     } catch (error) {
-      const message = getErrorMessage(error, "加载模型配置失败");
+      const message = getErrorMessage(error, t("store.settings.error.loadConfig"));
       set({ settingsError: message });
-      useUiStore.getState().pushToast({ title: formatError("加载模型配置失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.settings.error.loadConfig"), message), tone: "error" });
       return null;
     }
   },
@@ -166,12 +175,12 @@ export const useSettingsStore = create((set, get) => ({
         settingsError: "",
         orchestratorConfig: normalizeOrchestratorConfig(saved),
       });
-      useUiStore.getState().pushToast({ title: "模型调度配置已保存", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.settings.toast.configSaved"), tone: "success" });
       return saved;
     } catch (error) {
-      const message = getErrorMessage(error, "保存模型配置失败");
+      const message = getErrorMessage(error, t("store.settings.error.saveConfig"));
       set({ settingsError: message });
-      useUiStore.getState().pushToast({ title: formatError("保存模型配置失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.settings.error.saveConfig"), message), tone: "error" });
       return null;
     }
   },
@@ -183,12 +192,12 @@ export const useSettingsStore = create((set, get) => ({
         settingsError: "",
         orchestratorConfig: normalizeOrchestratorConfig(saved),
       });
-      useUiStore.getState().pushToast({ title: "已恢复默认配置", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.settings.toast.configReset"), tone: "success" });
       return saved;
     } catch (error) {
-      const message = getErrorMessage(error, "重置模型配置失败");
+      const message = getErrorMessage(error, t("store.settings.error.resetConfig"));
       set({ settingsError: message });
-      useUiStore.getState().pushToast({ title: formatError("重置模型配置失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.settings.error.resetConfig"), message), tone: "error" });
       return null;
     }
   },
@@ -197,12 +206,12 @@ export const useSettingsStore = create((set, get) => ({
     try {
       await api.post("/system/orchestrator/config/defaults/use-current", {});
       set({ settingsError: "" });
-      useUiStore.getState().pushToast({ title: "已将当前参数设为默认值", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.settings.toast.setCurrentAsDefault"), tone: "success" });
       return true;
     } catch (error) {
-      const message = getErrorMessage(error, "设置默认配置失败");
+      const message = getErrorMessage(error, t("store.settings.error.setDefaultConfig"));
       set({ settingsError: message });
-      useUiStore.getState().pushToast({ title: formatError("设置默认配置失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.settings.error.setDefaultConfig"), message), tone: "error" });
       return false;
     }
   },
@@ -211,12 +220,12 @@ export const useSettingsStore = create((set, get) => ({
     try {
       await api.post("/system/unload-llm", {});
       set({ settingsError: "" });
-      useUiStore.getState().pushToast({ title: "LLM 已卸载", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.settings.toast.llmUnloaded"), tone: "success" });
       await get().refreshSystemStatus();
     } catch (error) {
-      const message = getErrorMessage(error, "卸载 LLM 失败");
+      const message = getErrorMessage(error, t("store.settings.error.unloadLlm"));
       set({ settingsError: message });
-      useUiStore.getState().pushToast({ title: formatError("卸载 LLM 失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.settings.error.unloadLlm"), message), tone: "error" });
     }
   },
 
@@ -224,12 +233,12 @@ export const useSettingsStore = create((set, get) => ({
     try {
       await api.post("/system/unload-tts", {});
       set({ settingsError: "" });
-      useUiStore.getState().pushToast({ title: "TTS 已卸载", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.settings.toast.ttsUnloaded"), tone: "success" });
       await get().refreshSystemStatus();
     } catch (error) {
-      const message = getErrorMessage(error, "卸载 TTS 失败");
+      const message = getErrorMessage(error, t("store.settings.error.unloadTts"));
       set({ settingsError: message });
-      useUiStore.getState().pushToast({ title: formatError("卸载 TTS 失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.settings.error.unloadTts"), message), tone: "error" });
     }
   },
 
@@ -237,12 +246,12 @@ export const useSettingsStore = create((set, get) => ({
     try {
       await api.post("/system/unload-asr", {});
       set({ settingsError: "" });
-      useUiStore.getState().pushToast({ title: "ASR 已卸载", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.settings.toast.asrUnloaded"), tone: "success" });
       await get().refreshSystemStatus();
     } catch (error) {
-      const message = getErrorMessage(error, "卸载 ASR 失败");
+      const message = getErrorMessage(error, t("store.settings.error.unloadAsr"));
       set({ settingsError: message });
-      useUiStore.getState().pushToast({ title: formatError("卸载 ASR 失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.settings.error.unloadAsr"), message), tone: "error" });
     }
   },
 
@@ -250,12 +259,12 @@ export const useSettingsStore = create((set, get) => ({
     try {
       await api.post("/system/unload-music", {});
       set({ settingsError: "" });
-      useUiStore.getState().pushToast({ title: "Music 模型已卸载", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.settings.toast.musicUnloaded"), tone: "success" });
       await get().refreshSystemStatus();
     } catch (error) {
-      const message = getErrorMessage(error, "卸载 Music 模型失败");
+      const message = getErrorMessage(error, t("store.settings.error.unloadMusic"));
       set({ settingsError: message });
-      useUiStore.getState().pushToast({ title: formatError("卸载 Music 模型失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.settings.error.unloadMusic"), message), tone: "error" });
     }
   },
 
@@ -270,12 +279,12 @@ export const useSettingsStore = create((set, get) => ({
         model_name: "",
         error: "",
       });
-      useUiStore.getState().pushToast({ title: "所有模型已卸载", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.settings.toast.allUnloaded"), tone: "success" });
       await get().refreshSystemStatus();
     } catch (error) {
-      const message = getErrorMessage(error, "卸载所有模型失败");
+      const message = getErrorMessage(error, t("store.settings.error.unloadAll"));
       set({ settingsError: message });
-      useUiStore.getState().pushToast({ title: formatError("卸载所有模型失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.settings.error.unloadAll"), message), tone: "error" });
     }
   },
 }));

@@ -1,4 +1,5 @@
 import GlassCard from "../shared/GlassCard";
+import { useI18n } from "../../i18n/I18nProvider";
 
 export default function TextWorkspaceCard({
   projectName,
@@ -16,14 +17,16 @@ export default function TextWorkspaceCard({
   onParse,
   onCancelParse,
 }) {
+  const { t } = useI18n();
+
   return (
     <GlassCard>
-      <h2>文本输入</h2>
-      <p className="muted">粘贴小说、章节内容或测试样例，为 LLM 解析剧本做准备。</p>
+      <h2>{t("text.title")}</h2>
+      <p className="muted">{t("text.subtitle")}</p>
       <div className="controlRow">
-        <input className="textInput" value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="新项目名称" />
+        <input className="textInput" value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder={t("project.newName")} />
         <button type="button" className="primaryButton ghostButton" onClick={onCreateProject}>
-          新建项目
+          {t("project.create")}
         </button>
       </div>
       <div className="controlRow">
@@ -35,23 +38,23 @@ export default function TextWorkspaceCard({
           ))}
         </select>
         <button type="button" className="primaryButton ghostButton" onClick={onFillDemo}>
-          填充示例
+          {t("text.fillDemo")}
         </button>
       </div>
       <textarea
         className="textArea"
         value={sourceText}
         onChange={(event) => setSourceText(event.target.value)}
-        placeholder="在这里输入文本，例如：旁白：暮色渐浓。林黛玉：宝哥哥，你来了。"
+        placeholder={t("text.inputPlaceholder")}
       />
       <div className="controlRow">
         <button type="button" className="primaryButton" onClick={onParse} disabled={isParsing || !sourceText.trim()}>
-          {isParsing ? `解析中 ${parseProgress}%` : "开始解析"}
+          {isParsing ? t("text.parsingWithProgress", { progress: parseProgress }) : t("text.startParse")}
         </button>
         <button type="button" className="primaryButton ghostButton" onClick={onCancelParse} disabled={!isParsing}>
-          取消解析
+          {t("text.stopParse")}
         </button>
-        <span className="muted">{currentProject ? `将写入项目：${currentProject.name}` : "未选择项目"}</span>
+        <span className="muted">{currentProject ? `${t("text.writingTo")}${currentProject.name}` : t("text.projectNotSelected")}</span>
       </div>
       {error ? <div className="errorText">{error}</div> : null}
     </GlassCard>

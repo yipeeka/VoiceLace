@@ -2,6 +2,7 @@ import { Cpu, RefreshCw, Trash2 } from "lucide-react";
 
 import GlassCard from "../shared/GlassCard";
 import Button from "../ui/Button";
+import { useI18n } from "../../i18n/I18nProvider";
 
 function SectionTitle({ children }) {
   return (
@@ -27,6 +28,7 @@ export default function SystemStatusCard({
   onUnloadMusic,
   onUnloadASR,
 }) {
+  const { t } = useI18n();
   const gpu = systemStatus?.gpu;
   const llmStatus =
     systemStatus?.llm_status ??
@@ -72,7 +74,7 @@ export default function SystemStatusCard({
     <GlassCard>
       <div className="sectionHeader">
         <h2 className="cardTitle">
-          <Cpu size={16} /> 系统状态
+          <Cpu size={16} /> {t("settings.status.title")}
         </h2>
         <Button
           variant="ghost"
@@ -81,49 +83,49 @@ export default function SystemStatusCard({
           disabled={isRefreshing}
           onClick={onRefresh}
         >
-          刷新
+          {t("settings.status.refresh")}
         </Button>
       </div>
 
       <div className="listStack">
-        <SectionTitle>模型运行状态</SectionTitle>
+        <SectionTitle>{t("settings.status.section.runtime")}</SectionTitle>
         {settingsError ? (
           <div className="statRow">
-            <span>系统错误</span>
+            <span>{t("settings.status.systemError")}</span>
             <strong style={{ color: "var(--danger)", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {settingsError}
             </strong>
           </div>
         ) : null}
         <div className="statRow">
-          <span>LLM 状态</span>
+          <span>{t("settings.status.llmStatus")}</span>
           <strong style={{ color: llmStatus === "ready" ? "var(--success)" : llmStatus === "error" ? "var(--danger)" : "var(--text-secondary)" }}>
             {llmStatus}
           </strong>
         </div>
         <div className="statRow">
-          <span>LLM 后端</span>
+          <span>{t("settings.status.llmBackend")}</span>
           <strong style={{ color: llmFallbackActive ? "var(--warning, #f59e0b)" : "var(--text-primary)" }}>
-            {llmFallbackActive ? `${llmBackend} (fallback)` : llmBackend}
+            {llmFallbackActive ? `${llmBackend} (${t("settings.status.fallback")})` : llmBackend}
           </strong>
         </div>
         <div className="statRow">
-          <span>LLM 配置后端</span>
+          <span>{t("settings.status.llmConfiguredBackend")}</span>
           <strong>{configuredLlmBackend}</strong>
         </div>
         <div className="statRow">
-          <span>Think 模式生效</span>
+          <span>{t("settings.status.thinkModeEffective")}</span>
           <strong style={{ color: llmThinkModeEffective ? "var(--success)" : "var(--text-secondary)" }}>
-            {llmThinkModeEffective ? "yes" : "no"}
+            {llmThinkModeEffective ? t("common.yes") : t("common.no")}
           </strong>
         </div>
         <div className="statRow">
-          <span>Think 支持类型</span>
+          <span>{t("settings.status.thinkModeSupport")}</span>
           <strong>{llmThinkModeSupport}</strong>
         </div>
         {llmLoadMode ? (
           <div className="statRow">
-            <span>LLM 加载模式</span>
+            <span>{t("settings.status.llmLoadMode")}</span>
             <strong title={llmLoadMode} style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {llmLoadMode}
             </strong>
@@ -131,7 +133,7 @@ export default function SystemStatusCard({
         ) : null}
         {configuredClipPath ? (
           <div className="statRow">
-            <span>LLM CLIP 路径</span>
+            <span>{t("settings.status.llmClipPath")}</span>
             <strong
               title={configuredClipPath}
               style={{ fontFamily: "monospace", fontSize: 11, maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
@@ -142,7 +144,7 @@ export default function SystemStatusCard({
         ) : null}
         {llmHandlerFallbackReason ? (
           <div className="statRow">
-            <span>Handler 降级原因</span>
+            <span>{t("settings.status.handlerFallbackReason")}</span>
             <strong style={{ color: "var(--warning, #f59e0b)", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {llmHandlerFallbackReason}
             </strong>
@@ -150,116 +152,116 @@ export default function SystemStatusCard({
         ) : null}
         {llmError ? (
           <div className="statRow">
-            <span>LLM 错误</span>
+            <span>{t("settings.status.llmError")}</span>
             <strong style={{ color: "var(--danger)", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {llmError}
             </strong>
           </div>
         ) : null}
         <div className="statRow">
-          <span>TTS 状态</span>
+          <span>{t("settings.status.ttsStatus")}</span>
           <strong style={{ color: ttsStatus === "ready" ? "var(--success)" : ttsStatus === "error" ? "var(--danger)" : "var(--text-secondary)" }}>
             {ttsStatus}
           </strong>
         </div>
         <div className="statRow">
-          <span>Music 状态</span>
+          <span>{t("settings.status.musicStatus")}</span>
           <strong style={{ color: musicStatus === "ready" ? "var(--success)" : musicStatus === "error" ? "var(--danger)" : "var(--text-secondary)" }}>
             {musicStatus}
           </strong>
         </div>
         {systemStatus?.music_backend ? (
           <div className="statRow">
-            <span>Music 后端</span>
+            <span>{t("settings.status.musicBackend")}</span>
             <strong>{systemStatus.music_backend}</strong>
           </div>
         ) : null}
         <div className="statRow">
-          <span>Music 启用</span>
+          <span>{t("settings.status.musicEnabled")}</span>
           <strong style={{ color: systemStatus?.config?.music_enabled ? "var(--success)" : "var(--text-secondary)" }}>
-            {systemStatus?.config?.music_enabled ? "yes" : "no"}
+            {systemStatus?.config?.music_enabled ? t("common.yes") : t("common.no")}
           </strong>
         </div>
         {systemStatus?.music_error ? (
           <div className="statRow">
-            <span>Music 错误</span>
+            <span>{t("settings.status.musicError")}</span>
             <strong style={{ color: "var(--danger)", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {systemStatus.music_error}
             </strong>
           </div>
         ) : null}
 
-        <SectionTitle>ASR 状态</SectionTitle>
+        <SectionTitle>{t("settings.status.section.asr")}</SectionTitle>
         <div className="statRow">
-          <span>ASR 状态</span>
+          <span>{t("settings.status.asrStatus")}</span>
           <strong style={{ color: asrLoaded ? "var(--success)" : "var(--text-secondary)" }}>
-            {asrLoaded ? `ready (${asrBackend})` : "idle"}
+            {asrLoaded ? `${t("settings.status.ready")} (${asrBackend})` : t("settings.status.idle")}
           </strong>
         </div>
         <div className="statRow">
-          <span>ASR 配置后端</span>
+          <span>{t("settings.status.asrConfiguredBackend")}</span>
           <strong>{asrDefaultBackend}</strong>
         </div>
         <div className="statRow">
-          <span>ASR 设备</span>
-          <strong>{asrDevice || "未设置"}</strong>
+          <span>{t("settings.status.asrDevice")}</span>
+          <strong>{asrDevice || t("settings.status.notSet")}</strong>
         </div>
         {asrDefaultBackend === "qwen3_crispasr" ? (
           <>
             <div className="statRow">
-              <span>Qwen3-ASR 就绪</span>
+              <span>{t("settings.status.qwen3Ready")}</span>
               <strong style={{ color: qwen3Ready ? "var(--success)" : "var(--warning)" }}>
-                {qwen3Ready ? "yes" : "no"}
+                {qwen3Ready ? t("common.yes") : t("common.no")}
               </strong>
             </div>
             <div className="statRow">
-              <span>CrispASR 路径</span>
+              <span>{t("settings.status.crispAsrPath")}</span>
               <strong title={qwen3Exe} style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {qwen3Exe || "未设置"}
+                {qwen3Exe || t("settings.status.notSet")}
               </strong>
             </div>
             <div className="statRow">
-              <span>Qwen3 模型</span>
+              <span>{t("settings.status.qwen3Model")}</span>
               <strong title={qwen3Model} style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {qwen3Model || "未设置"}
+                {qwen3Model || t("settings.status.notSet")}
               </strong>
             </div>
             <div className="statRow">
-              <span>ForcedAligner</span>
+              <span>{t("settings.status.forcedAligner")}</span>
               <strong
                 title={qwen3AlignerModel}
                 style={{ color: qwen3AlignerModel ? (qwen3AlignerModelExists ? "var(--success)" : "var(--warning)") : "var(--text-secondary)", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
               >
-                {qwen3AlignerModel || "未设置（可选）"}
+                {qwen3AlignerModel || t("settings.status.notSetOptional")}
               </strong>
             </div>
             <div className="statRow">
-              <span>时间戳模式</span>
-              <strong>{qwen3Timestamps ? "on" : "off"}</strong>
+              <span>{t("settings.status.timestampMode")}</span>
+              <strong>{qwen3Timestamps ? t("settings.status.on") : t("settings.status.off")}</strong>
             </div>
           </>
         ) : null}
         <div className="statRow">
-          <span>pyannote 可用</span>
+          <span>{t("settings.status.pyannoteAvailable")}</span>
           <strong style={{ color: pyannoteAvailable ? "var(--success)" : "var(--warning)" }}>
-            {pyannoteAvailable ? "yes" : "no"}
+            {pyannoteAvailable ? t("common.yes") : t("common.no")}
           </strong>
         </div>
         <div className="statRow">
-          <span>pyannote 已加载</span>
+          <span>{t("settings.status.pyannoteLoaded")}</span>
           <strong style={{ color: pyannoteLoaded ? "var(--success)" : "var(--text-secondary)" }}>
-            {pyannoteLoaded ? "yes" : "no"}
+            {pyannoteLoaded ? t("common.yes") : t("common.no")}
           </strong>
         </div>
         <div className="statRow">
-          <span>pyannote 模型</span>
+          <span>{t("settings.status.pyannoteModel")}</span>
           <strong title={pyannoteModelId} style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {pyannoteModelId || "未设置"}
+            {pyannoteModelId || t("settings.status.notSet")}
           </strong>
         </div>
         {pyannoteError ? (
           <div className="statRow">
-            <span>pyannote 错误</span>
+            <span>{t("settings.status.pyannoteError")}</span>
             <strong style={{ color: "var(--danger)", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {pyannoteError}
             </strong>
@@ -267,32 +269,32 @@ export default function SystemStatusCard({
         ) : null}
         {asrError ? (
           <div className="statRow">
-            <span>ASR 错误</span>
+            <span>{t("settings.status.asrError")}</span>
             <strong style={{ color: "var(--danger)", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {asrError}
             </strong>
           </div>
         ) : null}
 
-        <SectionTitle>运行环境</SectionTitle>
+        <SectionTitle>{t("settings.status.section.runtimeEnv")}</SectionTitle>
         <div className="statRow">
-          <span>Python 解释器</span>
+          <span>{t("settings.status.pythonExecutable")}</span>
           <strong
-            title={pythonExecutable || "未获取"}
+            title={pythonExecutable || t("settings.status.notAvailable")}
             style={{ fontFamily: "monospace", fontSize: 11, maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
           >
-            {compactPath(pythonExecutable) || "未获取"}
+            {compactPath(pythonExecutable) || t("settings.status.notAvailable")}
           </strong>
         </div>
         <div className="statRow">
-          <span>llama_cpp 可用</span>
+          <span>{t("settings.status.llamaCppAvailable")}</span>
           <strong style={{ color: llamaCppAvailable ? "var(--success)" : "var(--danger)" }}>
-            {llamaCppAvailable ? "yes" : "no"}
+            {llamaCppAvailable ? t("common.yes") : t("common.no")}
           </strong>
         </div>
         {llamaCppModulePath ? (
           <div className="statRow">
-            <span>llama_cpp 模块</span>
+            <span>{t("settings.status.llamaCppModule")}</span>
             <strong
               title={llamaCppModulePath}
               style={{ fontFamily: "monospace", fontSize: 11, maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
@@ -302,33 +304,33 @@ export default function SystemStatusCard({
           </div>
         ) : null}
 
-        <SectionTitle>GPU 资源</SectionTitle>
+        <SectionTitle>{t("settings.status.section.gpu")}</SectionTitle>
         {gpu ? (
           <>
             <div className="statRow">
-              <span>GPU</span>
-              <strong>{gpu.name ?? "Unknown"}</strong>
+              <span>{t("settings.status.gpu")}</span>
+              <strong>{gpu.name ?? t("settings.status.unknown")}</strong>
             </div>
             <div className="statRow">
-              <span>本进程 VRAM（{gpu.process_vram_source || "torch"}）</span>
+              <span>{t("settings.status.processVram", { source: gpu.process_vram_source || "torch" })}</span>
               <strong style={{ fontFamily: "monospace" }}>
                 {((Number(gpu.process_used_vram_mb ?? gpu.torch_reserved_mb ?? 0)) / 1024).toFixed(2)} GB
               </strong>
             </div>
             <div className="statRow">
-              <span>整卡 VRAM 已用（{gpu.system_vram_source || "torch"}）</span>
+              <span>{t("settings.status.systemVramUsed", { source: gpu.system_vram_source || "torch" })}</span>
               <strong style={{ fontFamily: "monospace" }}>
                 {((Number(gpu.system_used_vram_mb ?? gpu.used_vram_mb ?? 0)) / 1024).toFixed(1)} GB / {(gpu.total_vram_mb / 1024).toFixed(1)} GB
               </strong>
             </div>
             <div className="statRow">
-              <span>整卡 VRAM 空闲</span>
+              <span>{t("settings.status.systemVramFree")}</span>
               <strong style={{ fontFamily: "monospace", color: "var(--success)" }}>
                 {((Number(gpu.system_free_vram_mb ?? gpu.free_vram_mb ?? 0)) / 1024).toFixed(1)} GB
               </strong>
             </div>
             <div className="statRow">
-              <span>Torch allocated / reserved</span>
+              <span>{t("settings.status.torchAllocatedReserved")}</span>
               <strong style={{ fontFamily: "monospace" }}>
                 {Number(gpu.torch_allocated_mb ?? 0)} / {Number(gpu.torch_reserved_mb ?? 0)} MB
               </strong>
@@ -336,8 +338,8 @@ export default function SystemStatusCard({
           </>
         ) : (
           <div className="statRow">
-            <span>GPU</span>
-            <strong style={{ color: "var(--text-muted)" }}>未检测到</strong>
+            <span>{t("settings.status.gpu")}</span>
+            <strong style={{ color: "var(--text-muted)" }}>{t("settings.status.gpuNotDetected")}</strong>
           </div>
         )}
       </div>
@@ -350,7 +352,7 @@ export default function SystemStatusCard({
           disabled={llmStatus !== "ready"}
           onClick={onUnloadLLM}
         >
-          卸载 LLM
+          {t("settings.status.unloadLLM")}
         </Button>
         <Button
           variant="danger"
@@ -359,7 +361,7 @@ export default function SystemStatusCard({
           disabled={!canUnloadTTS}
           onClick={onUnloadTTS}
         >
-          卸载 TTS
+          {t("settings.status.unloadTTS")}
         </Button>
         <Button
           variant="danger"
@@ -368,7 +370,7 @@ export default function SystemStatusCard({
           disabled={!canUnloadMusic}
           onClick={onUnloadMusic}
         >
-          卸载 Music
+          {t("settings.status.unloadMusic")}
         </Button>
         <Button
           variant="danger"
@@ -377,7 +379,7 @@ export default function SystemStatusCard({
           disabled={!canUnloadASR}
           onClick={onUnloadASR}
         >
-          卸载 ASR
+          {t("settings.status.unloadASR")}
         </Button>
       </div>
     </GlassCard>

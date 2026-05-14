@@ -1,15 +1,17 @@
 import { cn } from "../../utils/cn";
+import { useI18n } from "../../i18n/I18nProvider";
 
 const STATUS_CONFIG = {
-  idle:      { dot: "idle",    label: "空闲" },
-  loading:   { dot: "loading", label: "加载中" },
-  ready:     { dot: "ready",   label: "就绪" },
-  running:   { dot: "loading", label: "运行中" },
-  unloading: { dot: "loading", label: "卸载中" },
-  error:     { dot: "error",   label: "错误" },
+  idle:      { dot: "idle",    key: "status.state.idle" },
+  loading:   { dot: "loading", key: "status.state.loading" },
+  ready:     { dot: "ready",   key: "status.state.ready" },
+  running:   { dot: "loading", key: "legacy.status.state.running" },
+  unloading: { dot: "loading", key: "status.state.unloading" },
+  error:     { dot: "error",   key: "status.state.error" },
 };
 
 export default function ModelStatusChip({ name, status = "idle", className }) {
+  const { t } = useI18n();
   const config = STATUS_CONFIG[status] ?? STATUS_CONFIG.idle;
   return (
     <div
@@ -19,7 +21,7 @@ export default function ModelStatusChip({ name, status = "idle", className }) {
       <span className={cn("statusBarDot", config.dot)} />
       <span style={{ color: "var(--text-muted)", fontSize: 11 }}>{name}:</span>
       <span style={{ color: "var(--text-secondary)", fontSize: 12, fontWeight: 500 }}>
-        {config.label}
+        {t(config.key)}
       </span>
     </div>
   );

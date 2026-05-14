@@ -2,9 +2,18 @@ import { create } from "zustand";
 
 import { api, getWsBaseUrl } from "../utils/api.js";
 import { formatError, getErrorMessage } from "../utils/errors.js";
+import { getLanguage } from "../i18n/core.js";
+import { MESSAGES } from "../i18n/messages.js";
 import { runTaskChannel } from "../utils/taskChannel.js";
 import { createTaskChannelBridge } from "../utils/taskChannelBridge.js";
 import { useUiStore } from "./useUiStore.js";
+
+function t(key, params = {}) {
+  const language = getLanguage();
+  const dict = MESSAGES[language] || MESSAGES.zh;
+  const template = dict[key] || MESSAGES.en?.[key] || key;
+  return String(template).replace(/\{(\w+)\}/g, (_, name) => String(params?.[name] ?? `{${name}}`));
+}
 
 const DEFAULT_PARSE_MODE = "verified_five_step_pipeline";
 const PARSE_MODE_STORAGE_KEY = "beautyvoice.parse_mode";
@@ -59,13 +68,13 @@ export const useScriptStore = create((set, get) => ({
       isParsing: true,
       status: "starting",
       connectionStatus: "connecting",
-      modelStatus: "正在建立连接...",
+      modelStatus: t("store.script.status.connecting"),
       lastSyncError: "",
       error: "",
       parseProgress: 5,
       parseMode: normalizedMode,
       parseStage: "initializing",
-      parseStageLabel: "准备开始解析",
+      parseStageLabel: t("store.script.stage.preparing"),
       parseStageProgress: 5,
       llmStreamOutput: "",
       parseTaskId: null,
@@ -89,13 +98,13 @@ export const useScriptStore = create((set, get) => ({
           lastSyncError: "",
           parseProgress: 100,
           parseStage: "done",
-          parseStageLabel: "解析完成",
+          parseStageLabel: t("store.script.stage.done"),
           parseStageProgress: 100,
           script,
           llmStreamOutput: JSON.stringify(script, null, 2),
           parseTaskId: null,
         });
-        useUiStore.getState().pushToast({ title: `解析完成，生成 ${script.segments.length} 个片段`, tone: "success" });
+        useUiStore.getState().pushToast({ title: t("store.script.toast.parseDoneWithCount", { count: script.segments.length }), tone: "success" });
         return script;
       };
 
@@ -103,16 +112,16 @@ export const useScriptStore = create((set, get) => ({
         set,
         getStatus: () => useScriptStore.getState().status,
         maxReconnectRetries: 5,
-        exhaustedMessage: "解析连接已关闭（重连失败）",
-        timeoutMessage: "解析任务等待超时",
+        exhaustedMessage: t("store.script.error.connClosed"),
+        timeoutMessage: t("store.script.error.timeout"),
         onReconnectOpenExtra: async () => {
           set((state) => ({
-            llmStreamOutput: `${state.llmStreamOutput}[系统] 连接已恢复。\n`,
+            llmStreamOutput: `${state.llmStreamOutput}${t("store.script.log.systemReconnected")}\n`,
           }));
         },
         onReconnectScheduledExtra: ({ reconnectAttempts, delay }) => {
           set((state) => ({
-            llmStreamOutput: `${state.llmStreamOutput}\n[系统] 连接中断，${delay}ms 后尝试重连 (${reconnectAttempts}/5)...\n`,
+            llmStreamOutput: `${state.llmStreamOutput}\n${t("store.script.log.systemReconnectScheduled", { delay, attempt: reconnectAttempts })}\n`,
           }));
         },
         onExhaustedExtra: () => {
@@ -120,7 +129,7 @@ export const useScriptStore = create((set, get) => ({
             isParsing: false,
             status: "error",
             modelStatus: "",
-            error: "解析连接已关闭（重连失败）",
+            error: t("store.script.error.connClosed"),
             parseProgress: 0,
             parseTaskId: null,
           });
@@ -130,7 +139,7 @@ export const useScriptStore = create((set, get) => ({
             isParsing: false,
             status: "error",
             modelStatus: "",
-            error: "解析任务等待超时",
+            error: t("store.script.error.timeout"),
             parseProgress: 0,
             parseTaskId: null,
           });
@@ -170,7 +179,7 @@ export const useScriptStore = create((set, get) => ({
             if (state?.status) {
               set({
                 status: state.status,
-                modelStatus: state.status === "cancel_requested" ? "正在中断解析任务..." : "任务状态同步中",
+                modelStatus: state.status === "cancel_requested" ? t("store.script.status.canceling") : t("store.script.status.syncing"),
                 lastSyncError: "",
                 parseMode: normalizeParseMode(state.parse_mode || normalizedMode),
                 parseStage: state.stage || "",
@@ -180,7 +189,7 @@ export const useScriptStore = create((set, get) => ({
             }
             return false;
           } catch (error) {
-            set({ lastSyncError: getErrorMessage(error, "解析状态同步失败") });
+            set({ lastSyncError: getErrorMessage(error, t("store.script.error.syncFailed")) });
             return false;
           }
         },
@@ -194,8 +203,8 @@ export const useScriptStore = create((set, get) => ({
             case "task_status":
               set((state) => ({
                 status: msg.status || state.status,
-                modelStatus: `任务状态：${msg.status || state.status}`,
-                llmStreamOutput: `任务状态：${msg.status}\n`,
+                modelStatus: t("store.script.status.taskState", { status: msg.status || state.status }),
+                llmStreamOutput: `${t("store.script.status.taskState", { status: msg.status })}\n`,
                 parseMode: normalizeParseMode(msg.parse_mode || state.parseMode),
               }));
               break;
@@ -225,7 +234,7 @@ export const useScriptStore = create((set, get) => ({
             case "chunk_start":
               set((state) => ({
                 parseProgress: msg.percent || state.parseProgress || 0,
-                llmStreamOutput: `${state.llmStreamOutput}\n[Chunk ${msg.chunk}/${msg.total_chunks}] 开始处理...\n`,
+                llmStreamOutput: `${state.llmStreamOutput}\n${t("store.script.log.chunkStart", { chunk: msg.chunk, total: msg.total_chunks })}\n`,
               }));
               break;
             case "complete":
@@ -267,7 +276,7 @@ export const useScriptStore = create((set, get) => ({
                 parseStageLabel: msg.stage_label || "",
                 parseStageProgress: Number(msg.stage_progress || 0) || 0,
                 modelStatus: msg.stage_label || state.modelStatus,
-                llmStreamOutput: `${state.llmStreamOutput}\n[系统] ${msg.stage_label || msg.stage || "阶段更新"} (${msg.stage_progress || 0}%)\n`,
+                llmStreamOutput: `${state.llmStreamOutput}\n${t("store.script.log.stageUpdate", { stage: msg.stage_label || msg.stage || t("store.script.stage.update"), progress: msg.stage_progress || 0 })}\n`,
               }));
               break;
             case "error":
@@ -275,7 +284,7 @@ export const useScriptStore = create((set, get) => ({
                 isParsing: false,
                 status: "error",
                 modelStatus: "",
-                error: msg.message || "解析失败",
+                error: msg.message || t("store.script.error.parseFailed"),
                 parseProgress: 0,
                 parseStage: "",
                 parseStageLabel: "",
@@ -283,28 +292,28 @@ export const useScriptStore = create((set, get) => ({
                 parseTaskId: null,
                 parseStats: null,
               });
-              fail(new Error(msg.message || "解析失败"));
+              fail(new Error(msg.message || t("store.script.error.parseFailed")));
               break;
             case "canceled":
               set((state) => ({
                 isParsing: false,
                 status: "canceled",
-                modelStatus: "解析任务已中断",
+                modelStatus: t("store.script.status.canceled"),
                 parseProgress: 0,
                 parseStage: "",
                 parseStageLabel: "",
                 parseStageProgress: 0,
                 parseTaskId: null,
                 parseStats: null,
-                llmStreamOutput: `${state.llmStreamOutput}\n[系统] 解析已中断\n`,
+                llmStreamOutput: `${state.llmStreamOutput}\n${t("store.script.log.parseCanceled")}\n`,
               }));
               done(null);
               break;
             case "cancel_requested":
               set((state) => ({
                 status: "cancel_requested",
-                modelStatus: "正在中断解析任务...",
-                llmStreamOutput: `${state.llmStreamOutput}\n[系统] 正在中断...\n`,
+                modelStatus: t("store.script.status.canceling"),
+                llmStreamOutput: `${state.llmStreamOutput}\n${t("store.script.log.canceling")}\n`,
               }));
               break;
             default:
@@ -313,7 +322,7 @@ export const useScriptStore = create((set, get) => ({
         },
       });
     } catch (error) {
-      const message = getErrorMessage(error, "解析失败");
+      const message = getErrorMessage(error, t("store.script.error.parseFailed"));
       set({
         isParsing: false,
         status: "error",
@@ -328,7 +337,7 @@ export const useScriptStore = create((set, get) => ({
         parseTaskId: null,
         parseStats: null,
       });
-      useUiStore.getState().pushToast({ title: formatError("解析失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.script.error.parseFailed"), message), tone: "error" });
       throw error;
     }
   },
@@ -338,8 +347,8 @@ export const useScriptStore = create((set, get) => ({
       return { status: "idle" };
     }
     const result = await api.post(`/llm/parse/${taskId}/cancel`, {});
-    set({ status: "cancel_requested", modelStatus: "正在中断解析任务...", connectionStatus: "open" });
-    useUiStore.getState().pushToast({ title: "已请求取消解析任务", tone: "default" });
+    set({ status: "cancel_requested", modelStatus: t("store.script.status.canceling"), connectionStatus: "open" });
+    useUiStore.getState().pushToast({ title: t("store.script.toast.cancelRequested"), tone: "default" });
     return result;
   },
   updateSegment: async ({ projectId, segmentId, segment }) => {
@@ -348,12 +357,12 @@ export const useScriptStore = create((set, get) => ({
       await api.put(`/projects/${projectId}/script/segments/${segmentId}`, segment);
       const script = await api.get(`/projects/${projectId}/script`);
       set({ script, isSaving: false });
-      useUiStore.getState().pushToast({ title: "片段已保存", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.script.toast.segmentSaved"), tone: "success" });
       return script;
     } catch (error) {
-      const message = getErrorMessage(error, "保存片段失败");
+      const message = getErrorMessage(error, t("store.script.error.saveSegment"));
       set({ isSaving: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("保存片段失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.script.error.saveSegment"), message), tone: "error" });
       throw error;
     }
   },
@@ -363,12 +372,12 @@ export const useScriptStore = create((set, get) => ({
       await api.post(`/projects/${projectId}/script/segments`, segment);
       const script = await api.get(`/projects/${projectId}/script`);
       set({ script, isSaving: false });
-      useUiStore.getState().pushToast({ title: "已新增片段", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.script.toast.segmentAdded"), tone: "success" });
       return script;
     } catch (error) {
-      const message = getErrorMessage(error, "新增片段失败");
+      const message = getErrorMessage(error, t("store.script.error.addSegment"));
       set({ isSaving: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("新增片段失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.script.error.addSegment"), message), tone: "error" });
       throw error;
     }
   },
@@ -378,12 +387,12 @@ export const useScriptStore = create((set, get) => ({
       await api.delete(`/projects/${projectId}/script/segments/${segmentId}`);
       const script = await api.get(`/projects/${projectId}/script`);
       set({ script, isSaving: false });
-      useUiStore.getState().pushToast({ title: "片段已删除", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.script.toast.segmentDeleted"), tone: "success" });
       return script;
     } catch (error) {
-      const message = getErrorMessage(error, "删除片段失败");
+      const message = getErrorMessage(error, t("store.script.error.deleteSegment"));
       set({ isSaving: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("删除片段失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.script.error.deleteSegment"), message), tone: "error" });
       throw error;
     }
   },
@@ -392,12 +401,12 @@ export const useScriptStore = create((set, get) => ({
     try {
       const updated = await api.put(`/projects/${projectId}/script`, script);
       set({ script: updated, sourceText: updated.source_text || "", isSaving: false });
-      useUiStore.getState().pushToast({ title: "剧本导入成功", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.script.toast.scriptImported"), tone: "success" });
       return updated;
     } catch (error) {
-      const message = getErrorMessage(error, "剧本导入失败");
+      const message = getErrorMessage(error, t("store.script.error.importScript"));
       set({ isSaving: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("剧本导入失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.script.error.importScript"), message), tone: "error" });
       throw error;
     }
   },
@@ -406,12 +415,12 @@ export const useScriptStore = create((set, get) => ({
     try {
       const updated = await api.put(`/projects/${projectId}/script`, script);
       set({ script: updated, sourceText: updated.source_text || "", isSaving: false });
-      useUiStore.getState().pushToast({ title: "剧本已保存", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.script.toast.scriptSaved"), tone: "success" });
       return updated;
     } catch (error) {
-      const message = getErrorMessage(error, "保存剧本失败");
+      const message = getErrorMessage(error, t("store.script.error.saveScript"));
       set({ isSaving: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("保存剧本失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.script.error.saveScript"), message), tone: "error" });
       throw error;
     }
   },
@@ -424,12 +433,12 @@ export const useScriptStore = create((set, get) => ({
       });
       const script = result?.script || await api.get(`/projects/${projectId}/script`);
       set({ script, sourceText: script.source_text || "", isSaving: false });
-      useUiStore.getState().pushToast({ title: "角色改名完成", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.script.toast.renameCharacterDone"), tone: "success" });
       return script;
     } catch (error) {
-      const message = getErrorMessage(error, "角色改名失败");
+      const message = getErrorMessage(error, t("store.script.error.renameCharacter"));
       set({ isSaving: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("角色改名失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.script.error.renameCharacter"), message), tone: "error" });
       throw error;
     }
   },
@@ -442,12 +451,12 @@ export const useScriptStore = create((set, get) => ({
       });
       const script = result?.script || await api.get(`/projects/${projectId}/script`);
       set({ script, sourceText: script.source_text || "", isSaving: false });
-      useUiStore.getState().pushToast({ title: "角色合并完成", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.script.toast.mergeCharacterDone"), tone: "success" });
       return script;
     } catch (error) {
-      const message = getErrorMessage(error, "角色合并失败");
+      const message = getErrorMessage(error, t("store.script.error.mergeCharacter"));
       set({ isSaving: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("角色合并失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.script.error.mergeCharacter"), message), tone: "error" });
       throw error;
     }
   },
@@ -461,12 +470,12 @@ export const useScriptStore = create((set, get) => ({
       });
       const script = result?.script || await api.get(`/projects/${projectId}/script`);
       set({ script, sourceText: script.source_text || "", isSaving: false });
-      useUiStore.getState().pushToast({ title: "批量修改完成", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.script.toast.batchUpdateDone"), tone: "success" });
       return script;
     } catch (error) {
-      const message = getErrorMessage(error, "批量修改失败");
+      const message = getErrorMessage(error, t("store.script.error.batchUpdate"));
       set({ isSaving: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("批量修改失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.script.error.batchUpdate"), message), tone: "error" });
       throw error;
     }
   },
@@ -481,12 +490,12 @@ export const useScriptStore = create((set, get) => ({
       });
       const script = result?.script || await api.get(`/projects/${projectId}/script`);
       set({ script, sourceText: script.source_text || "", isSaving: false });
-      useUiStore.getState().pushToast({ title: "搜索替换完成", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.script.toast.searchReplaceDone"), tone: "success" });
       return script;
     } catch (error) {
-      const message = getErrorMessage(error, "搜索替换失败");
+      const message = getErrorMessage(error, t("store.script.error.searchReplace"));
       set({ isSaving: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("搜索替换失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.script.error.searchReplace"), message), tone: "error" });
       throw error;
     }
   },
@@ -499,12 +508,12 @@ export const useScriptStore = create((set, get) => ({
       });
       const script = result?.script || await api.get(`/projects/${projectId}/script`);
       set({ script, sourceText: script.source_text || "", isSaving: false });
-      useUiStore.getState().pushToast({ title: "片段拆分完成", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.script.toast.splitDone"), tone: "success" });
       return script;
     } catch (error) {
-      const message = getErrorMessage(error, "片段拆分失败");
+      const message = getErrorMessage(error, t("store.script.error.splitSegment"));
       set({ isSaving: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("片段拆分失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.script.error.splitSegment"), message), tone: "error" });
       throw error;
     }
   },
@@ -517,12 +526,12 @@ export const useScriptStore = create((set, get) => ({
       });
       const script = result?.script || await api.get(`/projects/${projectId}/script`);
       set({ script, sourceText: script.source_text || "", isSaving: false });
-      useUiStore.getState().pushToast({ title: "片段合并完成", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.script.toast.mergeSegmentsDone"), tone: "success" });
       return script;
     } catch (error) {
-      const message = getErrorMessage(error, "片段合并失败");
+      const message = getErrorMessage(error, t("store.script.error.mergeSegments"));
       set({ isSaving: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("片段合并失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.script.error.mergeSegments"), message), tone: "error" });
       throw error;
     }
   },
@@ -552,7 +561,7 @@ function buildParseStatsSummary(stats) {
   if (!stats) {
     return "";
   }
-  return `[系统] 解析统计: parse_mode=${stats.parse_mode || DEFAULT_PARSE_MODE}, mode=${stats.mode || "unknown"}, chunks=${stats.total_chunks ?? "?"}, duration_ms=${stats.duration_ms ?? "?"}, repair=${stats.repair_used_count ?? 0}, fallback=${stats.fallback_count ?? 0}\n`;
+  return `[System] Parse stats: parse_mode=${stats.parse_mode || DEFAULT_PARSE_MODE}, mode=${stats.mode || "unknown"}, chunks=${stats.total_chunks ?? "?"}, duration_ms=${stats.duration_ms ?? "?"}, repair=${stats.repair_used_count ?? 0}, fallback=${stats.fallback_count ?? 0}\n`;
 }
 
 function normalizeParseMode(value) {

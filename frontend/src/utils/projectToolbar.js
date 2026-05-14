@@ -1,3 +1,13 @@
+import { getLanguage } from "../i18n/core";
+import { MESSAGES } from "../i18n/messages";
+
+function t(key, params = {}) {
+  const language = getLanguage();
+  const dict = MESSAGES[language] || MESSAGES.zh;
+  const template = dict[key] || MESSAGES.en?.[key] || key;
+  return String(template).replace(/\{(\w+)\}/g, (_, name) => String(params?.[name] ?? `{${name}}`));
+}
+
 export function toProjectFileDisplayName(fileName) {
   const raw = String(fileName || "").trim();
   if (!raw) return "";
@@ -8,9 +18,9 @@ export function toProjectFileDisplayName(fileName) {
 }
 
 export function getProjectSourceTag(source) {
-  if (source === "project_file") return "文件";
+  if (source === "project_file") return t("util.project.source.file");
   if (source === "archive_import") return "ZIP";
-  return "本地";
+  return t("util.project.source.local");
 }
 
 export function shortProjectId(projectId) {
@@ -34,10 +44,10 @@ export function buildProjectOption(project, source) {
   }
   return {
     value: project?.id || "",
-    label: `${project?.name || "未命名项目"} [${sourceTag}]`,
+    label: `${project?.name || t("text.untitledProject")} [${sourceTag}]`,
     meta: detailParts.join(" · "),
     title: detailParts.length
-      ? `${project?.name || "未命名项目"} [${sourceTag}] · ${detailParts.join(" · ")}`
-      : `${project?.name || "未命名项目"} [${sourceTag}]`,
+      ? `${project?.name || t("text.untitledProject")} [${sourceTag}] · ${detailParts.join(" · ")}`
+      : `${project?.name || t("text.untitledProject")} [${sourceTag}]`,
   };
 }

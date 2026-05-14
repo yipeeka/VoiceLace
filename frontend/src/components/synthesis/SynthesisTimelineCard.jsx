@@ -6,6 +6,7 @@ import EmptyState from "../shared/EmptyState";
 import GlassCard from "../shared/GlassCard";
 import Button from "../ui/Button";
 import SegmentTimelineRow from "./SegmentTimelineRow";
+import { useI18n } from "../../i18n/I18nProvider";
 
 export default function SynthesisTimelineCard({
   API_ORIGIN,
@@ -47,6 +48,7 @@ export default function SynthesisTimelineCard({
   stop,
   pushToast,
 }) {
+  const { t } = useI18n();
   const timelineRef = useRef(null);
   const speakerOptions = [
     { value: "narrator", label: "narrator" },
@@ -75,69 +77,69 @@ export default function SynthesisTimelineCard({
 
   return (
     <GlassCard>
-      <h2 className="cardTitle">分段时间线</h2>
+      <h2 className="cardTitle">{t("synth.timeline.title")}</h2>
       {totalVisibleSegments ? (
         <div className="controlRow" style={{ marginBottom: 10 }}>
           <span className="muted">
-            当前显示 {totalVisibleSegments} 段{activeSpeakerFilter !== "all" ? "（已按角色筛选）" : ""}
+            {t("synth.timeline.showingCount", { count: totalVisibleSegments })}{activeSpeakerFilter !== "all" ? t("synth.timeline.filteredByCharacter") : ""}
           </span>
           {activeSpeakerFilter !== "all" ? (
-            <span className="muted">筛选状态下暂不支持拖拽排序</span>
+            <span className="muted">{t("synth.timeline.dragDisabledByFilter")}</span>
           ) : null}
         </div>
       ) : null}
       <div className="controlRow" style={{ marginBottom: 10, gap: 8, flexWrap: "wrap" }}>
-        <span className="muted">状态筛选</span>
+        <span className="muted">{t("synth.timeline.statusFilter")}</span>
         <Button
           variant={activeStatusFilter === "all" ? "primary" : "ghost"}
           size="sm"
           onClick={() => onStatusFilterChange("all")}
         >
-          全部 {statusCounts?.all ?? 0}
+          {t("common.all")} {statusCounts?.all ?? 0}
         </Button>
         <Button
           variant={activeStatusFilter === "stale" ? "primary" : "ghost"}
           size="sm"
           onClick={() => onStatusFilterChange("stale")}
         >
-          待修音 {statusCounts?.stale ?? 0}
+          {t("synth.timeline.stale")} {statusCounts?.stale ?? 0}
         </Button>
         <Button
           variant={activeStatusFilter === "done" ? "primary" : "ghost"}
           size="sm"
           onClick={() => onStatusFilterChange("done")}
         >
-          已合成 {statusCounts?.done ?? 0}
+          {t("synth.timeline.done")} {statusCounts?.done ?? 0}
         </Button>
         <Button
           variant={activeStatusFilter === "missing" ? "primary" : "ghost"}
           size="sm"
           onClick={() => onStatusFilterChange("missing")}
         >
-          缺音频 {statusCounts?.missing ?? 0}
+          {t("synth.timeline.missing")} {statusCounts?.missing ?? 0}
         </Button>
         <Button
           variant={activeStatusFilter === "failed" ? "primary" : "ghost"}
           size="sm"
           onClick={() => onStatusFilterChange("failed")}
         >
-          失败 {statusCounts?.failed ?? 0}
+          {t("synth.timeline.failed")} {statusCounts?.failed ?? 0}
         </Button>
       </div>
       {selectedSegmentIds.length ? (
         <div className="controlRow" style={{ marginBottom: 10 }}>
-          <span className="muted">已选 {selectedSegmentIds.length} 段</span>
+          <span className="muted">{t("synth.timeline.selectedCount", { count: selectedSegmentIds.length })}</span>
           <Button variant="secondary" size="sm" onClick={() => handleRegenerateSelected()} disabled={isRunning}>
-            重新生成已选段落
+            {t("synth.timeline.regenerateSelected")}
           </Button>
           <Button variant="ghost" size="sm" onClick={() => setSelectedSegmentIds([])} disabled={isRunning}>
-            清空选择
+            {t("common.clear")}
           </Button>
         </div>
       ) : null}
       {staleTargetIds.length ? (
         <div className="controlRow" style={{ marginBottom: 10 }}>
-          <span className="muted">检测到 {staleTargetIds.length} 段需要更新</span>
+          <span className="muted">{t("synth.timeline.staleDetected", { count: staleTargetIds.length })}</span>
           <Button
             variant="secondary"
             size="sm"
@@ -148,7 +150,7 @@ export default function SynthesisTimelineCard({
               await handleRegenerateSelected(ids);
             }}
           >
-            需更新段落重新生成
+            {t("synth.timeline.regenerateStale")}
           </Button>
         </div>
       ) : null}
@@ -201,17 +203,17 @@ export default function SynthesisTimelineCard({
           </SortableContext>
         </DndContext>
       ) : activeSpeakerFilter !== "all" ? (
-        <EmptyState title="该角色暂无段落" description="切换角色或点击“总计”可查看其他段落。" />
+        <EmptyState title={t("script.empty.noSegmentsForSpeaker")} description={t("script.empty.noSegmentsForSpeakerDesc")} />
       ) : shouldShowSegmentTimeline ? (
-        <EmptyState title="还没有分段结果" description="点击「开始合成」后每段音频完成时会在此显示" />
+        <EmptyState title={t("synth.timeline.empty.noSegmentResults")} description={t("synth.timeline.empty.noSegmentResultsDesc")} />
       ) : (
-        <EmptyState title="缺失音频文件" description="当前项目尚未生成任何分段音频，请先执行合成后再查看分段时间线。" />
+        <EmptyState title={t("synth.timeline.empty.missingAudioTitle")} description={t("synth.timeline.empty.missingAudioDesc")} />
       )}
       {isAutoPlay ? (
         <div className="controlRow" style={{ marginTop: 12 }}>
-          <span className="muted">连续播放进行中</span>
+          <span className="muted">{t("synth.timeline.autoPlayRunning")}</span>
           <Button variant="danger" size="sm" onClick={stop}>
-            停止连续播放
+            {t("synth.timeline.stopAutoPlay")}
           </Button>
         </div>
       ) : null}

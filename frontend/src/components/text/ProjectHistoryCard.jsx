@@ -3,12 +3,13 @@ import { useMemo, useState } from "react";
 
 import GlassCard from "../shared/GlassCard";
 import Button from "../ui/Button";
+import { useI18n } from "../../i18n/I18nProvider";
 
 function formatTimestamp(raw) {
   if (!raw) return "-";
   const date = new Date(raw);
   if (Number.isNaN(date.getTime())) return raw;
-  return date.toLocaleString("zh-CN", { hour12: false });
+  return date.toLocaleString();
 }
 
 export default function ProjectHistoryCard({
@@ -18,6 +19,7 @@ export default function ProjectHistoryCard({
   onRefresh,
   onRollback,
 }) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const rows = useMemo(() => (Array.isArray(historyItems) ? historyItems : []), [historyItems]);
 
@@ -33,25 +35,25 @@ export default function ProjectHistoryCard({
           >
             {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             <History size={16} />
-            项目历史
+            {t("text.history.title")}
           </button>
           <p className="cardSubtitle">
             {expanded
-              ? "显示快照与关键任务事件，可回滚到历史版本。"
-              : "默认收起，点击“项目历史”展开。"}
+              ? t("text.history.subtitleExpanded")
+              : t("text.history.subtitleCollapsed")}
           </p>
         </div>
         <Button variant="secondary" size="sm" icon={RefreshCw} onClick={onRefresh} disabled={isLoading}>
-          {isLoading ? "刷新中..." : "刷新"}
+          {isLoading ? t("common.refreshing") : t("common.refresh")}
         </Button>
       </div>
 
       {!expanded ? (
-        <div className="muted">已收起</div>
+        <div className="muted">{t("text.history.collapsed")}</div>
       ) : !projectName ? (
-        <div className="emptyState">请先选择项目。</div>
+        <div className="emptyState">{t("text.history.selectProjectFirst")}</div>
       ) : rows.length === 0 ? (
-        <div className="emptyState">暂无历史记录。</div>
+        <div className="emptyState">{t("text.history.empty")}</div>
       ) : (
         <div className="listStack">
           {rows.map((item) => {
@@ -61,10 +63,10 @@ export default function ProjectHistoryCard({
               <div key={item.id} className="statRow" style={{ alignItems: "flex-start", gap: 10 }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0, flex: 1 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flexWrap: "wrap" }}>
-                    <strong>{item?.title || "历史记录"}</strong>
+                    <strong>{item?.title || t("text.history.record")}</strong>
                     <span className="muted">{formatTimestamp(item?.timestamp)}</span>
                     {item?.event?.source ? <span className="projectToolbarBadge">{item.event.source}</span> : null}
-                    {isSnapshot ? <span className="projectToolbarBadge">snapshot</span> : null}
+                    {isSnapshot ? <span className="projectToolbarBadge">{t("text.history.snapshot")}</span> : null}
                   </div>
                   {desc ? <span className="muted" style={{ wordBreak: "break-word" }}>{desc}</span> : null}
                 </div>
@@ -74,9 +76,9 @@ export default function ProjectHistoryCard({
                     size="sm"
                     icon={RotateCcw}
                     onClick={() => onRollback(item.snapshot.id)}
-                    title="回滚到此快照"
+                    title={t("text.history.rollbackToSnapshot")}
                   >
-                    回滚
+                    {t("text.history.rollback")}
                   </Button>
                 ) : null}
               </div>

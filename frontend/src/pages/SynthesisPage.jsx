@@ -36,6 +36,7 @@ import {
   resolveSegmentDisplayStatus,
   resolveWorkflowStatus,
 } from "../utils/stale";
+import { useI18n } from "../i18n/I18nProvider";
 
 function formatTimeMs(ms) {
   if (!ms || isNaN(ms)) return "0:00";
@@ -46,6 +47,7 @@ function formatTimeMs(ms) {
 }
 
 export default function SynthesisPage() {
+  const { t } = useI18n();
   const {
     currentProject,
     refreshCurrentProject,
@@ -598,7 +600,7 @@ export default function SynthesisPage() {
     if (!hasUnsavedChanges) {
       return false;
     }
-    pushToast({ title: `请先保存剧本后再${actionLabel}`, tone: "warning" });
+    pushToast({ title: t("synth.toast.saveScriptBeforeAction", { action: actionLabel }), tone: "warning" });
     return true;
   }
 
@@ -622,7 +624,7 @@ export default function SynthesisPage() {
     }
     const normalized = normalizeSegmentFromEditorDraft(segmentDraft);
     if (!normalized.ok) {
-      pushToast({ title: `tts_overrides JSON 格式错误：${normalized.error}`, tone: "error" });
+      pushToast({ title: t("synth.toast.ttsOverridesInvalid", { error: normalized.error }), tone: "error" });
       return;
     }
     setDraftScript((current) => ({
@@ -632,7 +634,7 @@ export default function SynthesisPage() {
       ),
     }));
     setSelectedSegmentIds((ids) => (ids.includes(segment.segment_id) ? ids : [...ids, segment.segment_id]));
-    pushToast({ title: "已加入草稿，点击“保存剧本”后生效", tone: "default" });
+    pushToast({ title: t("synth.toast.addedToDraft"), tone: "default" });
     cancelEditSegment();
   }
 
@@ -647,7 +649,7 @@ export default function SynthesisPage() {
     setEditingSegmentId((current) => (current === segmentId ? null : current));
     setSegmentDraft((current) => (current?.id === segmentId ? null : current));
     setInsertAfterSegmentId((current) => (current === segmentId ? null : current));
-    pushToast({ title: "已加入草稿，点击“保存剧本”后生效", tone: "default" });
+    pushToast({ title: t("synth.toast.addedToDraft"), tone: "default" });
   }
 
   function handleAddSegment() {
@@ -656,7 +658,7 @@ export default function SynthesisPage() {
     }
     const normalized = normalizeSegmentFromEditorDraft(newSegment);
     if (!normalized.ok) {
-      pushToast({ title: `新增片段 tts_overrides JSON 格式错误：${normalized.error}`, tone: "error" });
+      pushToast({ title: t("synth.toast.newSegmentTtsInvalid", { error: normalized.error }), tone: "error" });
       return;
     }
     const toAdd = {
@@ -678,13 +680,13 @@ export default function SynthesisPage() {
     }));
     setNewSegment(createSegmentDraft((draftScript?.segments || []).length + 1));
     setInsertAfterSegmentId(null);
-    pushToast({ title: "已加入草稿，点击“保存剧本”后生效", tone: "default" });
+    pushToast({ title: t("synth.toast.addedToDraft"), tone: "default" });
   }
 
   function handleApplySegmentSpeed(speed, scope = "all") {
     const value = Number(speed);
     if (!Number.isFinite(value) || value < 0.5 || value > 2) {
-      pushToast({ title: "speed 需要在 0.5 到 2.0 之间", tone: "error" });
+      pushToast({ title: t("synth.toast.speedRange"), tone: "error" });
       return;
     }
     const selectedSet = new Set(selectedSegmentIds || []);
@@ -717,7 +719,7 @@ export default function SynthesisPage() {
         // Keep the visible JSON untouched if it is already invalid; save validation will report it.
       }
     }
-    pushToast({ title: `已为 ${changedCount} 个片段写入 speed=${value}，点击“保存剧本”后生效`, tone: "default" });
+    pushToast({ title: t("synth.toast.speedApplied", { count: changedCount, value }), tone: "default" });
   }
 
   async function handleSaveScript() {
@@ -728,7 +730,7 @@ export default function SynthesisPage() {
     if (editingSegmentId && segmentDraft?.id === editingSegmentId) {
       const normalized = normalizeSegmentFromEditorDraft(segmentDraft);
       if (!normalized.ok) {
-        pushToast({ title: `当前编辑片段 tts_overrides JSON 格式错误：${normalized.error}`, tone: "error" });
+        pushToast({ title: t("synth.toast.currentSegmentTtsInvalid", { error: normalized.error }), tone: "error" });
         return;
       }
       workingDraftScript = {
@@ -766,17 +768,17 @@ export default function SynthesisPage() {
   }
 
   async function handleStart() {
-    if (guardUnsavedChanges("开始合成")) {
+    if (guardUnsavedChanges(t("synth.action.start"))) {
       return;
     }
     if (systemRuntimeStatus?.llm_loaded) {
-      pushToast({ title: "检测到 LLM 已加载，合成前会自动释放以降低显存占用。", tone: "warning" });
+      pushToast({ title: t("synth.toast.llmWillUnload"), tone: "warning" });
     }
     await startSynthesisTask();
   }
 
   async function handleRetryFailed() {
-    if (guardUnsavedChanges("重试失败段")) {
+    if (guardUnsavedChanges(t("synth.action.retryFailed"))) {
       return;
     }
     if (!currentProject?.id || isRunning) {
@@ -790,7 +792,7 @@ export default function SynthesisPage() {
   }
 
   async function handleResumeSynthesisRun() {
-    if (guardUnsavedChanges("继续合成")) {
+    if (guardUnsavedChanges(t("synth.action.resume"))) {
       return;
     }
     if (!currentProject?.id || isRunning) {
@@ -832,7 +834,7 @@ export default function SynthesisPage() {
   }
 
   async function handleStartPostprocess() {
-    if (guardUnsavedChanges("开始后期处理")) {
+    if (guardUnsavedChanges(t("synth.action.postprocess"))) {
       return;
     }
     if (!currentProject?.id || isRunning) {
@@ -873,9 +875,9 @@ export default function SynthesisPage() {
         });
       }
       await refreshCurrentProject(currentProject.id);
-      pushToast({ title: `${assetType === "bgm" ? "背景音乐" : "环境音"}已绑定`, tone: "success" });
+      pushToast({ title: t(assetType === "bgm" ? "synth.toast.bgmBound" : "synth.toast.ambienceBound"), tone: "success" });
     } catch (uploadError) {
-      pushToast({ title: `素材上传失败：${uploadError?.message || uploadError}`, tone: "error" });
+      pushToast({ title: t("synth.toast.uploadAssetFailed", { error: uploadError?.message || uploadError }), tone: "error" });
     } finally {
       setIsUploadingPostAsset(false);
     }
@@ -897,18 +899,18 @@ export default function SynthesisPage() {
         },
       });
     }
-    pushToast({ title: `${assetType === "bgm" ? "背景音乐" : "环境音"}已移除`, tone: "success" });
+    pushToast({ title: t(assetType === "bgm" ? "synth.toast.bgmRemoved" : "synth.toast.ambienceRemoved"), tone: "success" });
   }
 
   async function handleSingleSegmentSynthesis(segmentId) {
-    if (guardUnsavedChanges("重新生成")) {
+    if (guardUnsavedChanges(t("synth.action.regenerate"))) {
       return;
     }
     await regenerateSingleSegment(segmentId);
   }
 
   async function handleRegenerateSelected(targetIds) {
-    if (guardUnsavedChanges("重新生成")) {
+    if (guardUnsavedChanges(t("synth.action.regenerate"))) {
       return;
     }
     await regenerateSelectedSegments(targetIds);
@@ -933,7 +935,7 @@ export default function SynthesisPage() {
 
   const handleSaveProjectFile = useCallback(async (options = {}) => {
     if (!currentProject) {
-      pushToast({ title: "请先创建或选择项目", tone: "warning" });
+      pushToast({ title: t("synth.toast.selectProjectFirst"), tone: "warning" });
       return;
     }
     const forceSaveAs = Boolean(options?.forceSaveAs);
@@ -953,14 +955,14 @@ export default function SynthesisPage() {
         bindCurrentProjectFile({ handle: result.handle, fileName: result.fileName || "" });
       }
       pushToast({
-        title: forceSaveAs ? "项目文件已另存" : result?.mode === "inplace" ? "项目文件已保存" : "项目文件已导出",
+        title: forceSaveAs ? t("text.toast.projectSavedAs") : result?.mode === "inplace" ? t("text.toast.projectSaved") : t("text.toast.projectExported"),
         tone: "success",
       });
     } catch (saveError) {
       if (saveError?.name === "AbortError") {
         return;
       }
-      pushToast({ title: `保存项目失败：${saveError?.message || "未知错误"}`, tone: "error" });
+      pushToast({ title: t("text.toast.saveProjectFailed", { error: saveError?.message || t("common.unknownError") }), tone: "error" });
     }
   }, [
     currentProject,
@@ -1077,7 +1079,7 @@ export default function SynthesisPage() {
           onClearInsertAnchor={() => setInsertAfterSegmentId(null)}
           onNewSegmentFieldChange={(field, value) => setNewSegment((current) => ({ ...current, [field]: value }))}
           onAddSegment={handleAddSegment}
-          addButtonLabel="+ 添加片段"
+          addButtonLabel={t("synth.addSegment")}
           actionContent={
             <>
               <Button
@@ -1085,10 +1087,10 @@ export default function SynthesisPage() {
                 disabled={!currentProject?.id || isScriptSaving || !hasUnsavedChanges}
                 onClick={handleSaveScript}
               >
-                {isScriptSaving ? "保存中..." : hasUnsavedChanges ? "保存剧本" : "已保存"}
+                {isScriptSaving ? t("synth.saving") : hasUnsavedChanges ? t("synth.saveScript") : t("synth.saved")}
               </Button>
               <Button variant="secondary" onClick={() => setDiffPreviewOpen(true)} disabled={!hasUnsavedChanges}>
-                查看差异
+                {t("synth.viewDiff")}
               </Button>
             </>
           }

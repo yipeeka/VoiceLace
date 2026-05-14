@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import GlassCard from "../shared/GlassCard";
 import SynthesisWaveSurfer from "../shared/SynthesisWaveSurfer";
+import { useI18n } from "../../i18n/I18nProvider";
 
 function isEditableTarget(target) {
   const tagName = String(target?.tagName || "").toLowerCase();
@@ -17,6 +18,7 @@ export default function SynthesisFullAudioCard({
   useSourceTimeline = false,
   onCurrentTimeChange,
 }) {
+  const { t } = useI18n();
   const [isPlaying, setIsPlaying] = useState(false);
   const [playSignal, setPlaySignal] = useState(0);
   const [pauseSignal, setPauseSignal] = useState(0);
@@ -46,7 +48,7 @@ export default function SynthesisFullAudioCard({
 
   return (
     <GlassCard>
-      <h2 className="cardTitle">完整音频</h2>
+      <h2 className="cardTitle">{t("synth.fullAudio.title")}</h2>
       <SynthesisWaveSurfer
         projectId={projectId}
         audioUrl={fullAudioUrl}

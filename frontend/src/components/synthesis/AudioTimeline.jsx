@@ -1,6 +1,7 @@
 import { Pause, Play } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import WaveSurfer from "wavesurfer.js";
+import { useI18n } from "../../i18n/I18nProvider";
 
 function formatTime(seconds) {
   const m = Math.floor(seconds / 60);
@@ -27,6 +28,7 @@ function buildTimeline(segments, gapDurationMs) {
 }
 
 export default function AudioTimeline({ audioUrl, segments, gapDurationMs = 300, onActiveSegmentChange, focusSegmentId }) {
+  const { t } = useI18n();
   const containerRef = useRef(null);
   const wavesurferRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -92,7 +94,7 @@ export default function AudioTimeline({ audioUrl, segments, gapDurationMs = 300,
     ws.on("error", () => {
       setIsReady(false);
       setIsPlaying(false);
-      setLoadError("完整音频加载失败，请重新合成或切换为 WAV 导出。");
+      setLoadError(t("synth.audioTimeline.loadFailed"));
     });
     wavesurferRef.current = ws;
     return () => {
@@ -109,7 +111,7 @@ export default function AudioTimeline({ audioUrl, segments, gapDurationMs = 300,
     try {
       ws.zoom(zoomPxPerSec);
     } catch {
-      setLoadError("完整音频尚未就绪，请稍后重试。");
+      setLoadError(t("synth.audioTimeline.notReady"));
     }
   }, [zoomPxPerSec, isReady]);
 
@@ -122,7 +124,7 @@ export default function AudioTimeline({ audioUrl, segments, gapDurationMs = 300,
       setIsPlaying((prev) => !prev);
     } catch {
       setIsPlaying(false);
-      setLoadError("完整音频尚未就绪，请稍后重试。");
+      setLoadError(t("synth.audioTimeline.notReady"));
     }
   }
 
@@ -135,7 +137,7 @@ export default function AudioTimeline({ audioUrl, segments, gapDurationMs = 300,
     try {
       ws.seekTo(fraction);
     } catch {
-      setLoadError("完整音频尚未就绪，请稍后重试。");
+      setLoadError(t("synth.audioTimeline.notReady"));
     }
   }
 
@@ -156,12 +158,12 @@ export default function AudioTimeline({ audioUrl, segments, gapDurationMs = 300,
     try {
       ws.seekTo(Math.max(0, Math.min(1, percent)));
     } catch {
-      setLoadError("完整音频尚未就绪，请稍后重试。");
+      setLoadError(t("synth.audioTimeline.notReady"));
     }
   }
 
   if (!audioUrl) {
-    return <div className="emptyState">完成合成后，这里会显示完整时间线。</div>;
+    return <div className="emptyState">{t("synth.audioTimeline.empty")}</div>;
   }
 
   return (
@@ -171,17 +173,17 @@ export default function AudioTimeline({ audioUrl, segments, gapDurationMs = 300,
           {isPlaying ? <Pause size={18} /> : <Play size={18} />}
         </button>
         <button type="button" className="timelineJumpButton" onClick={() => seekByOffset(-1)} disabled={!items.length || !isReady}>
-          上一段
+          {t("synth.audioTimeline.prev")}
         </button>
         <button type="button" className="timelineJumpButton" onClick={() => seekByOffset(1)} disabled={!items.length || !isReady}>
-          下一段
+          {t("synth.audioTimeline.next")}
         </button>
         <span className="muted">
           {formatTime(currentTime)} / {formatTime(duration)}
         </span>
       </div>
       <div className="timelineZoomRow">
-        <span className="muted">缩放</span>
+        <span className="muted">{t("synth.audioTimeline.zoom")}</span>
         <input
           className="timelineZoomSlider"
           type="range"

@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   ChevronRight,
   FolderOpen,
+  Languages,
   ShieldCheck,
   Mic,
   Music,
@@ -18,22 +19,25 @@ import {
 import { Tooltip } from "../ui/Tooltip";
 import { useSettingsStore } from "../../stores/useSettingsStore";
 import { useUiStore } from "../../stores/useUiStore";
+import { useI18n } from "../../i18n/I18nProvider";
 
 const NAV_ITEMS = [
-  { id: "speech",  label: "语音识别",  icon: Mic,               step: 1 },
-  { id: "text",    label: "文本输入",  icon: BookOpen,          step: 2 },
-  { id: "qc",      label: "解析质检",  icon: ShieldCheck,       step: 3 },
-  { id: "script",  label: "剧本编辑",  icon: SlidersHorizontal, step: 4 },
-  { id: "voice",   label: "声音配置",  icon: Users,             step: 5 },
-  { id: "music",   label: "音乐生成",  icon: Music,             step: 6 },
-  { id: "synth",   label: "合成导出",  icon: Volume2,           step: 7 },
+  { id: "speech",  labelKey: "sidebar.nav.speech", icon: Mic, step: 1 },
+  { id: "text",    labelKey: "sidebar.nav.text", icon: BookOpen, step: 2 },
+  { id: "qc",      labelKey: "sidebar.nav.qc", icon: ShieldCheck, step: 3 },
+  { id: "script",  labelKey: "sidebar.nav.script", icon: SlidersHorizontal, step: 4 },
+  { id: "voice",   labelKey: "sidebar.nav.voice", icon: Users, step: 5 },
+  { id: "music",   labelKey: "sidebar.nav.music", icon: Music, step: 6 },
+  { id: "synth",   labelKey: "sidebar.nav.synth", icon: Volume2, step: 7 },
 ];
 
 export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCollapse, completedPages = [] }) {
   const projectSaveAction = useUiStore((state) => state.projectSaveAction);
   const manualUnloadAll = useSettingsStore((state) => state.manualUnloadAll);
+  const { language, setLanguage, t } = useI18n();
   const canShowProjectSave = ["speech", "text", "script", "voice", "music", "synth"].includes(activePage);
   const canSaveProject = typeof projectSaveAction === "function";
+  const toggleLanguage = () => setLanguage(language === "zh" ? "en" : "zh");
 
   return (
     <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
@@ -52,14 +56,14 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
               transition={{ duration: 0.2 }}
             >
               <div className="title">VoiceLace</div>
-              <div className="subtitle">AI 有声书工作台</div>
+              <div className="subtitle">{t("sidebar.brand.subtitle")}</div>
             </motion.div>
           )}
         </AnimatePresence>
         <button
           className="sidebarCollapseBtn"
           onClick={onToggleCollapse}
-          title={collapsed ? "展开侧边栏" : "折叠侧边栏"}
+          title={collapsed ? t("sidebar.collapse.expand") : t("sidebar.collapse.collapse")}
         >
           {collapsed ? <ChevronRight size={13} /> : <ChevronLeft size={13} />}
         </button>
@@ -88,7 +92,7 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.15 }}
                   >
-                    {item.label}
+                    {t(item.labelKey)}
                   </motion.span>
                 )}
               </AnimatePresence>
@@ -109,7 +113,7 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
           );
 
           const renderedButton = collapsed ? (
-            <Tooltip key={item.id} content={item.label} side="right">
+            <Tooltip key={item.id} content={t(item.labelKey)} side="right">
               {button}
             </Tooltip>
           ) : (
@@ -127,22 +131,22 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
                 <>
                   {collapsed ? (
                     <>
-                      <Tooltip content={canSaveProject ? "保存项目" : "当前页面不可保存"} side="right">
+                      <Tooltip content={canSaveProject ? t("sidebar.project.save") : t("sidebar.project.saveUnavailable")} side="right">
                         <button
                           className="navItem navItemSubAction"
                           onClick={() => projectSaveAction?.()}
                           disabled={!canSaveProject}
-                          title="保存项目"
+                          title={t("sidebar.project.save")}
                         >
                           <Save className="navItemIcon" size={18} />
                         </button>
                       </Tooltip>
-                      <Tooltip content={canSaveProject ? "另存项目" : "当前页面不可保存"} side="right">
+                      <Tooltip content={canSaveProject ? t("sidebar.project.saveAs") : t("sidebar.project.saveUnavailable")} side="right">
                         <button
                           className="navItem navItemSubAction"
                           onClick={() => projectSaveAction?.({ forceSaveAs: true })}
                           disabled={!canSaveProject}
-                          title="另存项目"
+                          title={t("sidebar.project.saveAs")}
                         >
                           <FolderOpen className="navItemIcon" size={18} />
                         </button>
@@ -156,7 +160,7 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
                         disabled={!canSaveProject}
                       >
                         <Save className="navItemIcon" size={16} />
-                        <span className="navItemLabel">保存项目</span>
+                        <span className="navItemLabel">{t("sidebar.project.save")}</span>
                       </button>
                       <button
                         className="navItem navItemSubAction"
@@ -164,7 +168,7 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
                         disabled={!canSaveProject}
                       >
                         <FolderOpen className="navItemIcon" size={16} />
-                        <span className="navItemLabel">另存项目</span>
+                        <span className="navItemLabel">{t("sidebar.project.saveAs")}</span>
                       </button>
                     </>
                   )}
@@ -177,11 +181,11 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
         <div className="sidebarDivider" />
 
         {collapsed ? (
-          <Tooltip content="一键卸载" side="right">
+          <Tooltip content={t("sidebar.unloadAll")} side="right">
             <button
               className="navItem navItemSubAction navItemDangerAction"
               onClick={() => manualUnloadAll?.()}
-              title="一键卸载"
+              title={t("sidebar.unloadAll")}
             >
               <Power className="navItemIcon" size={18} />
             </button>
@@ -192,13 +196,26 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
             onClick={() => manualUnloadAll?.()}
           >
             <Power className="navItemIcon" size={16} />
-            <span className="navItemLabel">一键卸载</span>
+            <span className="navItemLabel">{t("sidebar.unloadAll")}</span>
+          </button>
+        )}
+
+        {collapsed ? (
+          <Tooltip content={language === "zh" ? t("sidebar.langToggle.en") : t("sidebar.langToggle.zh")} side="right">
+            <button className="navItem navItemSubAction" onClick={toggleLanguage} title={language === "zh" ? t("sidebar.langToggle.en") : t("sidebar.langToggle.zh")}>
+              <Languages className="navItemIcon" size={18} />
+            </button>
+          </Tooltip>
+        ) : (
+          <button className="navItem navItemSubAction" onClick={toggleLanguage} title={language === "zh" ? t("sidebar.langToggle.en") : t("sidebar.langToggle.zh")}>
+            <Languages className="navItemIcon" size={16} />
+            <span className="navItemLabel">{language === "zh" ? t("settings.languageSwitch.compactZh") : t("settings.languageSwitch.compactEn")}</span>
           </button>
         )}
 
         {/* Settings */}
         {collapsed ? (
-          <Tooltip content="设置" side="right">
+          <Tooltip content={t("sidebar.settings")} side="right">
             <button
               className={`navItem ${activePage === "settings" ? "active" : ""}`}
               onClick={() => onNavigate("settings")}
@@ -212,7 +229,7 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
             onClick={() => onNavigate("settings")}
           >
             <Settings className="navItemIcon" size={18} />
-            <span className="navItemLabel">系统设置</span>
+            <span className="navItemLabel">{t("sidebar.settings")}</span>
           </button>
         )}
       </nav>

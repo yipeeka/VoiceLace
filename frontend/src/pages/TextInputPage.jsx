@@ -20,20 +20,15 @@ import {
   shortProjectId,
   toProjectFileDisplayName,
 } from "../utils/projectToolbar";
+import { useI18n } from "../i18n/I18nProvider";
 
 const DEMO_TEXT = `旁白：暮色渐浓，庭院里只剩下风吹竹叶的细响。
 林黛玉：宝哥哥，你今日怎么来得这样晚？
 贾宝玉：路上被二姐姐叫住了，这才耽搧了。
 旁白：黛玉低头轻笑，却仍带着几分嗔意。`;
 
-const PARSE_MODE_OPTIONS = [
-  { value: "verified_five_step_pipeline", label: "快速解析（推荐）" },
-  { value: "two_step_pipeline", label: "两步解析" },
-  { value: "legacy_single_pass", label: "单步解析" },
-  { value: "read_aloud_single_voice", label: "单人朗读" },
-];
-
 export default function TextInputPage({ onNavigate }) {
+  const { t } = useI18n();
   const [projectName, setProjectName] = useState("");
   const [renameProjectName, setRenameProjectName] = useState("");
   const [promptOpen, setPromptOpen] = useState(false);
@@ -136,7 +131,7 @@ export default function TextInputPage({ onNavigate }) {
   }, [loadProjectScript, selectProject, setScript, setSourceText]);
 
   async function handleCreateProject() {
-    const name = projectName.trim() || `项目 ${new Date().toLocaleTimeString("zh-CN")}`;
+    const name = projectName.trim() || `${t("text.projectPrefix")} ${new Date().toLocaleTimeString("zh-CN")}`;
     await createProject(name);
     setProjectName("");
     setSourceText("");
@@ -146,7 +141,7 @@ export default function TextInputPage({ onNavigate }) {
   async function handleParse() {
     let project = currentProject;
     if (!project) {
-      project = await createProject(projectName.trim() || "默认项目");
+      project = await createProject(projectName.trim() || t("text.defaultProject"));
       setProjectName("");
     }
     const result = await parseText({ text: sourceText.trim(), projectId: project.id, prompt, parseMode });
@@ -162,14 +157,14 @@ export default function TextInputPage({ onNavigate }) {
     const nextName = renameProjectName.trim();
     if (!nextName) {
       useUiStore.getState().pushToast({
-        title: "项目名称不能为空",
+        title: t("text.toast.projectNameRequired"),
         tone: "warning",
       });
       return;
     }
     if (nextName === currentProject.name) {
       useUiStore.getState().pushToast({
-        title: "项目名称未变化",
+        title: t("text.toast.projectNameUnchanged"),
         tone: "default",
       });
       return;
@@ -179,7 +174,7 @@ export default function TextInputPage({ onNavigate }) {
       setRenameProjectName(updated.name || nextName);
     } catch (error) {
       useUiStore.getState().pushToast({
-        title: `项目改名失败：${error?.message || "未知错误"}`,
+        title: t("text.toast.renameFailed", { error: error?.message || t("common.unknownError") }),
         tone: "error",
       });
     }
@@ -189,19 +184,19 @@ export default function TextInputPage({ onNavigate }) {
     if (!currentProject?.id) {
       return;
     }
-    const ok = window.confirm(`确认删除项目「${currentProject.name}」？该操作不可撤销。`);
+    const ok = window.confirm(t("text.confirm.deleteProject", { name: currentProject.name }));
     if (!ok) {
       return;
     }
     try {
       await deleteProject(currentProject.id, { silent: true });
       useUiStore.getState().pushToast({
-        title: "项目已删除",
+        title: t("text.toast.projectDeleted"),
         tone: "success",
       });
     } catch {
       useUiStore.getState().pushToast({
-        title: "项目删除失败，请重试",
+        title: t("text.toast.projectDeleteFailed"),
         tone: "warning",
       });
       return;
@@ -226,7 +221,7 @@ export default function TextInputPage({ onNavigate }) {
       return;
     }
     const ok = window.confirm(
-      `检测到 ${siblingProjects.length} 个与「${currentProject.name}」同名的副本。\n确认删除这些同名副本并保留当前项目？`
+      t("text.confirm.deleteSameNameCopies", { count: siblingProjects.length, name: currentProject.name })
     );
     if (!ok) {
       return;
@@ -245,22 +240,20 @@ export default function TextInputPage({ onNavigate }) {
 
     if (deletedCount > 0) {
       useUiStore.getState().pushToast({
-        title: `已删除 ${deletedCount} 个同名副本`,
+        title: t("text.toast.deletedSameNameCopies", { count: deletedCount }),
         tone: "success",
       });
     }
     if (failedIds.length) {
       useUiStore.getState().pushToast({
-        title: `有 ${failedIds.length} 个同名副本删除失败，请重试`,
+        title: t("text.toast.deleteSameNameCopiesFailed", { count: failedIds.length }),
         tone: "warning",
       });
     }
   }
 
   async function handleCleanupDuplicateProjects() {
-    const ok = window.confirm(
-      "执行“清理重复项目”将合并 project-file 阴影副本并去重重复 project-file 项目。是否继续？"
-    );
+    const ok = window.confirm(t("text.confirm.cleanupDuplicateProjects"));
     if (!ok) {
       return;
     }
@@ -287,12 +280,15 @@ export default function TextInputPage({ onNavigate }) {
       }
 
       useUiStore.getState().pushToast({
-        title: `清理完成：合并 ${mergeResult.remove_count || 0} 个阴影副本，去重 ${dedupeResult.remove_count || 0} 个重复项目`,
+        title: t("text.toast.cleanupDone", {
+          mergeCount: mergeResult.remove_count || 0,
+          dedupeCount: dedupeResult.remove_count || 0,
+        }),
         tone: "success",
       });
     } catch (error) {
       useUiStore.getState().pushToast({
-        title: `清理重复项目失败：${error?.message || "未知错误"}`,
+        title: t("text.toast.cleanupFailed", { error: error?.message || t("common.unknownError") }),
         tone: "error",
       });
     }
@@ -349,7 +345,7 @@ export default function TextInputPage({ onNavigate }) {
         return;
       }
       useUiStore.getState().pushToast({
-        title: `打开项目文件失败：${error?.message || "未知错误"}`,
+        title: t("text.toast.openProjectFileFailed", { error: error?.message || t("common.unknownError") }),
         tone: "error",
       });
     }
@@ -357,7 +353,7 @@ export default function TextInputPage({ onNavigate }) {
 
   const handleSaveProjectFile = useCallback(async (options = {}) => {
     const forceSaveAs = Boolean(options?.forceSaveAs);
-    const fallbackName = projectName.trim() || "未命名项目";
+    const fallbackName = projectName.trim() || t("text.untitledProject");
     const fallbackProject = currentProject || {
       name: fallbackName,
       status: sourceText.trim() ? "draft" : "draft",
@@ -386,7 +382,7 @@ export default function TextInputPage({ onNavigate }) {
         bindCurrentProjectFile({ handle: result.handle, fileName: result.fileName || "" });
       }
       useUiStore.getState().pushToast({
-        title: forceSaveAs ? "项目文件已另存" : result?.mode === "inplace" ? "项目文件已保存" : "项目文件已导出",
+        title: forceSaveAs ? t("text.toast.projectSavedAs") : result?.mode === "inplace" ? t("text.toast.projectSaved") : t("text.toast.projectExported"),
         tone: "success",
       });
     } catch (error) {
@@ -394,7 +390,7 @@ export default function TextInputPage({ onNavigate }) {
         return;
       }
       useUiStore.getState().pushToast({
-        title: `保存项目失败：${error?.message || "未知错误"}`,
+        title: t("text.toast.saveProjectFailed", { error: error?.message || t("common.unknownError") }),
         tone: "error",
       });
     }
@@ -412,7 +408,7 @@ export default function TextInputPage({ onNavigate }) {
 
   async function handleRollbackSnapshot(snapshotId) {
     if (!currentProject?.id || !snapshotId) return;
-    const ok = window.confirm("回滚会覆盖当前项目内容，是否继续？");
+    const ok = window.confirm(t("text.confirm.rollbackProject"));
     if (!ok) return;
     try {
       await restoreProjectSnapshot(currentProject.id, snapshotId);
@@ -422,7 +418,7 @@ export default function TextInputPage({ onNavigate }) {
       await loadProjectHistory(currentProject.id, 120);
     } catch (error) {
       useUiStore.getState().pushToast({
-        title: `回滚失败：${error?.message || "未知错误"}`,
+        title: t("text.toast.rollbackFailed", { error: error?.message || t("common.unknownError") }),
         tone: "error",
       });
     }
@@ -436,6 +432,12 @@ export default function TextInputPage({ onNavigate }) {
   const wordCount = sourceText.length;
   const estimatedSegments = sourceText.split(/\n/).filter((l) => l.trim()).length;
   const fixedPromptMode = parseMode === "verified_five_step_pipeline";
+  const parseModeOptions = useMemo(() => ([
+    { value: "verified_five_step_pipeline", label: t("text.parseMode.fastRecommended") },
+    { value: "two_step_pipeline", label: t("text.parseMode.twoStep") },
+    { value: "legacy_single_pass", label: t("text.parseMode.singleStep") },
+    { value: "read_aloud_single_voice", label: t("text.parseMode.singleVoiceRead") },
+  ]), [t]);
 
   const sortedProjects = useMemo(
     () => [...projects].sort((a, b) => Date.parse(b.updated_at || "") - Date.parse(a.updated_at || "")),
@@ -461,7 +463,7 @@ export default function TextInputPage({ onNavigate }) {
   );
   const currentProjectMeta = useMemo(() => {
     if (!currentProject?.id) {
-      return { sourceTag: "未选择", detail: "未选择项目" };
+      return { sourceTag: t("common.notSelected"), detail: t("text.projectNotSelected") };
     }
     const sourceTag = getProjectSourceTag(projectSources?.[currentProject.id]);
     const detailParts = [];
@@ -477,7 +479,7 @@ export default function TextInputPage({ onNavigate }) {
   }, [currentProject, currentProjectFileName, projectSources]);
   const moreMenuItems = useMemo(() => [
     {
-      label: "删除当前项目",
+      label: t("text.menu.deleteCurrentProject"),
       icon: Trash2,
       danger: true,
       disabled: !currentProject?.id,
@@ -486,18 +488,18 @@ export default function TextInputPage({ onNavigate }) {
     { type: "separator" },
     {
       label: sameNameSiblingProjects.length
-        ? `删除同名副本（${sameNameSiblingProjects.length}）`
-        : "删除同名副本",
+        ? t("text.menu.deleteSameNameCopiesWithCount", { count: sameNameSiblingProjects.length })
+        : t("text.menu.deleteSameNameCopies"),
       icon: Trash2,
       danger: true,
       disabled: !currentProject?.id || sameNameSiblingProjects.length < 1,
       title: sameNameSiblingProjects.length
-        ? `删除 ${sameNameSiblingProjects.length} 个与当前项目同名的副本`
-        : "当前没有可删除的同名副本",
+        ? t("text.menu.deleteSameNameCopiesHintWithCount", { count: sameNameSiblingProjects.length })
+        : t("text.menu.deleteSameNameCopiesHintNone"),
       onSelect: handleDeleteSameNameDuplicates,
     },
     {
-      label: "清理重复项目",
+      label: t("text.menu.cleanupDuplicateProjects"),
       disabled: isParsing,
       onSelect: handleCleanupDuplicateProjects,
     },
@@ -518,9 +520,9 @@ export default function TextInputPage({ onNavigate }) {
           <div className="sectionHeaderLeft">
             <h2 className="cardTitle">
               <BookOpen size={16} />
-              文本输入
+              {t("text.title")}
             </h2>
-            <p className="cardSubtitle">粘贴小说、剧本文件，LLM 将自动解析角色与剧本结构。</p>
+            <p className="cardSubtitle">{t("text.subtitle")}</p>
           </div>
         </div>
 
@@ -548,7 +550,7 @@ export default function TextInputPage({ onNavigate }) {
         {importWarnings?.length ? (
           <div className="statusBadge warning" style={{ marginBottom: 10, display: "block", textAlign: "left" }}>
             {importWarnings.map((warning, idx) => (
-              <div key={`${idx}-${warning}`}>导入提示 {idx + 1}: {warning}</div>
+              <div key={`${idx}-${warning}`}>{t("text.importHint")} {idx + 1}: {warning}</div>
             ))}
           </div>
         ) : null}
@@ -558,8 +560,8 @@ export default function TextInputPage({ onNavigate }) {
           <FileDropZone
             accept=".txt,.md,.srt"
             onFile={handleFile}
-            label="拖拽 .txt / .md / .srt 文件到此处"
-            sublabel="或直接在下方编辑区粘贴内容"
+            label={t("text.dropzone.label")}
+            sublabel={t("text.dropzone.sublabel")}
           />
         )}
 
@@ -570,7 +572,7 @@ export default function TextInputPage({ onNavigate }) {
             style={{ minHeight: 200 }}
             value={sourceText}
             onChange={(e) => setSourceText(e.target.value)}
-            placeholder={"在这里粘贴文本内容...\n\n示例：\n旁白：暮色渐浓。\n林黛玉：宝哥哥，你今日怎么来得这样晚？"}
+            placeholder={t("text.inputPlaceholder")}
           />
           <div
             style={{
@@ -582,7 +584,7 @@ export default function TextInputPage({ onNavigate }) {
               fontFamily: "monospace",
             }}
           >
-            {wordCount} 字 · 约 {estimatedSegments} 段
+            {t("text.countLine", { chars: wordCount, segments: estimatedSegments })}
           </div>
         </div>
 
@@ -595,7 +597,7 @@ export default function TextInputPage({ onNavigate }) {
             onClick={() => setPromptOpen((o) => !o)}
           >
             {promptOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-            自定义提示词（可选）
+            {t("text.customPrompt")}
           </button>
           {promptOpen && (
             <textarea
@@ -603,12 +605,12 @@ export default function TextInputPage({ onNavigate }) {
               style={{ marginTop: 8 }}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="留空使用默认系统提示词..."
+              placeholder={t("text.customPromptPlaceholder")}
             />
           )}
           {fixedPromptMode ? (
             <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
-              该模式使用固定提示词模板，会忽略自定义提示词。
+              {t("text.fixedPromptHint")}
             </div>
           ) : null}
         </div>
@@ -619,8 +621,8 @@ export default function TextInputPage({ onNavigate }) {
             <Select
               value={parseMode}
               onValueChange={(value) => setParseMode(value)}
-              options={PARSE_MODE_OPTIONS}
-              placeholder="选择解析模式"
+              options={parseModeOptions}
+              placeholder={t("text.selectParseMode")}
               disabled={isParsing}
             />
           </div>
@@ -633,10 +635,10 @@ export default function TextInputPage({ onNavigate }) {
             {isParsing ? (
               <>
                 <RefreshCw size={15} style={{ animation: "spin 0.8s linear infinite" }} />
-                解析中 {parseProgress > 0 ? `${parseProgress}%` : ""}
+                {t("text.parsing")} {parseProgress > 0 ? `${parseProgress}%` : ""}
               </>
             ) : (
-              "▶ 开始解析"
+              t("text.startParse")
             )}
           </Button>
           {isParsing && (
@@ -646,7 +648,7 @@ export default function TextInputPage({ onNavigate }) {
               onClick={cancelParse}
               icon={Square}
             >
-              中断解析
+              {t("text.stopParse")}
             </Button>
           )}
           <Button
@@ -654,7 +656,7 @@ export default function TextInputPage({ onNavigate }) {
             onClick={() => setSourceText(DEMO_TEXT)}
             disabled={isParsing}
           >
-            填充示例
+            {t("text.fillDemo")}
           </Button>
           {sourceText && (
             <Button
@@ -662,12 +664,12 @@ export default function TextInputPage({ onNavigate }) {
               onClick={() => setSourceText("")}
               disabled={isParsing}
             >
-              清空
+              {t("common.clear")}
             </Button>
           )}
           {currentProject && (
             <span className="muted" style={{ marginLeft: "auto" }}>
-              写入：{currentProject.name}
+              {t("text.writingTo")}{currentProject.name}
             </span>
           )}
         </div>
@@ -675,7 +677,7 @@ export default function TextInputPage({ onNavigate }) {
         {error && <div className="errorText">⚠ {error}</div>}
         {!error && isParsing && (parseStageLabel || parseStage) ? (
           <div className="errorText" style={{ color: "var(--text-secondary)" }}>
-            当前阶段：{parseStageLabel || parseStage}
+            {t("text.currentStage")}{parseStageLabel || parseStage}
             {Number.isFinite(Number(parseStageProgress)) && Number(parseStageProgress) > 0
               ? ` · ${Number(parseStageProgress)}%`
               : ""}
@@ -683,15 +685,15 @@ export default function TextInputPage({ onNavigate }) {
         ) : null}
         {!error && (modelStatus || lastSyncError) ? (
           <div className="errorText" style={{ color: lastSyncError ? "var(--danger)" : "var(--text-secondary)" }}>
-            {lastSyncError ? `⚠ ${lastSyncError}` : `${modelStatus} · 连接：${connectionStatus} · 任务：${status}`}
+            {lastSyncError ? `⚠ ${lastSyncError}` : `${modelStatus} · ${t("text.connection")}${connectionStatus} · ${t("text.task")}${status}`}
           </div>
         ) : null}
       </GlassCard>
 
       {/* Right: Stream output */}
       <GlassCard>
-        <h2 className="cardTitle">解析预览</h2>
-        <p className="cardSubtitle">LLM 实时输出，展示模型加卸载状态与剧本生成过程。</p>
+        <h2 className="cardTitle">{t("text.parsePreviewTitle")}</h2>
+        <p className="cardSubtitle">{t("text.parsePreviewSubtitle")}</p>
 
         {llmStreamOutput ? (
           <div ref={streamRef} className="streamOutput">
@@ -707,8 +709,8 @@ export default function TextInputPage({ onNavigate }) {
           </div>
         ) : (
           <EmptyState
-            title="等待解析..."
-            description="点击「开始解析」后，LLM 输出会在此实时显示"
+            title={t("text.waitingParse")}
+            description={t("text.waitingParseDesc")}
           />
         )}
       </GlassCard>

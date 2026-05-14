@@ -1,4 +1,5 @@
 import GlassCard from "../shared/GlassCard";
+import { useI18n } from "../../i18n/I18nProvider";
 
 export default function ScriptSegmentListCard({
   segments,
@@ -12,9 +13,11 @@ export default function ScriptSegmentListCard({
   onCancelEdit,
   onDelete,
 }) {
+  const { t } = useI18n();
+
   return (
     <GlassCard>
-      <h2>片段列表</h2>
+      <h2>{t("script.segmentList")}</h2>
       <div className="listStack">
         {segments.length ? (
           segments.map((segment) => {
@@ -30,24 +33,24 @@ export default function ScriptSegmentListCard({
                   <>
                     <div className="editorGrid">
                       <select className="textInput" value={draft.type} onChange={(event) => onUpdateDraft(segment.id, "type", event.target.value)}>
-                        <option value="dialogue">dialogue</option>
-                        <option value="narration">narration</option>
-                        <option value="direction">direction</option>
+                        <option value="dialogue">{t("script.segmentType.dialogue")}</option>
+                        <option value="narration">{t("script.segmentType.narration")}</option>
+                        <option value="direction">{t("script.segmentType.direction")}</option>
                       </select>
                       <input
                         className="textInput"
                         value={draft.speaker}
                         onChange={(event) => onUpdateDraft(segment.id, "speaker", event.target.value)}
-                        placeholder="角色名"
+                        placeholder={t("script.segmentListCard.speakerPlaceholder")}
                       />
                     </div>
                     <textarea className="textArea compactArea" value={draft.text} onChange={(event) => onUpdateDraft(segment.id, "text", event.target.value)} />
                     <div className="controlRow">
                       <button type="button" className="primaryButton" disabled={isSaving || !draft.text.trim()} onClick={() => onSaveDraft(segment.id)}>
-                        保存
+                        {t("common.save")}
                       </button>
                       <button type="button" className="primaryButton ghostButton" onClick={() => onCancelEdit(segment.id)}>
-                        取消
+                        {t("common.cancel")}
                       </button>
                     </div>
                   </>
@@ -62,10 +65,10 @@ export default function ScriptSegmentListCard({
                     <p className="segmentText">{segment.text}</p>
                     <div className="controlRow">
                       <button type="button" className="primaryButton ghostButton" disabled={!canEdit || isSaving} onClick={() => onBeginEdit(segment)}>
-                        编辑
+                        {t("common.edit")}
                       </button>
                       <button type="button" className="primaryButton ghostButton dangerButton" disabled={!canEdit || isSaving} onClick={() => onDelete(segment.id)}>
-                        删除
+                        {t("common.delete")}
                       </button>
                     </div>
                   </>
@@ -74,7 +77,7 @@ export default function ScriptSegmentListCard({
             );
           })
         ) : (
-          <div className="emptyState">还没有剧本片段，先在文本输入页发起解析。</div>
+          <div className="emptyState">{t("script.empty.noSegmentsDesc")}</div>
         )}
       </div>
     </GlassCard>

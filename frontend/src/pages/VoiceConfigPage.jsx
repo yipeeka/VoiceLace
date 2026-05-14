@@ -20,56 +20,57 @@ import { useUiStore } from "../stores/useUiStore";
 import { useVoiceStore } from "../stores/useVoiceStore";
 import { API_ORIGIN } from "../utils/api";
 import { buildProjectFilePayload, saveProjectFile } from "../utils/projectFile";
+import { useI18n } from "../i18n/I18nProvider";
 
-const GENDER_OPTIONS = [
-  { value: "", label: "未指定" },
-  { value: "female", label: "Female（女声）" },
-  { value: "male", label: "Male（男声）" },
-];
+const buildGenderOptions = (t) => ([
+  { value: "", label: t("voice.option.unspecified") },
+  { value: "female", label: t("voice.option.genderFemale") },
+  { value: "male", label: t("voice.option.genderMale") },
+]);
 
-const AGE_OPTIONS = [
-  { value: "",        label: "未指定" },
-  { value: "child",  label: "Child（儿童）" },
-  { value: "young",  label: "Young（青年）" },
-  { value: "middle", label: "Middle-aged（中年）" },
-  { value: "old",    label: "Old（老年）" },
-];
+const buildAgeOptions = (t) => ([
+  { value: "", label: t("voice.option.unspecified") },
+  { value: "child", label: t("voice.option.ageChild") },
+  { value: "young", label: t("voice.option.ageYoung") },
+  { value: "middle", label: t("voice.option.ageMiddle") },
+  { value: "old", label: t("voice.option.ageOld") },
+]);
 
-const PITCH_OPTIONS = [
-  { value: "",      label: "未指定" },
-  { value: "low",   label: "Low（低沉）" },
-  { value: "medium", label: "Medium（适中）" },
-  { value: "high",  label: "High（高亢）" },
-];
+const buildPitchOptions = (t) => ([
+  { value: "", label: t("voice.option.unspecified") },
+  { value: "low", label: t("voice.option.pitchLow") },
+  { value: "medium", label: t("voice.option.pitchMedium") },
+  { value: "high", label: t("voice.option.pitchHigh") },
+]);
 
-const STYLE_OPTIONS = [
-  { value: "",          label: "未指定" },
-  { value: "calm",      label: "Calm（平静）" },
-  { value: "gentle",    label: "Gentle（温柔）" },
-  { value: "assertive", label: "Assertive（坚定）" },
-  { value: "lively",    label: "Lively（活泼）" },
-  { value: "whisper",   label: "Whisper（低语）" },
-  { value: "dramatic",  label: "Dramatic（戏剧）" },
-];
+const buildStyleOptions = (t) => ([
+  { value: "", label: t("voice.option.unspecified") },
+  { value: "calm", label: t("voice.option.styleCalm") },
+  { value: "gentle", label: t("voice.option.styleGentle") },
+  { value: "assertive", label: t("voice.option.styleAssertive") },
+  { value: "lively", label: t("voice.option.styleLively") },
+  { value: "whisper", label: t("voice.option.styleWhisper") },
+  { value: "dramatic", label: t("voice.option.styleDramatic") },
+]);
 
 const BACKEND_OPTIONS = [
   { value: "omnivoice", label: "OmniVoice" },
   { value: "voxcpm2", label: "VoxCPM2" },
 ];
 const RECOMMEND_SOURCE_OPTIONS = [
-  { value: "secondary_local", label: "小模型（默认）" },
-  { value: "primary_local", label: "主模型" },
+  { value: "secondary_local", label: "secondary_local" },
+  { value: "primary_local", label: "primary_local" },
   { value: "openai", label: "OpenAI API" },
   { value: "gemini", label: "Gemini API" },
-  { value: "rule", label: "规则推荐（不走 LLM）" },
+  { value: "rule", label: "rule" },
 ];
-const QUALITY_FILTER_OPTIONS = [
-  { value: "all", label: "全部质量" },
-  { value: "pass", label: "质量通过" },
-  { value: "warning", label: "质量告警" },
-  { value: "fail", label: "质量失败" },
-  { value: "unknown", label: "未检测" },
-];
+const buildQualityFilterOptions = (t) => ([
+  { value: "all", label: t("voice.quality.all") },
+  { value: "pass", label: t("voice.quality.pass") },
+  { value: "warning", label: t("voice.quality.warning") },
+  { value: "fail", label: t("voice.quality.fail") },
+  { value: "unknown", label: t("voice.quality.unknown") },
+]);
 
 const DEFAULT_OMNIVOICE_PROFILE = {
   voice_mode: "design",
@@ -189,11 +190,11 @@ function resolvePresetQualityStatus(preset, backend = "omnivoice") {
   return report?.status || "unknown";
 }
 
-function qualityStatusLabel(status) {
-  if (status === "pass") return "质量通过";
-  if (status === "warning") return "质量告警";
-  if (status === "fail") return "质量失败";
-  return "未检测";
+function qualityStatusLabel(status, t) {
+  if (status === "pass") return t("voice.quality.pass");
+  if (status === "warning") return t("voice.quality.warning");
+  if (status === "fail") return t("voice.quality.fail");
+  return t("voice.quality.unknown");
 }
 
 function isPlaceholderCharacterDescription(name, description) {
@@ -235,6 +236,7 @@ const emptyForm = {
 };
 
 function SortablePresetCard({
+  t,
   preset,
   displayBackend,
   isSelected,
@@ -267,8 +269,8 @@ function SortablePresetCard({
       <button
         type="button"
         className="primaryButton ghostButton"
-        title="拖拽调整顺序"
-        aria-label="拖拽调整顺序"
+        title={t("voice.dragReorder")}
+        aria-label={t("voice.dragReorder")}
         style={{
           alignSelf: "flex-end",
           cursor: isDragging ? "grabbing" : "grab",
@@ -287,9 +289,9 @@ function SortablePresetCard({
       </div>
       <div className="presetName" title={preset.name}>{preset.name}</div>
       <div className="presetMetaRow">
-        {preset.favorite ? <span className="presetFavorite"><Star size={12} fill="currentColor" /> 收藏</span> : null}
+        {preset.favorite ? <span className="presetFavorite"><Star size={12} fill="currentColor" /> {t("voice.favorite")}</span> : null}
         <span className={`statusBadge ${qualityStatus === "pass" ? "success" : qualityStatus === "warning" ? "warning" : qualityStatus === "fail" ? "error" : "default"}`}>
-          {qualityStatusLabel(qualityStatus)}
+          {qualityStatusLabel(qualityStatus, t)}
         </span>
       </div>
       {Array.isArray(preset.tags) && preset.tags.length ? (
@@ -306,7 +308,7 @@ function SortablePresetCard({
           e.stopPropagation();
           onCycleMode?.();
         }}
-        title="点击切换 voice_mode"
+        title={t("voice.toggleVoiceMode")}
       >
         {String(displayMode || "auto").toUpperCase()}
       </button>
@@ -319,7 +321,7 @@ function SortablePresetCard({
             onPreview();
           }}
         >
-          试听
+          {t("voice.previewShort")}
         </Button>
         <Button
           variant="secondary"
@@ -329,7 +331,7 @@ function SortablePresetCard({
             onUseSlotA?.();
           }}
         >
-          放入A
+          {t("voice.putInA")}
         </Button>
         <Button
           variant="secondary"
@@ -339,7 +341,7 @@ function SortablePresetCard({
             onUseSlotB?.();
           }}
         >
-          放入B
+          {t("voice.putInB")}
         </Button>
         <Button
           variant="danger"
@@ -356,6 +358,25 @@ function SortablePresetCard({
 }
 
 export default function VoiceConfigPage() {
+  const { t } = useI18n();
+  const GENDER_OPTIONS = useMemo(() => buildGenderOptions(t), [t]);
+  const AGE_OPTIONS = useMemo(() => buildAgeOptions(t), [t]);
+  const PITCH_OPTIONS = useMemo(() => buildPitchOptions(t), [t]);
+  const STYLE_OPTIONS = useMemo(() => buildStyleOptions(t), [t]);
+  const QUALITY_FILTER_OPTIONS = useMemo(() => buildQualityFilterOptions(t), [t]);
+  const recommendSourceOptions = useMemo(
+    () => RECOMMEND_SOURCE_OPTIONS.map((item) => ({
+      ...item,
+      label: item.value === "secondary_local"
+        ? t("voice.recommendSource.secondary")
+        : item.value === "primary_local"
+          ? t("voice.recommendSource.primary")
+          : item.value === "rule"
+            ? t("voice.recommendSource.rule")
+            : item.label,
+    })),
+    [t],
+  );
   const { currentProject, currentProjectFileHandle, bindCurrentProjectFile, refreshCurrentProject } = useProjectStore();
   const { script } = useScriptStore();
   const setProjectSaveAction = useUiStore((state) => state.setProjectSaveAction);
@@ -379,7 +400,7 @@ export default function VoiceConfigPage() {
   const [qualityFilter, setQualityFilter] = useState("all");
   const [tagFilter, setTagFilter] = useState("all");
   const [selectedPresetId, setSelectedPresetId] = useState(null);
-  const [sampleText, setSampleText] = useState("这是试听文本，用于确认角色声音风格。");
+  const [sampleText, setSampleText] = useState(t("voice.sampleTextDefault"));
   const [deleteTarget, setDeleteTarget] = useState(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
@@ -433,7 +454,7 @@ export default function VoiceConfigPage() {
     return Array.from(merged.values()).sort((a, b) => (b.appearance_count || 0) - (a.appearance_count || 0));
   }, [script, currentProject?.script]);
   const presetOptions = useMemo(
-    () => [{ value: "", label: "未分配" }, ...presets.map((p) => ({ value: p.id, label: p.name }))],
+    () => [{ value: "", label: t("voice.unassigned") }, ...presets.map((p) => ({ value: p.id, label: p.name }))],
     [presets]
   );
   const selectedPreset = presets.find((p) => p.id === selectedPresetId);
@@ -666,11 +687,11 @@ export default function VoiceConfigPage() {
   }
 
   async function handlePreviewPreset(preset) {
-    setSampleText("这是试听文本");
+    setSampleText(t("voice.sampleTextShort"));
     setSelectedPresetId(preset.id);
     await previewVoice({
       preset,
-      text: "这是试听文本",
+      text: t("voice.sampleTextShort"),
       ttsBackend: previewBackend,
       sourceMode: getProfileModeFromPreset(preset, previewBackend),
     });
@@ -681,12 +702,12 @@ export default function VoiceConfigPage() {
     const presetId = slotState.presetId || "";
     const backend = slotState.backend || "omnivoice";
     if (!presetId) {
-      useUiStore.getState().pushToast({ title: `请先为 ${slot.toUpperCase()} 槽选择预设`, tone: "error" });
+      useUiStore.getState().pushToast({ title: t("voice.toast.selectPresetForSlot", { slot: slot.toUpperCase() }), tone: "error" });
       return;
     }
     const preset = presets.find((item) => item.id === presetId);
     if (!preset) {
-      useUiStore.getState().pushToast({ title: `未找到 ${slot.toUpperCase()} 槽预设`, tone: "error" });
+      useUiStore.getState().pushToast({ title: t("voice.toast.slotPresetNotFound", { slot: slot.toUpperCase() }), tone: "error" });
       return;
     }
     await previewVoice({
@@ -753,7 +774,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
       setForm(buildFormFromPreset(savedPreset));
     }
     useUiStore.getState().pushToast({
-      title: `已切换模式为 ${nextMode.toUpperCase()}`,
+      title: t("voice.toast.modeSwitched", { mode: nextMode.toUpperCase() }),
       tone: "success",
     });
   }
@@ -767,7 +788,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
     const uploaded = await uploadReferenceAudio(file);
     const refAudioPath = uploaded?.file_path || "";
     if (!refAudioPath) {
-      throw new Error("上传试听音频后未返回有效路径");
+      throw new Error(t("voice.error.noValidPathAfterUpload"));
     }
 
     const baseForm = selectedPresetId === preset.id ? form : buildFormFromPreset(preset);
@@ -783,12 +804,12 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
       setForm(savedForm);
       setActiveBackend(targetBackend);
       useUiStore.getState().pushToast({
-        title: `已同步并保存为 ${targetBackend === "voxcpm2" ? "VoxCPM2" : "OmniVoice"} Clone`,
+        title: t("voice.syncDoneAsClone", { backend: targetBackend === "voxcpm2" ? "VoxCPM2" : "OmniVoice" }),
         tone: "success",
       });
     } catch (error) {
       useUiStore.getState().pushToast({
-        title: `同步成功但自动保存失败：${error?.message || "未知错误"}`,
+        title: t("voice.syncSaveFailed", { error: error?.message || t("common.unknownError") }),
         tone: "error",
       });
     }
@@ -796,12 +817,12 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
 
   async function handleSyncPreviewToOtherBackend() {
     if ((!previewAudioUrl && !previewAudioBlob) || !selectedPreset) {
-      useUiStore.getState().pushToast({ title: "请先生成试听音频", tone: "error" });
+      useUiStore.getState().pushToast({ title: t("voice.toast.generatePreviewFirst"), tone: "error" });
       return;
     }
     if (previewMeta?.backend && previewMeta.backend !== previewBackend) {
       useUiStore.getState().pushToast({
-        title: "当前试听后端已切换，请先在当前 tab 重新生成试听后再同步",
+        title: t("voice.toast.previewBackendChanged"),
         tone: "error",
       });
       return;
@@ -812,7 +833,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
       const blob = previewAudioBlob || (await (async () => {
         const response = await fetch(previewAudioUrl);
         if (!response.ok) {
-          throw new Error(`读取试听音频失败: HTTP ${response.status}`);
+          throw new Error(t("voice.error.readPreviewAudioFailed", { status: response.status }));
         }
         return response.blob();
       })());
@@ -824,7 +845,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
       });
     } catch (error) {
       useUiStore.getState().pushToast({
-        title: `同步失败：${error?.message || "未知错误"}`,
+        title: t("voice.syncFailed", { error: error?.message || t("common.unknownError") }),
         tone: "error",
       });
     }
@@ -834,12 +855,12 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
     const slotState = previewSlots?.[slot] || {};
     const presetId = slotState.presetId || "";
     if (!presetId) {
-      useUiStore.getState().pushToast({ title: `请先为 ${slot.toUpperCase()} 槽选择预设`, tone: "error" });
+      useUiStore.getState().pushToast({ title: t("voice.toast.selectPresetForSlot", { slot: slot.toUpperCase() }), tone: "error" });
       return;
     }
     const preset = presets.find((item) => item.id === presetId);
     if (!preset) {
-      useUiStore.getState().pushToast({ title: `未找到 ${slot.toUpperCase()} 槽预设`, tone: "error" });
+      useUiStore.getState().pushToast({ title: t("voice.toast.slotPresetNotFound", { slot: slot.toUpperCase() }), tone: "error" });
       return;
     }
     const sourceBackend = (slotState.meta?.backend || slotState.backend || "omnivoice").toLowerCase();
@@ -849,12 +870,12 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
       if (!blob && slotState.audioUrl) {
         const response = await fetch(slotState.audioUrl);
         if (!response.ok) {
-          throw new Error(`读取 ${slot.toUpperCase()} 槽试听音频失败: HTTP ${response.status}`);
+          throw new Error(t("voice.error.readSlotPreviewAudioFailed", { slot: slot.toUpperCase(), status: response.status }));
         }
         blob = await response.blob();
       }
       if (!blob) {
-        throw new Error(`${slot.toUpperCase()} 槽还没有可同步的试听音频`);
+        throw new Error(t("voice.error.noSyncAudioInSlot", { slot: slot.toUpperCase() }));
       }
       await syncAndAutoSavePreset({
         preset,
@@ -864,7 +885,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
       });
     } catch (error) {
       useUiStore.getState().pushToast({
-        title: `${slot.toUpperCase()} 槽同步失败：${error?.message || "未知错误"}`,
+        title: t("voice.syncSlotFailed", { slot: slot.toUpperCase(), error: error?.message || t("common.unknownError") }),
         tone: "error",
       });
     }
@@ -897,7 +918,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
 
   async function handlePresetDragEnd(event) {
     if (isFilterActive) {
-      useUiStore.getState().pushToast({ title: "筛选状态下不支持拖拽排序", tone: "error" });
+      useUiStore.getState().pushToast({ title: t("voice.toast.dragNotSupportedInFilter"), tone: "error" });
       return;
     }
     const { active, over } = event;
@@ -936,7 +957,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
         bindCurrentProjectFile({ handle: result.handle, fileName: result.fileName || "" });
       }
       useUiStore.getState().pushToast({
-        title: forceSaveAs ? "项目文件已另存" : result?.mode === "inplace" ? "项目文件已保存" : "项目文件已导出",
+        title: forceSaveAs ? t("text.toast.projectSavedAs") : result?.mode === "inplace" ? t("text.toast.projectSaved") : t("text.toast.projectExported"),
         tone: "success",
       });
     } catch (error) {
@@ -944,7 +965,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
         return;
       }
       useUiStore.getState().pushToast({
-        title: `保存项目失败：${error?.message || "未知错误"}`,
+        title: t("text.toast.saveProjectFailed", { error: error?.message || t("common.unknownError") }),
         tone: "error",
       });
     }
@@ -969,14 +990,14 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {/* New preset form */}
         <GlassCard>
-          <h2 className="cardTitle"><Mic size={16} /> 新建声音预设</h2>
+          <h2 className="cardTitle"><Mic size={16} /> {t("voice.newPreset")}</h2>
 
           <div className="editorGrid">
             <input
               className="textInput"
               value={form.name}
               onChange={(e) => setField("name", e.target.value)}
-              placeholder="预设名称（必填）"
+              placeholder={t("voice.placeholder.presetNameRequired")}
               onKeyDown={(e) => e.key === "Enter" && handleSavePreset()}
             />
             <Select
@@ -987,8 +1008,8 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
           </div>
           <Tabs value={activeBackend} onValueChange={(v) => setActiveBackend(v)}>
             <TabsList>
-              <TabsTrigger value="omnivoice">OmniVoice Profile</TabsTrigger>
-              <TabsTrigger value="voxcpm2">VoxCPM2 Profile</TabsTrigger>
+              <TabsTrigger value="omnivoice">{t("voice.profile.omnivoice")}</TabsTrigger>
+              <TabsTrigger value="voxcpm2">{t("voice.profile.voxcpm2")}</TabsTrigger>
             </TabsList>
 
             <TabsContent value="omnivoice" style={{ display: "flex", flexDirection: "column", gap: 12, paddingTop: 12 }}>
@@ -997,79 +1018,79 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                 onValueChange={(v) => setBackendVoiceMode("omnivoice", v)}
               >
                 <TabsList>
-                  <TabsTrigger value="design">声音设计</TabsTrigger>
-                  <TabsTrigger value="clone">声音克隆</TabsTrigger>
-                  <TabsTrigger value="auto">自动</TabsTrigger>
+                  <TabsTrigger value="design">{t("voice.mode.design")}</TabsTrigger>
+                  <TabsTrigger value="clone">{t("voice.mode.clone")}</TabsTrigger>
+                  <TabsTrigger value="auto">{t("voice.mode.auto")}</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="design" style={{ display: "flex", flexDirection: "column", gap: 10, paddingTop: 12 }}>
                   <div className="editorGrid">
                     <div className="formGroup">
-                      <label className="formLabel">性别</label>
+                      <label className="formLabel">{t("voice.field.gender")}</label>
                       <Select
                         value={form.backend_profiles?.omnivoice?.gender || ""}
                         onValueChange={(v) => setBackendField("omnivoice", "gender", v)}
                         options={GENDER_OPTIONS}
-                        placeholder="未指定"
+                        placeholder={t("voice.option.unspecified")}
                       />
                     </div>
                     <div className="formGroup">
-                      <label className="formLabel">年龄</label>
+                      <label className="formLabel">{t("voice.field.age")}</label>
                       <Select
                         value={form.backend_profiles?.omnivoice?.age || ""}
                         onValueChange={(v) => setBackendField("omnivoice", "age", v)}
                         options={AGE_OPTIONS}
-                        placeholder="未指定"
+                        placeholder={t("voice.option.unspecified")}
                       />
                     </div>
                   </div>
                   <div className="editorGrid">
                     <div className="formGroup">
-                      <label className="formLabel">音调</label>
+                      <label className="formLabel">{t("voice.field.pitch")}</label>
                       <Select
                         value={form.backend_profiles?.omnivoice?.pitch || ""}
                         onValueChange={(v) => setBackendField("omnivoice", "pitch", v)}
                         options={PITCH_OPTIONS}
-                        placeholder="未指定"
+                        placeholder={t("voice.option.unspecified")}
                       />
                     </div>
                     <div className="formGroup">
-                      <label className="formLabel">风格</label>
+                      <label className="formLabel">{t("voice.field.style")}</label>
                       <Select
                         value={form.backend_profiles?.omnivoice?.style || ""}
                         onValueChange={(v) => setBackendField("omnivoice", "style", v)}
                         options={STYLE_OPTIONS}
-                        placeholder="未指定"
+                        placeholder={t("voice.option.unspecified")}
                       />
                     </div>
                   </div>
                   <div className="editorGrid">
                     <div className="formGroup">
-                      <label className="formLabel">口音（可选）</label>
+                      <label className="formLabel">{t("voice.field.accentOptional")}</label>
                       <input
                         className="textInput"
                         value={form.backend_profiles?.omnivoice?.accent || ""}
                         onChange={(e) => setBackendField("omnivoice", "accent", e.target.value)}
-                        placeholder="例如：美式、英式、川渝口音"
+                        placeholder={t("voice.placeholder.accent")}
                       />
                     </div>
                     <div className="formGroup">
-                      <label className="formLabel">方言（可选）</label>
+                      <label className="formLabel">{t("voice.field.dialectOptional")}</label>
                       <input
                         className="textInput"
                         value={form.backend_profiles?.omnivoice?.dialect || ""}
                         onChange={(e) => setBackendField("omnivoice", "dialect", e.target.value)}
-                        placeholder="例如：吴语、粤语、闽南语"
+                        placeholder={t("voice.placeholder.dialect")}
                       />
                     </div>
                   </div>
                   <div className="formGroup">
-                    <label className="formLabel">自定义描述</label>
+                    <label className="formLabel">{t("voice.field.customInstruction")}</label>
                     <textarea
                       className="textArea compactArea"
                       value={form.backend_profiles?.omnivoice?.custom_instruct || ""}
                       onChange={(e) => setBackendField("omnivoice", "custom_instruct", e.target.value)}
-                      placeholder="例如：说话温柔，略带忧伤的年轻女性，有古典气质"
+                      placeholder={t("voice.placeholder.customInstruction")}
                     />
                   </div>
                 </TabsContent>
@@ -1078,8 +1099,8 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                   <FileDropZone
                     accept="audio/*"
                     onFile={(file) => handleRefAudioUpload(file, "omnivoice")}
-                    label="上传参考音频"
-                    sublabel="支持 MP3 / WAV / FLAC，建议 3-30 秒"
+                    label={t("voice.uploadReferenceAudio")}
+                    sublabel={t("voice.uploadReferenceAudioHint")}
                   />
                   {form.backend_profiles?.omnivoice?.ref_audio_path ? (
                     <div className="controlRow">
@@ -1087,32 +1108,32 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                         ✓ {(form.backend_profiles?.omnivoice?.ref_audio_path || "").split(/[\\/]/).pop()}
                       </span>
                       <Button variant="secondary" size="sm" onClick={() => handleTranscribe("omnivoice")} disabled={isSaving || isTranscribing}>
-                        {isTranscribing ? "转写中..." : "ASR 转写"}
+                        {isTranscribing ? t("voice.transcribing") : t("voice.asrTranscribe")}
                       </Button>
                     </div>
                   ) : null}
                   <div className="formGroup">
-                    <label className="formLabel">参考音频路径</label>
+                    <label className="formLabel">{t("voice.field.referenceAudioPath")}</label>
                     <input
                       className="textInput"
                       value={form.backend_profiles?.omnivoice?.ref_audio_path || ""}
                       onChange={(e) => setBackendField("omnivoice", "ref_audio_path", e.target.value)}
-                      placeholder="可手工输入本地路径"
+                      placeholder={t("voice.placeholder.localPath")}
                     />
                   </div>
                   <ReferenceAudioPlayer audioPath={form.backend_profiles?.omnivoice?.ref_audio_path} />
                   <div className="formGroup">
-                    <label className="formLabel">参考文本（转写或手动输入）</label>
+                    <label className="formLabel">{t("voice.field.referenceText")}</label>
                     <textarea
                       className="textArea compactArea"
                       value={form.backend_profiles?.omnivoice?.ref_text || ""}
                       onChange={(e) => setBackendField("omnivoice", "ref_text", e.target.value)}
-                      placeholder="参考音频的对应文本内容..."
+                      placeholder={t("voice.placeholder.referenceText")}
                     />
                   </div>
                   <details style={{ border: "1px solid var(--lineSoft)", borderRadius: 10, padding: "8px 10px" }}>
                     <summary style={{ cursor: "pointer", color: "var(--textMain)" }}>
-                      高级默认推理参数（可选，仅克隆模式）
+                      {t("voice.advancedCloneDefaults")}
                     </summary>
                     <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
                       <label className="checkRow" style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1121,11 +1142,11 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                           checked={Boolean(form.backend_profiles?.omnivoice?.clone_denoise)}
                           onChange={(e) => setBackendField("omnivoice", "clone_denoise", e.target.checked)}
                         />
-                        <span>默认 denoise</span>
+                        <span>{t("voice.defaultDenoise")}</span>
                       </label>
                       <div className="editorGrid">
                         <div className="formGroup">
-                          <label className="formLabel">默认 num_step (1-128)</label>
+                          <label className="formLabel">{t("voice.field.defaultNumStepRange")}</label>
                           <input
                             className="textInput"
                             type="number"
@@ -1137,7 +1158,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                           />
                         </div>
                         <div className="formGroup">
-                          <label className="formLabel">默认 guidance_scale (0-10)</label>
+                          <label className="formLabel">{t("voice.field.defaultGuidanceScaleRange")}</label>
                           <input
                             className="textInput"
                             type="number"
@@ -1150,14 +1171,14 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                         </div>
                       </div>
                       <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-                        优先级：片段 tts_overrides {'>'} 预设高级默认 {'>'} 项目合成配置。
+                        {t("voice.hint.cloneDefaultPriority")}
                       </p>
                     </div>
                   </details>
                 </TabsContent>
 
                 <TabsContent value="auto" style={{ paddingTop: 12 }}>
-                  <p className="muted">Auto 模式下，OmniVoice 将使用模型默认声音。</p>
+                  <p className="muted">{t("voice.autoModeOmni")}</p>
                 </TabsContent>
               </Tabs>
             </TabsContent>
@@ -1168,24 +1189,24 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                 onValueChange={(v) => setBackendVoiceMode("voxcpm2", v)}
               >
                 <TabsList>
-                  <TabsTrigger value="design">声音设计</TabsTrigger>
-                  <TabsTrigger value="clone">声音克隆</TabsTrigger>
-                  <TabsTrigger value="auto">自动</TabsTrigger>
+                  <TabsTrigger value="design">{t("voice.mode.design")}</TabsTrigger>
+                  <TabsTrigger value="clone">{t("voice.mode.clone")}</TabsTrigger>
+                  <TabsTrigger value="auto">{t("voice.mode.auto")}</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="design" style={{ display: "grid", gap: 10, paddingTop: 12 }}>
                   <div className="formGroup">
-                    <label className="formLabel">Design Instruction</label>
+                    <label className="formLabel">{t("voice.field.designInstruction")}</label>
                     <textarea
                       className="textArea compactArea"
                       value={form.backend_profiles?.voxcpm2?.design_instruction || ""}
                       onChange={(e) => setBackendField("voxcpm2", "design_instruction", e.target.value)}
-                      placeholder="例如：年轻女性，温柔甜美，轻微播音腔"
+                      placeholder={t("voice.placeholder.designInstruction")}
                     />
                   </div>
                   <div className="editorGrid">
                     <div className="formGroup">
-                      <label className="formLabel">默认 cfg_value</label>
+                      <label className="formLabel">{t("voice.field.defaultCfgValue")}</label>
                       <input
                         className="textInput"
                         type="number"
@@ -1197,7 +1218,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                       />
                     </div>
                     <div className="formGroup">
-                      <label className="formLabel">默认 inference_timesteps</label>
+                      <label className="formLabel">{t("voice.field.defaultInferenceTimesteps")}</label>
                       <input
                         className="textInput"
                         type="number"
@@ -1215,7 +1236,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                       checked={Boolean(form.backend_profiles?.voxcpm2?.denoise)}
                       onChange={(e) => setBackendField("voxcpm2", "denoise", e.target.checked)}
                     />
-                    <span>默认 denoise</span>
+                    <span>{t("voice.defaultDenoise")}</span>
                   </label>
                 </TabsContent>
 
@@ -1223,16 +1244,16 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                   <FileDropZone
                     accept="audio/*"
                     onFile={(file) => handleRefAudioUpload(file, "voxcpm2")}
-                    label="上传参考音频"
-                    sublabel="VoxCPM2 clone/hifi clone 使用"
+                    label={t("voice.uploadReferenceAudio")}
+                    sublabel={t("voice.uploadReferenceAudioVoxHint")}
                   />
                   <div className="formGroup">
-                    <label className="formLabel">Control Instruction</label>
+                    <label className="formLabel">{t("voice.field.controlInstruction")}</label>
                     <textarea
                       className="textArea compactArea"
                       value={form.backend_profiles?.voxcpm2?.control_instruction || ""}
                       onChange={(e) => setBackendField("voxcpm2", "control_instruction", e.target.value)}
-                      placeholder="例如：更悲伤，语速稍慢，表达克制但带颤音"
+                      placeholder={t("voice.placeholder.controlInstruction")}
                     />
                   </div>
                   {form.backend_profiles?.voxcpm2?.ref_audio_path ? (
@@ -1241,27 +1262,27 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                         ✓ {(form.backend_profiles?.voxcpm2?.ref_audio_path || "").split(/[\\/]/).pop()}
                       </span>
                       <Button variant="secondary" size="sm" onClick={() => handleTranscribe("voxcpm2")} disabled={isSaving || isTranscribing}>
-                        {isTranscribing ? "转写中..." : "ASR 转写"}
+                        {isTranscribing ? t("voice.transcribing") : t("voice.asrTranscribe")}
                       </Button>
                     </div>
                   ) : null}
                   <div className="formGroup">
-                    <label className="formLabel">参考音频路径</label>
+                    <label className="formLabel">{t("voice.field.referenceAudioPath")}</label>
                     <input
                       className="textInput"
                       value={form.backend_profiles?.voxcpm2?.ref_audio_path || ""}
                       onChange={(e) => setBackendField("voxcpm2", "ref_audio_path", e.target.value)}
-                      placeholder="可手工输入本地路径"
+                      placeholder={t("voice.placeholder.localPath")}
                     />
                   </div>
                   <ReferenceAudioPlayer audioPath={form.backend_profiles?.voxcpm2?.ref_audio_path} />
                   <div className="formGroup">
-                    <label className="formLabel">Prompt Text（Hi-Fi clone 可选）</label>
+                    <label className="formLabel">{t("voice.field.promptTextHifiOptional")}</label>
                     <textarea
                       className="textArea compactArea"
                       value={form.backend_profiles?.voxcpm2?.ref_text || ""}
                       onChange={(e) => setBackendField("voxcpm2", "ref_text", e.target.value)}
-                      placeholder="参考音频对应文本"
+                      placeholder={t("voice.placeholder.referenceTextShort")}
                     />
                   </div>
                   <label className="checkRow" style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1270,11 +1291,11 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                       checked={Boolean(form.backend_profiles?.voxcpm2?.use_hifi_clone)}
                       onChange={(e) => setBackendField("voxcpm2", "use_hifi_clone", e.target.checked)}
                     />
-                    <span>启用 Hi-Fi Clone（会使用 prompt_wav_path + prompt_text）</span>
+                    <span>{t("voice.enableHifiClone")}</span>
                   </label>
                   <div className="editorGrid">
                     <div className="formGroup">
-                      <label className="formLabel">默认 cfg_value</label>
+                      <label className="formLabel">{t("voice.field.defaultCfgValue")}</label>
                       <input
                         className="textInput"
                         type="number"
@@ -1286,7 +1307,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                       />
                     </div>
                     <div className="formGroup">
-                      <label className="formLabel">默认 inference_timesteps</label>
+                      <label className="formLabel">{t("voice.field.defaultInferenceTimesteps")}</label>
                       <input
                         className="textInput"
                         type="number"
@@ -1304,19 +1325,19 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                       checked={Boolean(form.backend_profiles?.voxcpm2?.denoise)}
                       onChange={(e) => setBackendField("voxcpm2", "denoise", e.target.checked)}
                     />
-                    <span>默认 denoise</span>
+                    <span>{t("voice.defaultDenoise")}</span>
                   </label>
                 </TabsContent>
 
                 <TabsContent value="auto" style={{ paddingTop: 12 }}>
-                  <p className="muted">Auto 模式下，VoxCPM2 将使用模型默认行为。</p>
+                  <p className="muted">{t("voice.autoModeVox")}</p>
                 </TabsContent>
               </Tabs>
             </TabsContent>
           </Tabs>
 
           <Slider
-            label="语速"
+            label={t("voice.field.speed")}
             value={[Number(form.backend_profiles?.omnivoice?.speed ?? 1)]}
             onValueChange={([v]) => setBackendField("omnivoice", "speed", v)}
             min={0.5}
@@ -1326,12 +1347,12 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
           />
 
           <div className="formGroup">
-            <label className="formLabel">描述（可选）</label>
+            <label className="formLabel">{t("voice.field.descriptionOptional")}</label>
             <textarea
               className="textArea compactArea"
               value={form.description}
               onChange={(e) => setField("description", e.target.value)}
-              placeholder="记录这个声音适合的角色气质..."
+              placeholder={t("voice.placeholder.description")}
             />
           </div>
           <div className="editorGrid">
@@ -1341,35 +1362,35 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                 checked={Boolean(form.favorite)}
                 onChange={(e) => setField("favorite", e.target.checked)}
               />
-              <span>收藏预设</span>
+              <span>{t("voice.favoritePreset")}</span>
             </label>
             <div className="formGroup">
-              <label className="formLabel">标签（空格/逗号分隔）</label>
+              <label className="formLabel">{t("voice.field.tags")}</label>
               <input
                 className="textInput"
                 value={Array.isArray(form.tags) ? form.tags.join(", ") : ""}
                 onChange={(e) => setField("tags", parseTags(e.target.value))}
-                placeholder="如：温柔, 女声, 旁白"
+                placeholder={t("voice.placeholder.tags")}
               />
             </div>
           </div>
           <div className="formGroup">
-            <label className="formLabel">适合角色描述</label>
+            <label className="formLabel">{t("voice.field.suitableRoleDescription")}</label>
             <textarea
               className="textArea compactArea"
               value={form.suitable_role_description || ""}
               onChange={(e) => setField("suitable_role_description", e.target.value)}
-              placeholder="例如：适合温柔旁白、青年女性、古风人物"
+              placeholder={t("voice.placeholder.suitableRoleDescription")}
             />
           </div>
           <div className="controlRow" style={{ alignItems: "center" }}>
             <span className={`statusBadge ${currentBackendQualityReport?.status === "pass" ? "success" : currentBackendQualityReport?.status === "warning" ? "warning" : currentBackendQualityReport?.status === "fail" ? "error" : "default"}`}>
-              {qualityStatusLabel(currentBackendQualityReport?.status || "unknown")}
+              {qualityStatusLabel(currentBackendQualityReport?.status || "unknown", t)}
             </span>
             <span className="muted">
               {currentBackendQualityReport?.checked_at
-                ? `最近检测：${new Date(currentBackendQualityReport.checked_at).toLocaleString()}`
-                : "当前后端尚未检测"}
+                ? t("voice.lastChecked", { time: new Date(currentBackendQualityReport.checked_at).toLocaleString() })
+                : t("voice.notCheckedYet")}
             </span>
             {isEditMode ? (
               <Button
@@ -1378,7 +1399,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                 onClick={() => handleCheckQuality(activeBackend)}
                 disabled={isSaving}
               >
-                {isSaving ? "检测中..." : "重新检测"}
+                {isSaving ? t("voice.checking") : t("voice.recheck")}
               </Button>
             ) : null}
           </div>
@@ -1386,13 +1407,13 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
             <div className="listStack" style={{ marginTop: -6 }}>
               {currentBackendQualityReport.issues.slice(0, 3).map((issue, index) => (
                 <span key={`${issue.code}-${index}`} className="muted">
-                  {issue.severity === "fail" ? "失败" : "告警"}：{issue.message}
+                  {issue.severity === "fail" ? t("voice.quality.fail") : t("voice.quality.warning")}：{issue.message}
                 </span>
               ))}
             </div>
           ) : null}
           {lastReferenceQualityReport && !isEditMode ? (
-            <span className="muted">上传参考音频后会自动检测质量，保存后可在这里查看结果。</span>
+            <span className="muted">{t("voice.referenceAudioQualityHint")}</span>
           ) : null}
 
           <div className="controlRow">
@@ -1402,7 +1423,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
               disabled={isSaving || !form.name.trim()}
               onClick={handleSavePreset}
             >
-              {isSaving ? "保存中..." : isEditMode ? "更新预设" : "创建预设"}
+              {isSaving ? t("synth.saving") : isEditMode ? t("voice.updatePreset") : t("voice.createPreset")}
             </Button>
             {isEditMode ? (
               <Button
@@ -1413,11 +1434,11 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                   setActiveBackend("omnivoice");
                 }}
               >
-                取消编辑
+                {t("voice.cancelEdit")}
               </Button>
             ) : null}
             <span className="muted">
-              {isLoading ? "加载中..." : `已有 ${presets.length} 个预设`}
+              {isLoading ? t("common.loading") : t("voice.presetCount", { count: presets.length })}
             </span>
           </div>
 
@@ -1426,11 +1447,11 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
 
         {/* Preset grid */}
         <GlassCard>
-          <h2 className="cardTitle">声音预设</h2>
-          <p className="cardSubtitle">可拖拽调整预设顺序，新的顺序会自动保存。</p>
+          <h2 className="cardTitle">{t("voice.presets")}</h2>
+          <p className="cardSubtitle">{t("voice.presetsSubtitle")}</p>
           <div className="editorGrid">
             <div className="formGroup">
-              <label className="formLabel">搜索</label>
+              <label className="formLabel">{t("voice.search")}</label>
               <div style={{ position: "relative" }}>
                 <Search size={14} style={{ position: "absolute", left: 10, top: 10, color: "var(--text-muted)" }} />
                 <input
@@ -1438,22 +1459,22 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                   style={{ paddingLeft: 32 }}
                   value={searchKeyword}
                   onChange={(e) => setSearchKeyword(e.target.value)}
-                  placeholder="按名称、标签、描述搜索"
+                  placeholder={t("voice.searchPlaceholder")}
                 />
               </div>
             </div>
             <div className="formGroup">
-              <label className="formLabel">标签筛选</label>
+              <label className="formLabel">{t("voice.tagFilter")}</label>
               <Select
                 value={tagFilter}
                 onValueChange={(value) => setTagFilter(value)}
-                options={[{ value: "all", label: "全部标签" }, ...allTags.map((tag) => ({ value: tag, label: tag }))]}
+                options={[{ value: "all", label: t("voice.allTags") }, ...allTags.map((tag) => ({ value: tag, label: tag }))]}
               />
             </div>
           </div>
           <div className="editorGrid">
             <div className="formGroup">
-              <label className="formLabel">质量筛选</label>
+              <label className="formLabel">{t("voice.qualityFilter")}</label>
               <Select
                 value={qualityFilter}
                 onValueChange={(value) => setQualityFilter(value)}
@@ -1466,7 +1487,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                 checked={favoriteOnly}
                 onChange={(e) => setFavoriteOnly(e.target.checked)}
               />
-              <span>只看收藏</span>
+              <span>{t("voice.favoritesOnly")}</span>
             </label>
           </div>
           {presets.length ? (
@@ -1475,12 +1496,13 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                 <div className="presetGrid">
                   {!displayPresets.length ? (
                     <div className="presetCard" style={{ minHeight: 140, justifyContent: "center", alignItems: "center" }}>
-                      <span className="muted">当前筛选无匹配预设</span>
+                      <span className="muted">{t("voice.noPresetMatchesFilter")}</span>
                     </div>
                   ) : null}
                   {displayPresets.map((preset) => (
                     <SortablePresetCard
                       key={preset.id}
+                      t={t}
                       preset={preset}
                       displayBackend={activeBackend}
                       isSelected={selectedPresetId === preset.id}
@@ -1506,7 +1528,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                       onCycleMode={() => {
                         handleCyclePresetVoiceMode(preset).catch((error) => {
                           useUiStore.getState().pushToast({
-                            title: `切换模式失败：${error?.message || "未知错误"}`,
+                            title: t("voice.toast.switchModeFailed", { error: error?.message || t("common.unknownError") }),
                             tone: "error",
                           });
                         });
@@ -1524,15 +1546,15 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                     }}
                   >
                     <Plus size={24} style={{ color: "var(--text-muted)" }} />
-                    <span className="muted">新建预设</span>
+                    <span className="muted">{t("voice.newPresetCard")}</span>
                   </div>
                 </div>
               </SortableContext>
             </DndContext>
           ) : (
             <EmptyState
-              title="还没有声音预设"
-              description="在上方表单中填写并点击「创建预设」"
+              title={t("voice.empty.noPresetsTitle")}
+              description={t("voice.empty.noPresetsDesc")}
             />
           )}
         </GlassCard>
@@ -1543,7 +1565,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
         {/* Preview player */}
         {selectedPreset && (
           <GlassCard>
-            <h2 className="cardTitle">试听预览 · {selectedPreset.name}</h2>
+            <h2 className="cardTitle">{t("voice.previewTitle")} · {selectedPreset.name}</h2>
             <Tabs value={previewBackend} onValueChange={(v) => setPreviewBackend(v)}>
               <TabsList>
                 <TabsTrigger value="omnivoice">OmniVoice</TabsTrigger>
@@ -1557,14 +1579,14 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
             />
             <div className="controlRow">
               <Button variant="primary" onClick={handlePreview} disabled={isSaving}>
-                {isSaving ? "合成中..." : "▶ 试听"}
+                {isSaving ? t("voice.synthesizing") : t("voice.previewButton")}
               </Button>
               <Button
                 variant="secondary"
                 onClick={handleSyncPreviewToOtherBackend}
                 disabled={isSaving || (!previewAudioUrl && !previewAudioBlob)}
               >
-                {previewBackend === "voxcpm2" ? "同步并保存为 OmniVoice Clone" : "同步并保存为 VoxCPM2 Clone"}
+                {previewBackend === "voxcpm2" ? t("voice.syncAndSaveAsOmniClone") : t("voice.syncAndSaveAsVoxClone")}
               </Button>
             </div>
             {previewAudioUrl && <AudioPlayer audioUrl={previewAudioUrl} audioBlob={previewAudioBlob} />}
@@ -1572,8 +1594,8 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
         )}
 
         <GlassCard>
-          <h2 className="cardTitle">A/B 试听对比</h2>
-          <p className="cardSubtitle">选择两个预设并使用同一段文本对比试听。</p>
+          <h2 className="cardTitle">{t("voice.abTitle")}</h2>
+          <p className="cardSubtitle">{t("voice.abSubtitle")}</p>
           <textarea
             className="textArea compactArea"
             value={sampleText}
@@ -1581,12 +1603,12 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
           />
           <div className="editorGrid">
             <div className="listStack">
-              <strong>A 槽</strong>
+              <strong>{t("voice.slotA")}</strong>
               <Select
                 value={slotAState.presetId || ""}
                 onValueChange={(value) => setPreviewSlotPreset("a", value)}
                 options={presetOptions}
-                placeholder="选择 A 槽预设"
+                placeholder={t("voice.selectSlotAPreset")}
               />
               <Select
                 value={slotAState.backend || "omnivoice"}
@@ -1594,24 +1616,24 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                 options={BACKEND_OPTIONS}
               />
               <Button variant="secondary" onClick={() => handlePreviewSlot("a")} disabled={isSaving || !slotAState.presetId}>
-                {isSaving ? "合成中..." : "试听 A"}
+                {isSaving ? t("voice.synthesizing") : t("voice.previewA")}
               </Button>
               <Button
                 variant="secondary"
                 onClick={() => syncFromPreviewSlot("a")}
                 disabled={isSaving || !slotAState.audioUrl}
               >
-                A 同步并保存为另一后端 Clone
+                {t("voice.syncSlotA")}
               </Button>
               {slotAState.audioUrl ? <AudioPlayer audioUrl={slotAState.audioUrl} audioBlob={slotAState.audioBlob} /> : null}
             </div>
             <div className="listStack">
-              <strong>B 槽</strong>
+              <strong>{t("voice.slotB")}</strong>
               <Select
                 value={slotBState.presetId || ""}
                 onValueChange={(value) => setPreviewSlotPreset("b", value)}
                 options={presetOptions}
-                placeholder="选择 B 槽预设"
+                placeholder={t("voice.selectSlotBPreset")}
               />
               <Select
                 value={slotBState.backend || "omnivoice"}
@@ -1619,14 +1641,14 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                 options={BACKEND_OPTIONS}
               />
               <Button variant="secondary" onClick={() => handlePreviewSlot("b")} disabled={isSaving || !slotBState.presetId}>
-                {isSaving ? "合成中..." : "试听 B"}
+                {isSaving ? t("voice.synthesizing") : t("voice.previewB")}
               </Button>
               <Button
                 variant="secondary"
                 onClick={() => syncFromPreviewSlot("b")}
                 disabled={isSaving || !slotBState.audioUrl}
               >
-                B 同步并保存为另一后端 Clone
+                {t("voice.syncSlotB")}
               </Button>
               {slotBState.audioUrl ? <AudioPlayer audioUrl={slotBState.audioUrl} audioBlob={slotBState.audioBlob} /> : null}
             </div>
@@ -1635,8 +1657,8 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
 
         {/* Character assignment */}
         <GlassCard>
-          <h2 className="cardTitle">角色分配</h2>
-          <p className="cardSubtitle">为项目中每个角色选择对应的声音预设。</p>
+          <h2 className="cardTitle">{t("voice.assignments")}</h2>
+          <p className="cardSubtitle">{t("voice.assignmentsDesc")}</p>
           <div className="controlRow" style={{ justifyContent: "space-between" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <Button
@@ -1645,13 +1667,13 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                 disabled={!currentProject?.id || isLoading}
                 onClick={handleFetchRecommendations}
               >
-                {isLoading ? "推荐中..." : "按内容推荐"}
+                {isLoading ? t("voice.recommending") : t("voice.recommendByContent")}
               </Button>
               <div style={{ minWidth: 180 }}>
                 <Select
                   value={recommendSource}
                   onValueChange={(value) => setRecommendSource(value)}
-                  options={RECOMMEND_SOURCE_OPTIONS}
+                  options={recommendSourceOptions}
                 />
               </div>
               <Button
@@ -1659,12 +1681,12 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                 disabled={!["secondary_local", "primary_local"].includes(recommendSource) || isSaving || isLoading}
                 onClick={handleUnloadRecommendationModel}
               >
-                卸载模型
+                {t("voice.unloadModel")}
               </Button>
             </div>
             <span className="muted">
-              推荐使用当前试听后端：{previewBackend === "voxcpm2" ? "VoxCPM2" : "OmniVoice"}
-              {presetRecommendations?.source_used ? ` / 来源：${presetRecommendations.source_used}` : ""}
+              {t("voice.recommendCurrentBackend", { backend: previewBackend === "voxcpm2" ? "VoxCPM2" : "OmniVoice" })}
+              {presetRecommendations?.source_used ? ` / ${t("voice.source")}：${presetRecommendations.source_used}` : ""}
             </span>
           </div>
 
@@ -1674,14 +1696,14 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                 <div key={char.name} className="statRow" style={{ gap: 12, flexWrap: "wrap", alignItems: "stretch" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 220 }}>
                     <CharacterBadge name={char.name} />
-                    <span className="muted">出场 {char.appearance_count} 次</span>
+                    <span className="muted">{t("voice.appearanceCount", { count: char.appearance_count })}</span>
                   </div>
                   <div style={{ minWidth: 220, flex: 1 }}>
                     <Select
                       value={assignments[char.name] || ""}
                       onValueChange={(v) => assignVoice(char.name, v)}
                       options={presetOptions}
-                      placeholder="未分配"
+                      placeholder={t("voice.unassigned")}
                     />
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -1698,7 +1720,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                       </button>
                     ))}
                   </div>
-                  {char.description ? <span className="muted" style={{ width: "100%" }}>角色描述：{char.description}</span> : null}
+                  {char.description ? <span className="muted" style={{ width: "100%" }}>{t("voice.characterDescription")}：{char.description}</span> : null}
                 </div>
               ))}
               <div className="controlRow" style={{ justifyContent: "flex-end", marginTop: 4 }}>
@@ -1707,14 +1729,14 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                   disabled={!currentProject?.id || isSaving}
                   onClick={handleSaveAssignments}
                 >
-                  保存角色分配
+                  {t("voice.saveAssignments")}
                 </Button>
               </div>
             </div>
           ) : (
             <EmptyState
-              title="当前项目无角色"
-              description="请先在「文本输入」完成 LLM 解析"
+              title={t("voice.empty.noCharactersTitle")}
+              description={t("voice.empty.noCharactersDesc")}
             />
           )}
         </GlassCard>
@@ -1724,8 +1746,8 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
       <ConfirmDialog
         open={!!deleteTarget}
         onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}
-        title="删除声音预设"
-        description="此操作不可撤销，所有使用该预设的角色分配也将被清除。"
+        title={t("voice.deletePreset.title")}
+        description={t("voice.deletePreset.desc")}
         onConfirm={() => { deletePreset(deleteTarget); setDeleteTarget(null); if (selectedPresetId === deleteTarget) setSelectedPresetId(null); }}
         danger
       />

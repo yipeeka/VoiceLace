@@ -1,4 +1,5 @@
 import GlassCard from "../shared/GlassCard";
+import { useI18n } from "../../i18n/I18nProvider";
 
 export default function ScriptHeaderCard({
   currentProjectName,
@@ -10,11 +11,16 @@ export default function ScriptHeaderCard({
   onImportClick,
   onImportJson,
 }) {
+  const { t } = useI18n();
   return (
     <GlassCard>
-      <h2>剧本编辑器</h2>
+      <h2>{t("legacy.script.header.title")}</h2>
       <p className="muted">
-        当前项目 {currentProjectName || "未选择"}。片段数 {script.segments.length}，角色数 {script.characters.length}。
+        {t("legacy.script.header.summary", {
+          projectName: currentProjectName || t("project.unselected"),
+          segmentCount: script.segments.length,
+          characterCount: script.characters.length,
+        })}
       </p>
       {script.characters.length ? (
         <div className="chipRow">
@@ -28,10 +34,10 @@ export default function ScriptHeaderCard({
       {error ? <div className="errorText">{error}</div> : null}
       <div className="controlRow">
         <button type="button" className="primaryButton ghostButton" onClick={onExportJson} disabled={!script.segments.length}>
-          导出 JSON
+          {t("legacy.script.header.exportJson")}
         </button>
         <button type="button" className="primaryButton ghostButton" onClick={onImportClick} disabled={!canEdit}>
-          导入 JSON
+          {t("legacy.script.header.importJson")}
         </button>
         <input ref={fileInputRef} type="file" accept="application/json,.json" style={{ display: "none" }} onChange={onImportJson} />
       </div>

@@ -5,6 +5,7 @@ import EmptyState from "../shared/EmptyState";
 import GlassCard from "../shared/GlassCard";
 import SegmentEditorFields from "./SegmentEditorFields";
 import Button from "../ui/Button";
+import { useI18n } from "../../i18n/I18nProvider";
 
 export default function ScriptSidebarColumn({
   characters,
@@ -22,14 +23,16 @@ export default function ScriptSidebarColumn({
   onClearInsertAnchor = null,
   onNewSegmentFieldChange,
   onAddSegment,
-  addButtonLabel = "+ 添加片段",
+  addButtonLabel = "",
 }) {
+  const { t } = useI18n();
   const isFilterable = typeof onSelectSpeaker === "function";
+  const resolvedAddButtonLabel = addButtonLabel || t("synth.addSegment");
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <GlassCard>
-        <h2 className="cardTitle"><Users size={16} /> 角色面板</h2>
+        <h2 className="cardTitle"><Users size={16} /> {t("script.sidebar.characters")}</h2>
         {characters.length ? (
           <div className="listStack">
             <button
@@ -38,8 +41,8 @@ export default function ScriptSidebarColumn({
               onClick={isFilterable ? () => onSelectSpeaker("all") : undefined}
               disabled={!isFilterable}
             >
-              <span>总计</span>
-              <strong>{totalSegments} 段</strong>
+              <span>{t("script.sidebar.total")}</span>
+              <strong>{t("script.sidebar.segmentCount", { count: totalSegments })}</strong>
             </button>
             {characters.map(({ name, count }) => (
               <button
@@ -52,23 +55,23 @@ export default function ScriptSidebarColumn({
               >
                 <CharacterBadge name={name} />
                 <span className="muted" style={{ marginLeft: "auto" }}>
-                  {count} 段
+                  {t("script.sidebar.segmentCount", { count })}
                 </span>
               </button>
             ))}
           </div>
         ) : (
-          <EmptyState title="暂无角色" description="解析后角色将在此显示" />
+          <EmptyState title={t("script.sidebar.emptyCharactersTitle")} description={t("script.sidebar.emptyCharactersDesc")} />
         )}
       </GlassCard>
 
       <GlassCard>
-        <h2 className="cardTitle">操作</h2>
+        <h2 className="cardTitle">{t("script.sidebar.actions")}</h2>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {hasUnsavedChanges ? (
-            <div className="statusBadge warning">有未保存改动</div>
+            <div className="statusBadge warning">{t("script.sidebar.unsavedChanges")}</div>
           ) : (
-            <div className="statusBadge success">已保存</div>
+            <div className="statusBadge success">{t("synth.saved")}</div>
           )}
           {actionContent}
         </div>
@@ -76,12 +79,12 @@ export default function ScriptSidebarColumn({
       </GlassCard>
 
       <GlassCard>
-        <h2 className="cardTitle">新增片段</h2>
+        <h2 className="cardTitle">{t("script.sidebar.newSegment")}</h2>
         <div className="controlRow" style={{ justifyContent: "space-between" }}>
-          <span className="muted">{insertAfterLabel || "默认追加到末尾"}</span>
+          <span className="muted">{insertAfterLabel || t("script.sidebar.appendToEnd")}</span>
           {insertAfterLabel && onClearInsertAnchor ? (
             <Button variant="ghost" size="sm" onClick={onClearInsertAnchor}>
-              改为追加到末尾
+              {t("script.sidebar.switchToAppendEnd")}
             </Button>
           ) : null}
         </div>
@@ -98,7 +101,7 @@ export default function ScriptSidebarColumn({
           disabled={!canEdit || isSaving || !newSegment?.text?.trim()}
           onClick={onAddSegment}
         >
-          {addButtonLabel}
+          {resolvedAddButtonLabel}
         </Button>
       </GlassCard>
     </div>

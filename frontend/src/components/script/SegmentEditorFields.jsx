@@ -2,6 +2,7 @@ import { useMemo } from "react";
 
 import Select from "../ui/Select";
 import { EMOTION_OPTIONS, TYPE_OPTIONS } from "../../constants/scriptOptions";
+import { useI18n } from "../../i18n/I18nProvider";
 
 export default function SegmentEditorFields({
   draft,
@@ -12,6 +13,7 @@ export default function SegmentEditorFields({
   speakerOptions = [],
   compact = false,
 }) {
+  const { t } = useI18n();
   const knownSpeakerOptions = useMemo(() => {
     const map = new Map();
     map.set("narrator", { value: "narrator", label: "narrator" });
@@ -29,9 +31,9 @@ export default function SegmentEditorFields({
   const resolvedSpeakerOptions = useMemo(
     () => [
       ...knownSpeakerOptions,
-      { value: "__new__", label: "+ 添加新角色" },
+      { value: "__new__", label: t("script.segmentEditor.addNewCharacter") },
     ],
-    [knownSpeakerOptions],
+    [knownSpeakerOptions, t],
   );
 
   return (
@@ -64,7 +66,7 @@ export default function SegmentEditorFields({
           className="textInput"
           value={currentSpeaker}
           onChange={(e) => onFieldChange("speaker", e.target.value)}
-          placeholder="输入新角色名（留空保存后会回退 narrator）"
+          placeholder={t("script.segmentEditor.newCharacterPlaceholder")}
         />
       ) : null}
       <textarea
@@ -83,18 +85,18 @@ export default function SegmentEditorFields({
             value={draft?.nonVerbalText || ""}
             readOnly
             aria-readonly="true"
-            placeholder="non_verbal（只读）"
-            title="non_verbal 当前为只读显示"
+            placeholder={t("script.segmentEditor.nonVerbalReadonlyPlaceholder")}
+            title={t("script.segmentEditor.nonVerbalReadonlyTitle")}
           />
           <textarea
             className="textArea compactArea"
             value={draft?.ttsOverridesText || "{}"}
             onChange={(e) => onFieldChange("ttsOverridesText", e.target.value)}
             style={{ minHeight: 88, fontFamily: "monospace", fontSize: 12 }}
-            placeholder='tts_overrides JSON（仅支持 speed/duration/denoise/num_step/guidance_scale）'
+            placeholder={t("script.segmentEditor.ttsOverridesPlaceholder")}
           />
           <div style={{ fontSize: 12, color: "var(--textMuted)" }}>
-            支持字段：
+            {t("script.segmentEditor.supportedFields")}
             <code>speed</code>
             、
             <code>duration</code>
@@ -104,15 +106,15 @@ export default function SegmentEditorFields({
             <code>num_step</code>
             、
             <code>guidance_scale</code>
-            。示例：
+            。{t("script.segmentEditor.exampleLabel")}
             <code>{"{\"speed\":1.1}"}</code>
             。
             <code>duration</code>
-            与
+            {t("script.segmentEditor.and")}
             <code>speed</code>
-            同时存在时，以
+            {t("script.segmentEditor.whenBothExist")}
             <code>duration</code>
-            为准；不支持的字段会在重生成时报错。
+            {t("script.segmentEditor.durationPriority")}
           </div>
         </>
       ) : null}

@@ -1,3 +1,13 @@
+import { getLanguage } from "../i18n/core";
+import { MESSAGES } from "../i18n/messages";
+
+function t(key, params = {}) {
+  const language = getLanguage();
+  const dict = MESSAGES[language] || MESSAGES.zh;
+  const template = dict[key] || MESSAGES.en?.[key] || key;
+  return String(template).replace(/\{(\w+)\}/g, (_, name) => String(params?.[name] ?? `{${name}}`));
+}
+
 export function buildCharacterStats(segments = []) {
   const counts = {};
   for (const segment of segments || []) {
@@ -17,7 +27,7 @@ export function buildSpeakerOptions(characters = [], { includeCreateOption = fal
     ...withoutNarrator.map((name) => ({ value: name, label: name })),
   ];
   if (includeCreateOption) {
-    options.push({ value: "__new__", label: "+ 添加新角色" });
+    options.push({ value: "__new__", label: t("util.scriptSidebar.addNewCharacter") });
   }
   return options;
 }
@@ -49,5 +59,5 @@ export function getInsertAnchorLabel(segments = [], insertAfterSegmentId = null)
   if (!target) {
     return "";
   }
-  return `将插入到 #${(target.index ?? 0) + 1} 之后`;
+  return t("util.scriptSidebar.insertAfter", { index: (target.index ?? 0) + 1 });
 }

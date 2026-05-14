@@ -6,6 +6,7 @@ import TimelinePlugin from "wavesurfer.js/dist/plugins/timeline.esm.js";
 
 import { api } from "../../utils/api";
 import Slider from "../ui/Slider";
+import { useI18n } from "../../i18n/I18nProvider";
 
 function formatTime(seconds) {
   if (!seconds || isNaN(seconds)) return "0:00";
@@ -60,6 +61,7 @@ export default function SynthesisWaveSurfer({
   pauseSignal = 0,
   onPlayStateChange = null,
 }) {
+  const { t } = useI18n();
   const containerRef = useRef(null);
   const wavesurferRef = useRef(null);
   const regionWarningLoggedRef = useRef(false);
@@ -111,7 +113,7 @@ export default function SynthesisWaveSurfer({
         });
       } catch {
         if (canceled) return;
-        setWaveformError("完整波形 peaks 加载失败，已降级为普通波形加载。");
+        setWaveformError(t("synth.waveform.peaksLoadFailed"));
         setWaveformPayload({ data: [], duration_ms: 0, level: requestedLevel });
       }
     }
@@ -252,7 +254,7 @@ export default function SynthesisWaveSurfer({
       });
 
       if (regionRenderFailed) {
-        setWaveformError("分段标注暂不可用，已保留完整音频播放。");
+        setWaveformError(t("synth.waveform.segmentAnnotationUnavailable"));
       }
     });
 
@@ -269,15 +271,15 @@ export default function SynthesisWaveSurfer({
       const alreadyReady = readyRef.current || ws.getDuration() > 0;
       if (alreadyReady) {
         // Keep playback path available when waveform/region internals throw transient errors.
-        setWaveformError("完整音频波形渲染异常，已保留音频播放。");
+        setWaveformError(t("synth.waveform.renderErrorFallback"));
         return;
       }
       if (!forcePlainLoad && precomputedChannelData && precomputedDurationSec) {
         setForcePlainLoad(true);
-        setWaveformError("波形预加载失败，已自动切换普通模式。");
+        setWaveformError(t("synth.waveform.preloadFailed"));
         return;
       }
-      setWaveformError("WaveSurfer 初始化失败，建议重试或刷新页面。");
+      setWaveformError(t("synth.waveform.initFailed"));
     });
 
     wavesurferRef.current = ws;
@@ -298,7 +300,7 @@ export default function SynthesisWaveSurfer({
     try {
       wavesurferRef.current.zoom(mapZoomToPixelsPerSecond(zoom));
     } catch {
-      setWaveformError("缩放失败，已保持当前波形视图。");
+      setWaveformError(t("synth.waveform.zoomFailed"));
     }
   }, [zoom, isReady]);
 
@@ -309,7 +311,7 @@ export default function SynthesisWaveSurfer({
     } catch {
       setIsPlaying(false);
       setIsReady(false);
-      setWaveformError("音频尚未就绪，请稍后重试。");
+      setWaveformError(t("synth.waveform.audioNotReady"));
     }
   };
 
@@ -319,7 +321,7 @@ export default function SynthesisWaveSurfer({
     }
     wavesurferRef.current.play().catch(() => {
       setIsPlaying(false);
-      setWaveformError("音频尚未就绪，请稍后重试。");
+      setWaveformError(t("synth.waveform.audioNotReady"));
     });
   }, [autoPlaySignal, isReady]);
 

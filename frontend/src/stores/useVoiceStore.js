@@ -2,7 +2,16 @@ import { create } from "zustand";
 
 import { api } from "../utils/api";
 import { formatError, getErrorMessage } from "../utils/errors";
+import { getLanguage } from "../i18n/core";
+import { MESSAGES } from "../i18n/messages";
 import { useUiStore } from "./useUiStore";
+
+function t(key, params = {}) {
+  const language = getLanguage();
+  const dict = MESSAGES[language] || MESSAGES.zh;
+  const template = dict[key] || MESSAGES.en?.[key] || key;
+  return String(template).replace(/\{(\w+)\}/g, (_, name) => String(params?.[name] ?? `{${name}}`));
+}
 
 function reorderByIds(items, orderedIds) {
   const itemMap = new Map(items.map((item) => [item.id, item]));
@@ -81,9 +90,9 @@ export const useVoiceStore = create((set) => ({
       set({ presets, isLoading: false });
       return presets;
     } catch (error) {
-      const message = getErrorMessage(error, "声音预设加载失败");
+      const message = getErrorMessage(error, t("store.voice.error.loadPresets"));
       set({ isLoading: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("声音预设加载失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.voice.error.loadPresets"), message), tone: "error" });
       throw error;
     }
   },
@@ -92,12 +101,12 @@ export const useVoiceStore = create((set) => ({
     try {
       const preset = await api.post("/voices/presets", payload);
       set((state) => ({ presets: [...state.presets, preset], isSaving: false }));
-      useUiStore.getState().pushToast({ title: `已创建预设：${preset.name}`, tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.voice.toast.presetCreated", { name: preset.name }), tone: "success" });
       return preset;
     } catch (error) {
-      const message = getErrorMessage(error, "创建预设失败");
+      const message = getErrorMessage(error, t("store.voice.error.createPreset"));
       set({ isSaving: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("创建预设失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.voice.error.createPreset"), message), tone: "error" });
       throw error;
     }
   },
@@ -109,12 +118,12 @@ export const useVoiceStore = create((set) => ({
         presets: state.presets.map((item) => (item.id === presetId ? preset : item)),
         isSaving: false,
       }));
-      useUiStore.getState().pushToast({ title: `已更新预设：${preset.name}`, tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.voice.toast.presetUpdated", { name: preset.name }), tone: "success" });
       return preset;
     } catch (error) {
-      const message = getErrorMessage(error, "更新预设失败");
+      const message = getErrorMessage(error, t("store.voice.error.updatePreset"));
       set({ isSaving: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("更新预设失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.voice.error.updatePreset"), message), tone: "error" });
       throw error;
     }
   },
@@ -137,11 +146,11 @@ export const useVoiceStore = create((set) => ({
         },
         isSaving: false,
       }));
-      useUiStore.getState().pushToast({ title: "声音预设已删除", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.voice.toast.presetDeleted"), tone: "success" });
     } catch (error) {
-      const message = getErrorMessage(error, "删除预设失败");
+      const message = getErrorMessage(error, t("store.voice.error.deletePreset"));
       set({ isSaving: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("删除预设失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.voice.error.deletePreset"), message), tone: "error" });
       throw error;
     }
   },
@@ -151,12 +160,12 @@ export const useVoiceStore = create((set) => ({
     try {
       const presets = await api.post("/voices/presets/reorder", { preset_ids: orderedIds });
       set({ presets, isSaving: false });
-      useUiStore.getState().pushToast({ title: "预设顺序已保存", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.voice.toast.presetOrderSaved"), tone: "success" });
       return presets;
     } catch (error) {
-      const message = getErrorMessage(error, "调整预设顺序失败");
+      const message = getErrorMessage(error, t("store.voice.error.reorderPresets"));
       set({ presets: previousPresets, isSaving: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("调整预设顺序失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.voice.error.reorderPresets"), message), tone: "error" });
       throw error;
     }
   },
@@ -167,12 +176,12 @@ export const useVoiceStore = create((set) => ({
         assignments: { ...useVoiceStore.getState().assignments },
       });
       set({ isSaving: false });
-      useUiStore.getState().pushToast({ title: "角色声音分配已保存", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.voice.toast.assignmentsSaved"), tone: "success" });
       return assignments;
     } catch (error) {
-      const message = getErrorMessage(error, "保存分配失败");
+      const message = getErrorMessage(error, t("store.voice.error.saveAssignments"));
       set({ isSaving: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("保存分配失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.voice.error.saveAssignments"), message), tone: "error" });
       throw error;
     }
   },
@@ -224,14 +233,14 @@ export const useVoiceStore = create((set) => ({
         });
       }
       useUiStore.getState().pushToast({
-        title: `试听音频已生成（${backendName.toUpperCase()}）`,
+        title: t("store.voice.toast.previewGenerated", { backend: backendName.toUpperCase() }),
         tone: "success",
       });
       return url;
     } catch (error) {
-      const message = getErrorMessage(error, "试听失败");
+      const message = getErrorMessage(error, t("store.voice.error.preview"));
       set({ isSaving: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("试听失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.voice.error.preview"), message), tone: "error" });
       throw error;
     }
   },
@@ -244,12 +253,12 @@ export const useVoiceStore = create((set) => ({
         lastReferenceQualityReport: result.quality_report || null,
         isSaving: false,
       });
-      useUiStore.getState().pushToast({ title: "参考音频上传成功", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.voice.toast.referenceUploaded"), tone: "success" });
       return result;
     } catch (error) {
-      const message = getErrorMessage(error, "上传失败");
+      const message = getErrorMessage(error, t("store.voice.error.upload"));
       set({ isSaving: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("上传失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.voice.error.upload"), message), tone: "error" });
       throw error;
     }
   },
@@ -258,12 +267,12 @@ export const useVoiceStore = create((set) => ({
     try {
       const result = await api.post("/voices/transcribe", { audio_path: audioPath });
       set({ transcribedRefText: result.text || "", isTranscribing: false });
-      useUiStore.getState().pushToast({ title: "ASR 转写完成", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.voice.toast.transcribeDone"), tone: "success" });
       return result;
     } catch (error) {
-      const message = getErrorMessage(error, "转写失败");
+      const message = getErrorMessage(error, t("store.voice.error.transcribe"));
       set({ isTranscribing: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("转写失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.voice.error.transcribe"), message), tone: "error" });
       throw error;
     }
   },
@@ -287,12 +296,12 @@ export const useVoiceStore = create((set) => ({
         ),
         isSaving: false,
       }));
-      useUiStore.getState().pushToast({ title: "参考音频质量检测完成", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.voice.toast.qualityChecked"), tone: "success" });
       return result;
     } catch (error) {
-      const message = getErrorMessage(error, "质量检测失败");
+      const message = getErrorMessage(error, t("store.voice.error.qualityCheck"));
       set({ isSaving: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("质量检测失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.voice.error.qualityCheck"), message), tone: "error" });
       throw error;
     }
   },
@@ -308,13 +317,13 @@ export const useVoiceStore = create((set) => ({
       set({ presetRecommendations: result, isLoading: false });
       const sourceUsed = (result?.source_used || source || "").trim();
       if (sourceUsed === "rule_fallback") {
-        useUiStore.getState().pushToast({ title: "LLM 推荐失败，已自动回退规则推荐", tone: "warning" });
+        useUiStore.getState().pushToast({ title: t("store.voice.toast.llmFallbackToRule"), tone: "warning" });
       }
       return result;
     } catch (error) {
-      const message = getErrorMessage(error, "推荐失败");
+      const message = getErrorMessage(error, t("store.voice.error.recommend"));
       set({ isLoading: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("推荐失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.voice.error.recommend"), message), tone: "error" });
       throw error;
     }
   },
@@ -325,12 +334,12 @@ export const useVoiceStore = create((set) => ({
       const endpoint = sourceName === "primary_local" ? "/system/unload-llm" : "/llm/translation-engine/unload";
       const result = await api.post(endpoint, {});
       set({ isSaving: false });
-      useUiStore.getState().pushToast({ title: "推荐模型已卸载", tone: "success" });
+      useUiStore.getState().pushToast({ title: t("store.voice.toast.recommendModelUnloaded"), tone: "success" });
       return result;
     } catch (error) {
-      const message = getErrorMessage(error, "卸载推荐模型失败");
+      const message = getErrorMessage(error, t("store.voice.error.unloadRecommendModel"));
       set({ isSaving: false, error: message });
-      useUiStore.getState().pushToast({ title: formatError("卸载推荐模型失败", message), tone: "error" });
+      useUiStore.getState().pushToast({ title: formatError(t("store.voice.error.unloadRecommendModel"), message), tone: "error" });
       throw error;
     }
   },

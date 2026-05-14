@@ -3,6 +3,7 @@ import { FolderOpen, Upload } from "lucide-react";
 import Button from "../ui/Button";
 import DropdownMenu from "../ui/DropdownMenu";
 import Select from "../ui/Select";
+import { useI18n } from "../../i18n/I18nProvider";
 
 export default function ProjectToolbarCard({
   currentProject,
@@ -25,37 +26,39 @@ export default function ProjectToolbarCard({
   onImportArchive,
   moreMenuItems,
 }) {
+  const { t } = useI18n();
+
   return (
     <div className="projectToolbar">
       <div className="projectToolbarGroup projectToolbarGroupIdentity">
-        <div className="projectToolbarGroupTitle">当前项目</div>
+        <div className="projectToolbarGroupTitle">{t("project.current")}</div>
         <Select
           value={currentProject?.id ?? ""}
           onValueChange={onSelectProject}
           options={projectOptions}
-          placeholder="选择项目..."
+          placeholder={t("project.select")}
           className="projectToolbarSelect"
         />
         <div className="projectToolbarMetaRow">
-          <span className="projectToolbarBadge">{currentProjectMeta?.sourceTag || "未选择"}</span>
-          <span className="projectToolbarMetaText" title={currentProjectMeta?.detail || "未选择项目"}>
-            {currentProjectMeta?.detail || "未选择项目"}
+          <span className="projectToolbarBadge">{currentProjectMeta?.sourceTag || t("project.unselected")}</span>
+          <span className="projectToolbarMetaText" title={currentProjectMeta?.detail || t("project.unselectedDetail")}>
+            {currentProjectMeta?.detail || t("project.unselectedDetail")}
           </span>
         </div>
       </div>
 
       <div className="projectToolbarGroup projectToolbarGroupActions">
-        <div className="projectToolbarGroupTitle">项目操作</div>
+        <div className="projectToolbarGroupTitle">{t("project.actions")}</div>
         <div className="projectToolbarCreateRow">
           <input
             className="textInput projectToolbarNameInput"
             value={projectName}
             onChange={(event) => onProjectNameChange(event.target.value)}
-            placeholder="新项目名称"
+            placeholder={t("project.newName")}
             onKeyDown={onProjectNameKeyDown}
           />
           <Button variant="secondary" onClick={onCreateProject}>
-            新建
+            {t("project.create")}
           </Button>
         </div>
         <div className="projectToolbarRenameRow">
@@ -63,7 +66,7 @@ export default function ProjectToolbarCard({
             className="textInput projectToolbarNameInput"
             value={renameProjectName}
             onChange={(event) => onRenameProjectNameChange(event.target.value)}
-            placeholder="项目新名称"
+            placeholder={t("project.renameName")}
             onKeyDown={onRenameProjectNameKeyDown}
             disabled={!currentProject || isParsing}
           />
@@ -72,15 +75,15 @@ export default function ProjectToolbarCard({
             onClick={onRenameProject}
             disabled={!currentProject || isParsing}
           >
-            改名
+            {t("project.rename")}
           </Button>
         </div>
         <div className="projectToolbarActionsPrimary">
           <Button variant="secondary" icon={FolderOpen} onClick={onOpenProjectFileClick} disabled={isParsing}>
-            打开项目文件
+            {t("project.openFile")}
           </Button>
           <Button variant="secondary" icon={Upload} onClick={() => archiveInputRef.current?.click()} disabled={isParsing}>
-            导入工程 ZIP
+            {t("project.importZip")}
           </Button>
         </div>
         <input
@@ -100,9 +103,9 @@ export default function ProjectToolbarCard({
       </div>
 
       <div className="projectToolbarGroup projectToolbarGroupMore">
-        <div className="projectToolbarGroupTitle">更多操作</div>
+        <div className="projectToolbarGroupTitle">{t("project.moreActions")}</div>
         <DropdownMenu
-          label="更多"
+          label={t("common.more")}
           items={moreMenuItems}
           className="projectToolbarMoreButton"
           disabled={!moreMenuItems?.length}

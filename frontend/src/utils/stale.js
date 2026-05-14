@@ -1,3 +1,13 @@
+import { getLanguage } from "../i18n/core";
+import { MESSAGES } from "../i18n/messages";
+
+function t(key, params = {}) {
+  const language = getLanguage();
+  const dict = MESSAGES[language] || MESSAGES.zh;
+  const template = dict[key] || MESSAGES.en?.[key] || key;
+  return String(template).replace(/\{(\w+)\}/g, (_, name) => String(params?.[name] ?? `{${name}}`));
+}
+
 export function buildStaleTargetIds(report) {
   if (!report) {
     return [];
@@ -61,14 +71,14 @@ export function getSegmentStaleLabel(item) {
     return "";
   }
   if (item.status === "missing") {
-    return "缺失音频";
+    return t("util.stale.missingAudio");
   }
   const reasons = Array.isArray(item.reasons) ? item.reasons : [];
   if (reasons.some((reason) => AUTO_SELECT_REASONS.has(reason) && reason !== "missing_audio")) {
-    return "已修改待重新生成";
+    return t("util.stale.modifiedNeedsRegenerate");
   }
   if (item.status === "stale") {
-    return "配置变化待重新生成";
+    return t("util.stale.configChangedNeedsRegenerate");
   }
-  return "已同步";
+  return t("util.stale.synced");
 }

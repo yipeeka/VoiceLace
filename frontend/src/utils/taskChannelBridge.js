@@ -1,3 +1,13 @@
+import { getLanguage } from "../i18n/core";
+import { MESSAGES } from "../i18n/messages";
+
+function t(key, params = {}) {
+  const language = getLanguage();
+  const dict = MESSAGES[language] || MESSAGES.zh;
+  const template = dict[key] || MESSAGES.en?.[key] || key;
+  return String(template).replace(/\{(\w+)\}/g, (_, name) => String(params?.[name] ?? `{${name}}`));
+}
+
 export function createTaskChannelBridge({
   set,
   getStatus,
@@ -16,14 +26,18 @@ export function createTaskChannelBridge({
     },
     onConnectionStatus: (connectionStatus) => set({ connectionStatus }),
     onOpen: async ({ isReconnect }) => {
-      set({ modelStatus: "连接已建立" });
+      set({ modelStatus: t("util.taskBridge.connected") });
       if (isReconnect && typeof onReconnectOpenExtra === "function") {
         await onReconnectOpenExtra();
       }
     },
     onReconnectScheduled: ({ reconnectAttempts, delay }) => {
       set({
-        modelStatus: `连接中断，${delay}ms 后尝试重连 (${reconnectAttempts}/${maxReconnectRetries})...`,
+        modelStatus: t("util.taskBridge.reconnectScheduled", {
+          delay,
+          reconnectAttempts,
+          maxReconnectRetries,
+        }),
       });
       if (typeof onReconnectScheduledExtra === "function") {
         onReconnectScheduledExtra({ reconnectAttempts, delay });

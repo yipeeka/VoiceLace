@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/Tabs";
 import Select from "../ui/Select";
 import Button from "../ui/Button";
 import { EMOTION_OPTIONS, TYPE_OPTIONS } from "../../constants/scriptOptions";
+import { useI18n } from "../../i18n/I18nProvider";
 
 function buildSearchPreview({ segments, find, replace, caseSensitive }) {
   if (!find) return { hitCount: 0, affectedCount: 0, rows: [] };
@@ -51,6 +52,7 @@ export default function ScriptBatchToolsDrawer({
   onBatchUpdate,
   onSearchReplace,
 }) {
+  const { t } = useI18n();
   const [tab, setTab] = useState("rename");
   const [fromName, setFromName] = useState("");
   const [toName, setToName] = useState("");
@@ -65,11 +67,14 @@ export default function ScriptBatchToolsDrawer({
   const [caseSensitive, setCaseSensitive] = useState(false);
 
   const characterOptions = useMemo(
-    () => (characters || []).map((item) => ({ value: item.name, label: `${item.name} (${item.count}段)` })),
-    [characters]
+    () => (characters || []).map((item) => ({ value: item.name, label: t("script.batch.characterOption", { name: item.name, count: item.count }) })),
+    [characters, t]
   );
 
-  const scopeText = `作用范围：角色=${activeSpeakerFilter === "all" ? "全部" : activeSpeakerFilter} · 共 ${visibleSegments.length} 段`;
+  const scopeText = t("script.batch.scopeText", {
+    speaker: activeSpeakerFilter === "all" ? t("common.all") : activeSpeakerFilter,
+    count: visibleSegments.length,
+  });
 
   const renamePreviewCount = useMemo(
     () => (visibleSegments || []).filter((seg) => (seg?.speaker || "").trim() === fromName).length,
@@ -82,14 +87,14 @@ export default function ScriptBatchToolsDrawer({
   const emotionOptionsInScope = useMemo(() => {
     const existing = new Set((visibleSegments || []).map((seg) => (seg?.emotion || "neutral")));
     const ordered = EMOTION_OPTIONS.filter((opt) => existing.has(opt.value));
-    return ordered.length ? ordered : [{ value: "neutral", label: "neutral（中性）" }];
-  }, [visibleSegments]);
+    return ordered.length ? ordered : [{ value: "neutral", label: t("script.batch.emotionNeutral") }];
+  }, [visibleSegments, t]);
 
   const typeOptionsInScope = useMemo(() => {
     const existing = new Set((visibleSegments || []).map((seg) => (seg?.type || "dialogue")));
     const ordered = TYPE_OPTIONS.filter((opt) => existing.has(opt.value));
-    return ordered.length ? ordered : [{ value: "dialogue", label: "对话 (dialogue)" }];
-  }, [visibleSegments]);
+    return ordered.length ? ordered : [{ value: "dialogue", label: t("script.batch.typeDialogue") }];
+  }, [visibleSegments, t]);
 
   useEffect(() => {
     const emotionValues = new Set(emotionOptionsInScope.map((opt) => opt.value));
@@ -132,36 +137,36 @@ export default function ScriptBatchToolsDrawer({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        title="批量工具"
+        title={t("script.batch.title")}
         description={scopeText}
         className="batchToolsDrawer"
       >
         {!canExecute ? (
           <div className="statusBadge warning" style={{ marginBottom: 10, display: "block", textAlign: "left" }}>
-            当前有未保存草稿，请先保存后再执行后端批量操作。
+            {t("script.batch.unsavedDraftWarning")}
           </div>
         ) : null}
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="batchTabsList">
-            <TabsTrigger value="rename"><PencilLine size={13} /> 角色改名</TabsTrigger>
-            <TabsTrigger value="merge"><Blend size={13} /> 角色合并</TabsTrigger>
-            <TabsTrigger value="batch"><Settings2 size={13} /> 批量属性</TabsTrigger>
-            <TabsTrigger value="replace"><Replace size={13} /> 搜索替换</TabsTrigger>
-            <TabsTrigger value="structure"><UsersRound size={13} /> 片段结构</TabsTrigger>
+            <TabsTrigger value="rename"><PencilLine size={13} /> {t("script.batch.tab.rename")}</TabsTrigger>
+            <TabsTrigger value="merge"><Blend size={13} /> {t("script.batch.tab.merge")}</TabsTrigger>
+            <TabsTrigger value="batch"><Settings2 size={13} /> {t("script.batch.tab.batch")}</TabsTrigger>
+            <TabsTrigger value="replace"><Replace size={13} /> {t("script.batch.tab.replace")}</TabsTrigger>
+            <TabsTrigger value="structure"><UsersRound size={13} /> {t("script.batch.tab.structure")}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="rename">
             <div className="listStack">
-              <Select value={fromName} onValueChange={setFromName} options={characterOptions} placeholder="选择源角色" />
-              <input className="textInput" value={toName} onChange={(e) => setToName(e.target.value)} placeholder="输入新角色名" />
-              <div className="muted">预览影响：{renamePreviewCount} 段</div>
+              <Select value={fromName} onValueChange={setFromName} options={characterOptions} placeholder={t("script.batch.placeholder.sourceCharacter")} />
+              <input className="textInput" value={toName} onChange={(e) => setToName(e.target.value)} placeholder={t("script.batch.placeholder.newCharacterName")} />
+              <div className="muted">{t("script.batch.previewAffected", { count: renamePreviewCount })}</div>
               <div className="controlRow" style={{ justifyContent: "flex-end" }}>
                 <Button
                   variant="primary"
                   disabled={isSaving || !fromName || !toName || fromName === toName || renamePreviewCount <= 0}
                   onClick={() => onRenameCharacter?.({ fromName, toName })}
                 >
-                  {isSaving ? "执行中..." : "执行改名"}
+                  {isSaving ? t("script.batch.executing") : t("script.batch.action.rename")}
                 </Button>
               </div>
             </div>
@@ -169,16 +174,16 @@ export default function ScriptBatchToolsDrawer({
 
           <TabsContent value="merge">
             <div className="listStack">
-              <Select value={mergeSourceName} onValueChange={setMergeSourceName} options={characterOptions} placeholder="选择源角色（将被合并）" />
-              <Select value={mergeTargetName} onValueChange={setMergeTargetName} options={characterOptions} placeholder="选择目标角色（将保留）" />
-              <div className="muted">预览影响：{mergePreviewCount} 段（目标角色音色优先）</div>
+              <Select value={mergeSourceName} onValueChange={setMergeSourceName} options={characterOptions} placeholder={t("script.batch.placeholder.mergeSource")} />
+              <Select value={mergeTargetName} onValueChange={setMergeTargetName} options={characterOptions} placeholder={t("script.batch.placeholder.mergeTarget")} />
+              <div className="muted">{t("script.batch.previewMergeAffected", { count: mergePreviewCount })}</div>
               <div className="controlRow" style={{ justifyContent: "flex-end" }}>
                 <Button
                   variant="primary"
                   disabled={isSaving || !mergeSourceName || !mergeTargetName || mergeSourceName === mergeTargetName || mergePreviewCount <= 0}
                   onClick={() => onMergeCharacter?.({ sourceName: mergeSourceName, targetName: mergeTargetName })}
                 >
-                  {isSaving ? "执行中..." : "执行合并"}
+                  {isSaving ? t("script.batch.executing") : t("script.batch.action.merge")}
                 </Button>
               </div>
             </div>
@@ -186,37 +191,37 @@ export default function ScriptBatchToolsDrawer({
 
           <TabsContent value="batch">
             <div className="listStack">
-              <div className="muted">选择情绪 -&gt; 目标情绪</div>
+              <div className="muted">{t("script.batch.emotionToTarget")}</div>
               <Select
                 value={fromEmotion}
                 onValueChange={setFromEmotion}
-                options={[{ value: "", label: "全部情绪" }, ...emotionOptionsInScope]}
-                placeholder="选择情绪（源）"
+                options={[{ value: "", label: t("script.batch.option.allEmotions") }, ...emotionOptionsInScope]}
+                placeholder={t("script.batch.placeholder.sourceEmotion")}
               />
               <Select
                 value={targetEmotion}
                 onValueChange={setTargetEmotion}
-                options={[{ value: "", label: "目标情绪不改" }, ...EMOTION_OPTIONS]}
-                placeholder="目标情绪"
+                options={[{ value: "", label: t("script.batch.option.keepTargetEmotion") }, ...EMOTION_OPTIONS]}
+                placeholder={t("script.batch.placeholder.targetEmotion")}
               />
-              <div className="muted">选择类型 -&gt; 目标类型</div>
+              <div className="muted">{t("script.batch.typeToTarget")}</div>
               <Select
                 value={fromType}
                 onValueChange={setFromType}
-                options={[{ value: "", label: "全部类型" }, ...typeOptionsInScope]}
-                placeholder="选择类型（源）"
+                options={[{ value: "", label: t("script.batch.option.allTypes") }, ...typeOptionsInScope]}
+                placeholder={t("script.batch.placeholder.sourceType")}
               />
               <Select
                 value={targetType}
                 onValueChange={setTargetType}
-                options={[{ value: "", label: "目标类型不改" }, ...TYPE_OPTIONS]}
-                placeholder="目标类型"
+                options={[{ value: "", label: t("script.batch.option.keepTargetType") }, ...TYPE_OPTIONS]}
+                placeholder={t("script.batch.placeholder.targetType")}
               />
               <div className="muted">
-                预览影响：{batchPreviewCount} 段
+                {t("script.batch.previewAffected", { count: batchPreviewCount })}
                 {targetEmotion || targetType
-                  ? `（将改为：emotion=${targetEmotion || "不变"}，type=${targetType || "不变"}）`
-                  : "（请继续选择目标情绪或目标类型）"}
+                  ? t("script.batch.previewWillChangeTo", { emotion: targetEmotion || t("script.batch.keep"), type: targetType || t("script.batch.keep") })
+                  : t("script.batch.previewSelectTargetHint")}
               </div>
               <div className="controlRow" style={{ justifyContent: "flex-end" }}>
                 <Button
@@ -230,7 +235,7 @@ export default function ScriptBatchToolsDrawer({
                     })
                   }
                 >
-                  {isSaving ? "执行中..." : "执行批量修改"}
+                  {isSaving ? t("script.batch.executing") : t("script.batch.action.batchUpdate")}
                 </Button>
               </div>
             </div>
@@ -238,20 +243,20 @@ export default function ScriptBatchToolsDrawer({
 
           <TabsContent value="replace">
             <div className="listStack">
-              <input className="textInput" value={findText} onChange={(e) => setFindText(e.target.value)} placeholder="查找文本" />
-              <input className="textInput" value={replaceText} onChange={(e) => setReplaceText(e.target.value)} placeholder="替换为（可空）" />
+              <input className="textInput" value={findText} onChange={(e) => setFindText(e.target.value)} placeholder={t("script.batch.placeholder.findText")} />
+              <input className="textInput" value={replaceText} onChange={(e) => setReplaceText(e.target.value)} placeholder={t("script.batch.placeholder.replaceText")} />
               <label className="controlRow" style={{ justifyContent: "flex-start", gap: 8 }}>
                 <input type="checkbox" checked={caseSensitive} onChange={(e) => setCaseSensitive(e.target.checked)} />
-                区分大小写
+                {t("script.batch.caseSensitive")}
               </label>
-              <div className="muted">预览命中：{searchPreview.hitCount} 处，影响 {searchPreview.affectedCount} 段</div>
+              <div className="muted">{t("script.batch.previewHits", { hit: searchPreview.hitCount, count: searchPreview.affectedCount })}</div>
               {searchPreview.rows.length ? (
                 <div className="listStack" style={{ maxHeight: 180, overflowY: "auto" }}>
                   {searchPreview.rows.map((row) => (
                     <div key={row.segmentId} className="statRow" style={{ display: "block" }}>
-                      <div className="muted">#{row.segmentId} · 命中 {row.hit} 次</div>
-                      <div className="muted">旧：{row.before}</div>
-                      <div className="muted">新：{row.after}</div>
+                      <div className="muted">{t("script.batch.rowHit", { id: row.segmentId, hit: row.hit })}</div>
+                      <div className="muted">{t("script.batch.before")}{row.before}</div>
+                      <div className="muted">{t("script.batch.after")}{row.after}</div>
                     </div>
                   ))}
                 </div>
@@ -262,7 +267,7 @@ export default function ScriptBatchToolsDrawer({
                   disabled={isSaving || !findText || searchPreview.affectedCount <= 0}
                   onClick={() => onSearchReplace?.({ find: findText, replace: replaceText, caseSensitive })}
                 >
-                  {isSaving ? "执行中..." : "执行替换"}
+                  {isSaving ? t("script.batch.executing") : t("script.batch.action.replace")}
                 </Button>
               </div>
             </div>
@@ -270,10 +275,10 @@ export default function ScriptBatchToolsDrawer({
 
           <TabsContent value="structure">
             <div className="listStack">
-              <div className="muted">片段拆分与合并在片段卡片上直接操作：</div>
-              <div className="muted">1) 编辑状态点击“拆分”，按光标位置一键拆分</div>
-              <div className="muted">2) 非编辑状态点击“合并”可与下一段合并</div>
-              <div className="statusBadge default">这些操作也会进入项目历史与快照，可回滚</div>
+              <div className="muted">{t("script.batch.structureHint.title")}</div>
+              <div className="muted">{t("script.batch.structureHint.step1")}</div>
+              <div className="muted">{t("script.batch.structureHint.step2")}</div>
+              <div className="statusBadge default">{t("script.batch.structureHint.rollback")}</div>
             </div>
           </TabsContent>
         </Tabs>

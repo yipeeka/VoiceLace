@@ -3,6 +3,7 @@ import { Download, Upload } from "lucide-react";
 import GlassCard from "../shared/GlassCard";
 import Button from "../ui/Button";
 import Progress from "../ui/Progress";
+import { useI18n } from "../../i18n/I18nProvider";
 
 export default function SynthesisTaskStatusCard({
   API_ORIGIN,
@@ -40,6 +41,7 @@ export default function SynthesisTaskStatusCard({
   onCancelTask,
   onOpenExportWizard,
 }) {
+  const { t } = useI18n();
   const normalizedChapterExports = Array.isArray(chapterExports) ? chapterExports : [];
   const gpu = runtimeStatus?.gpu || {};
   const queuedCount = Number(queueSnapshot?.queued_count || 0);
@@ -53,60 +55,60 @@ export default function SynthesisTaskStatusCard({
   );
   return (
     <GlassCard>
-      <h2 className="cardTitle">任务状态</h2>
+      <h2 className="cardTitle">{t("synth.status.title")}</h2>
       {staleReport && (staleReport.stale_count > 0 || staleReport.missing_count > 0) ? (
         <div className="statusBadge warning" style={{ marginBottom: 8 }}>
-          共 {staleReport.total} 段，其中已修改 {staleSummary.modified} 段，配置变化 {staleSummary.config} 段，缺失{" "}
-          {staleSummary.missing} 段
+          {t("synth.status.staleSummary", { total: staleReport.total, modified: staleSummary.modified, config: staleSummary.config })}{" "}
+          {t("synth.status.segmentsCount", { count: staleSummary.missing })}
         </div>
       ) : null}
       <div className="taskStatusGrid">
         <div className="statRow taskStatusCell">
-          <span>状态</span>
+          <span>{t("synth.status.state")}</span>
           <strong>{modelStatus || status}</strong>
         </div>
         <div className="statRow taskStatusCell">
-          <span>连接</span>
+          <span>{t("synth.status.connection")}</span>
           <strong>{connectionStatus}</strong>
         </div>
         <div className="statRow taskStatusCell">
-          <span>进度</span>
+          <span>{t("synth.status.progress")}</span>
           <strong style={{ fontFamily: "monospace" }}>
             {progress.current}&thinsp;/&thinsp;{progress.total || totalSegments}
           </strong>
         </div>
         <div className="statRow taskStatusCell">
-          <span>排队位次</span>
-          <strong>{queuePosition > 0 ? `#${queuePosition}` : "运行中/空闲"}</strong>
+          <span>{t("synth.status.queuePosition")}</span>
+          <strong>{queuePosition > 0 ? `#${queuePosition}` : t("synth.status.runningOrIdle")}</strong>
         </div>
         <div className="statRow taskStatusCell">
-          <span>队列长度</span>
+          <span>{t("synth.status.queueLength")}</span>
           <strong>{queuedCount}</strong>
         </div>
         <div className="statRow taskStatusCell">
-          <span>失败段</span>
+          <span>{t("synth.status.failedSegments")}</span>
           <strong>{failedCount}</strong>
         </div>
         <div className="statRow taskStatusCell">
-          <span>重试次数</span>
+          <span>{t("synth.status.retryCount")}</span>
           <strong>{retryCount}</strong>
         </div>
         <div className="statRow taskStatusCell">
-          <span>段并发</span>
+          <span>{t("synth.status.segmentConcurrency")}</span>
           <strong>{effectiveSegmentConcurrency}</strong>
         </div>
         <div className="statRow taskStatusCell taskStatusCellWide">
-          <span>模型</span>
-          <strong>TTS {runtimeStatus?.tts_loaded ? "已加载" : "未加载"} / LLM {runtimeStatus?.llm_loaded ? "已加载" : "未加载"}</strong>
+          <span>{t("synth.status.model")}</span>
+          <strong>TTS {runtimeStatus?.tts_loaded ? t("synth.status.loaded") : t("synth.status.unloaded")} / LLM {runtimeStatus?.llm_loaded ? t("synth.status.loaded") : t("synth.status.unloaded")}</strong>
         </div>
         <div className="statRow taskStatusCell">
-          <span>显存</span>
+          <span>{t("synth.status.vram")}</span>
           <strong>
             App {gpu.process_used_vram_mb ?? gpu.torch_reserved_mb ?? 0} MB / GPU {gpu.system_used_vram_mb ?? gpu.used_vram_mb ?? 0} MB
           </strong>
         </div>
         <div className="statRow taskStatusCell taskStatusCellWide">
-          <span>Task ID</span>
+          <span>{t("synth.status.taskId")}</span>
           <strong style={{ fontFamily: "monospace", fontSize: 11 }}>{taskId || "—"}</strong>
         </div>
       </div>
@@ -116,39 +118,39 @@ export default function SynthesisTaskStatusCard({
       )}
       <div className="controlRow" style={{ marginTop: 8, gap: 8, flexWrap: "wrap" }}>
         <Button variant="secondary" size="sm" disabled={!canResume} onClick={onResume}>
-          继续合成
+          {t("synth.status.resume")}
         </Button>
         <Button variant="secondary" size="sm" disabled={!canRetryFailed} onClick={onRetryFailed}>
-          只重试失败段
+          {t("synth.status.retryFailedOnly")}
         </Button>
         <Button variant="danger" size="sm" disabled={!canCancelQueued} onClick={onCancelTask}>
-          {status === "queued" ? "取消排队" : "停止任务"}
+          {status === "queued" ? t("synth.status.cancelQueue") : t("synth.status.stopTask")}
         </Button>
       </div>
       {fullAudioUrl && (
         <div style={{ display: "flex", gap: 10, marginTop: 4, flexWrap: "wrap" }}>
           <a className="downloadLink" href={fullAudioUrl} target="_blank" rel="noreferrer">
             <Download size={14} />
-            下载当前音频
+            {t("synth.status.downloadCurrent")}
           </a>
           {rawAudioUrl ? (
             <a className="downloadLink" href={rawAudioUrl} target="_blank" rel="noreferrer">
-              下载原始音频
+              {t("synth.status.downloadRaw")}
             </a>
           ) : null}
           {processedAudioUrl ? (
             <a className="downloadLink" href={processedAudioUrl} target="_blank" rel="noreferrer">
-              下载后期处理音频
+              {t("synth.status.downloadProcessed")}
             </a>
           ) : null}
           {subtitleSrtUrl ? (
             <a className="downloadLink" href={subtitleSrtUrl} target="_blank" rel="noreferrer">
-              下载 SRT
+              {t("synth.status.downloadSrt")}
             </a>
           ) : null}
           {subtitleLrcUrl ? (
             <a className="downloadLink" href={subtitleLrcUrl} target="_blank" rel="noreferrer">
-              下载 LRC
+              {t("synth.status.downloadLrc")}
             </a>
           ) : null}
           {currentProject?.id ? (
@@ -158,7 +160,7 @@ export default function SynthesisTaskStatusCard({
               target="_blank"
               rel="noreferrer"
             >
-              下载完整工程 ZIP
+              {t("synth.status.downloadProjectZip")}
             </a>
           ) : null}
         </div>
@@ -166,23 +168,23 @@ export default function SynthesisTaskStatusCard({
       {hasProject ? (
         <details className="listStack" style={{ marginTop: 8 }}>
           <summary className="statRow" style={{ cursor: "pointer", listStyle: "none" }}>
-            <span>扩展导出</span>
+            <span>{t("synth.status.extendedExport")}</span>
             <strong style={{ fontFamily: "monospace", fontSize: 11 }}>
               {audioVariant === "processed" ? "processed" : "raw"}
             </strong>
           </summary>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-            <a className="downloadLink" href={buildExtendedUrl("script", "json")} target="_blank" rel="noreferrer">剧本 JSON</a>
-            <a className="downloadLink" href={buildExtendedUrl("script", "csv")} target="_blank" rel="noreferrer">剧本 CSV</a>
-            <a className="downloadLink" href={buildExtendedUrl("timestamp_manifest", "json")} target="_blank" rel="noreferrer">时间戳 JSON</a>
-            <a className="downloadLink" href={buildExtendedUrl("timestamp_manifest", "csv")} target="_blank" rel="noreferrer">时间戳 CSV</a>
-            <a className="downloadLink" href={buildExtendedUrl("chapters", "json")} target="_blank" rel="noreferrer">章节清单 JSON</a>
-            <a className="downloadLink" href={buildExtendedUrl("chapters", "csv")} target="_blank" rel="noreferrer">章节清单 CSV</a>
-            <a className="downloadLink" href={buildExtendedUrl("metadata", "json", "podcast")} target="_blank" rel="noreferrer">播客元数据</a>
-            <a className="downloadLink" href={buildExtendedUrl("metadata", "json", "audible")} target="_blank" rel="noreferrer">Audible 元数据</a>
-            <a className="downloadLink" href={buildExtendedUrl("ffmetadata", "txt")} target="_blank" rel="noreferrer">FFMetadata</a>
-            <a className="downloadLink" href={buildExtendedUrl("capcut", "csv")} target="_blank" rel="noreferrer">剪映 CSV</a>
-            <a className="downloadLink" href={buildExtendedUrl("premiere_markers", "csv")} target="_blank" rel="noreferrer">PR 标记 CSV</a>
+            <a className="downloadLink" href={buildExtendedUrl("script", "json")} target="_blank" rel="noreferrer">{t("synth.status.extended.scriptJson")}</a>
+            <a className="downloadLink" href={buildExtendedUrl("script", "csv")} target="_blank" rel="noreferrer">{t("synth.status.extended.scriptCsv")}</a>
+            <a className="downloadLink" href={buildExtendedUrl("timestamp_manifest", "json")} target="_blank" rel="noreferrer">{t("synth.status.extended.timestampJson")}</a>
+            <a className="downloadLink" href={buildExtendedUrl("timestamp_manifest", "csv")} target="_blank" rel="noreferrer">{t("synth.status.extended.timestampCsv")}</a>
+            <a className="downloadLink" href={buildExtendedUrl("chapters", "json")} target="_blank" rel="noreferrer">{t("synth.status.extended.chaptersJson")}</a>
+            <a className="downloadLink" href={buildExtendedUrl("chapters", "csv")} target="_blank" rel="noreferrer">{t("synth.status.extended.chaptersCsv")}</a>
+            <a className="downloadLink" href={buildExtendedUrl("metadata", "json", "podcast")} target="_blank" rel="noreferrer">{t("synth.status.extended.podcastMetadata")}</a>
+            <a className="downloadLink" href={buildExtendedUrl("metadata", "json", "audible")} target="_blank" rel="noreferrer">{t("synth.status.extended.audibleMetadata")}</a>
+            <a className="downloadLink" href={buildExtendedUrl("ffmetadata", "txt")} target="_blank" rel="noreferrer">{t("synth.status.extended.ffmetadata")}</a>
+            <a className="downloadLink" href={buildExtendedUrl("capcut", "csv")} target="_blank" rel="noreferrer">{t("synth.status.extended.capcutCsv")}</a>
+            <a className="downloadLink" href={buildExtendedUrl("premiere_markers", "csv")} target="_blank" rel="noreferrer">{t("synth.status.extended.prMarkersCsv")}</a>
           </div>
         </details>
       ) : null}
@@ -193,7 +195,7 @@ export default function SynthesisTaskStatusCard({
           disabled={!rawAudioUrl}
           onClick={() => onAudioVariantChange?.("raw")}
         >
-          播放原始
+          {t("synth.status.playRaw")}
         </Button>
         <Button
           variant={audioVariant === "processed" ? "primary" : "secondary"}
@@ -201,7 +203,7 @@ export default function SynthesisTaskStatusCard({
           disabled={!processedAudioUrl}
           onClick={() => onAudioVariantChange?.("processed")}
         >
-          播放后期处理
+          {t("synth.status.playProcessed")}
         </Button>
       </div>
       {normalizedChapterExports.length ? (
@@ -235,10 +237,10 @@ export default function SynthesisTaskStatusCard({
           disabled={!hasProject}
           onClick={onOpenExportWizard}
         >
-          导出向导
+          {t("synth.status.exportWizard")}
         </Button>
         <Button variant="secondary" size="sm" icon={Upload} onClick={() => archiveInputRef.current?.click()}>
-          导入工程 ZIP
+          {t("synth.status.importProjectZip")}
         </Button>
         <input
           ref={archiveInputRef}
@@ -251,7 +253,7 @@ export default function SynthesisTaskStatusCard({
       {importWarnings?.length ? (
         <div className="statusBadge warning" style={{ marginTop: 10, display: "block", textAlign: "left" }}>
           {importWarnings.map((warning, idx) => (
-            <div key={`${idx}-${warning}`}>导入提示 {idx + 1}: {warning}</div>
+            <div key={`${idx}-${warning}`}>{t("text.importHint")} {idx + 1}: {warning}</div>
           ))}
         </div>
       ) : null}

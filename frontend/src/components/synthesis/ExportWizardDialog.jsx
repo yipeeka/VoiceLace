@@ -3,71 +3,56 @@ import { Archive, CircleAlert, CircleCheckBig, Download } from "lucide-react";
 
 import { Dialog, DialogContent } from "../ui/Dialog";
 import Button from "../ui/Button";
+import { useI18n } from "../../i18n/I18nProvider";
 
 const PRESETS = [
-  {
-    id: "audiobook",
-    title: "听书成品",
-    description: "适合分发收听：音频、章节、元数据、字幕",
-  },
-  {
-    id: "editing",
-    title: "剪辑工程",
-    description: "适合剪映/PR：音频、字幕、标记、时间戳清单",
-  },
-  {
-    id: "backup",
-    title: "备份归档",
-    description: "完整工程归档 ZIP，可后续重新导入",
-  },
-  {
-    id: "data",
-    title: "数据分析",
-    description: "结构化脚本与时间轴清单，便于分析处理",
-  },
+  { id: "audiobook" },
+  { id: "editing" },
+  { id: "backup" },
+  { id: "data" },
 ];
 
-function buildPresetPreview({ presetId, availability }) {
+function buildPresetPreview({ presetId, availability, t }) {
   if (presetId === "backup") {
     return {
-      included: ["完整工程 ZIP（项目/音频/字幕/预设/扩展导出）"],
+      included: [t("synth.export.preview.backupZip")],
       missing: [],
     };
   }
   if (presetId === "audiobook") {
     return {
       included: [
-        "完整音频（WAV/MP3）",
-        "章节清单（JSON）",
-        "播客元数据（Podcast/Audible）",
+        t("synth.export.preview.fullAudio"),
+        t("synth.export.preview.chaptersJson"),
+        t("synth.export.preview.podcastMetadata"),
         "FFMetadata",
       ],
       missing: [
-        !availability.hasSrt ? "字幕 SRT 缺失" : "",
-        !availability.hasProcessedChapters ? "章节音频缺失（先执行后期并设置章节）" : "",
+        !availability.hasSrt ? t("synth.export.missing.srt") : "",
+        !availability.hasProcessedChapters ? t("synth.export.missing.chapterAudio") : "",
       ].filter(Boolean),
     };
   }
   if (presetId === "editing") {
     return {
       included: [
-        "完整音频 WAV",
-        "字幕（SRT/LRC）",
-        "剪映 CSV / PR 标记 CSV",
-        "时间戳清单（JSON/CSV）",
+        t("synth.export.preview.fullAudioWav"),
+        t("synth.export.preview.subtitles"),
+        t("synth.export.preview.capcutPr"),
+        t("synth.export.preview.timestampManifest"),
       ],
       missing: [
-        !availability.hasSrt ? "字幕 SRT 缺失" : "",
-        !availability.hasLrc ? "字幕 LRC 缺失" : "",
+        !availability.hasSrt ? t("synth.export.missing.srt") : "",
+        !availability.hasLrc ? t("synth.export.missing.lrc") : "",
       ].filter(Boolean),
     };
   }
   return {
     included: [
-      "剧本（JSON/CSV）",
-      "时间戳清单（JSON/CSV）",
-      "章节清单（JSON/CSV）",
-      "元数据（Podcast/Audible）",
+      t("synth.export.preview.script"),
+      t("synth.export.preview.timestampManifest"),
+      t("synth.export.preview.chapters"),
+      t("synth.export.preview.metadata"),
     ],
     missing: [],
   };
@@ -80,6 +65,7 @@ export default function ExportWizardDialog({
   currentProject,
   audioVariant = "raw",
 }) {
+  const { t } = useI18n();
   const projectId = currentProject?.id || "";
   const [selectedPreset, setSelectedPreset] = useState("audiobook");
   const [selectedVariant, setSelectedVariant] = useState(audioVariant === "processed" ? "processed" : "raw");
@@ -109,8 +95,8 @@ export default function ExportWizardDialog({
   }, [audioVariant, availability.hasProcessedAudio, availability.hasRawAudio, open]);
 
   const preview = useMemo(
-    () => buildPresetPreview({ presetId: selectedPreset, availability }),
-    [selectedPreset, availability]
+    () => buildPresetPreview({ presetId: selectedPreset, availability, t }),
+    [selectedPreset, availability, t]
   );
 
   const downloadUrl = useMemo(() => {
@@ -126,12 +112,12 @@ export default function ExportWizardDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        title="导出向导"
-        description="选择导出目标，系统会自动打包为单个 ZIP 文件。"
+        title={t("synth.status.exportWizard")}
+        description={t("synth.export.description")}
         className="exportWizardDialog"
       >
         <div className="controlRow" style={{ justifyContent: "space-between", marginBottom: 4 }}>
-          <div className="muted">导出变体</div>
+          <div className="muted">{t("synth.export.variant")}</div>
           <div className="controlRow">
             <Button
               variant={selectedVariant === "raw" ? "primary" : "secondary"}
@@ -160,15 +146,15 @@ export default function ExportWizardDialog({
               className={`statRow statRowButton ${selectedPreset === preset.id ? "active" : ""}`}
               onClick={() => setSelectedPreset(preset.id)}
             >
-              <span>{preset.title}</span>
-              <strong>{preset.description}</strong>
+              <span>{t(`synth.export.preset.${preset.id}.title`)}</span>
+              <strong>{t(`synth.export.preset.${preset.id}.description`)}</strong>
             </button>
           ))}
         </div>
 
         <div className="exportWizardPreview">
           <div className="listStack">
-            <div className="muted">将包含</div>
+            <div className="muted">{t("synth.export.includes")}</div>
             {preview.included.map((item) => (
               <div key={`in-${item}`} className="controlRow exportWizardRow ok">
                 <CircleCheckBig size={14} />
@@ -177,7 +163,7 @@ export default function ExportWizardDialog({
             ))}
           </div>
           <div className="listStack">
-            <div className="muted">缺失/跳过</div>
+            <div className="muted">{t("synth.export.missing")}</div>
             {preview.missing.length ? preview.missing.map((item) => (
               <div key={`miss-${item}`} className="controlRow exportWizardRow warn">
                 <CircleAlert size={14} />
@@ -186,7 +172,7 @@ export default function ExportWizardDialog({
             )) : (
               <div className="controlRow exportWizardRow ok">
                 <CircleCheckBig size={14} />
-                <span>无</span>
+                <span>{t("common.none")}</span>
               </div>
             )}
           </div>
@@ -194,7 +180,7 @@ export default function ExportWizardDialog({
 
         <div className="controlRow" style={{ justifyContent: "flex-end", marginTop: 8 }}>
           <Button variant="secondary" onClick={() => onOpenChange(false)}>
-            关闭
+            {t("common.close")}
           </Button>
           <a
             href={downloadUrl}
@@ -207,7 +193,7 @@ export default function ExportWizardDialog({
               icon={selectedPreset === "backup" ? Archive : Download}
               disabled={!projectId}
             >
-              下载导出包
+              {t("synth.export.downloadPackage")}
             </Button>
           </a>
         </div>

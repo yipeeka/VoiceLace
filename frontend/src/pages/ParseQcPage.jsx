@@ -7,6 +7,7 @@ import Button from "../components/ui/Button";
 import { useProjectStore } from "../stores/useProjectStore";
 import { useScriptStore } from "../stores/useScriptStore";
 import { formatError } from "../utils/errors";
+import { useI18n } from "../i18n/I18nProvider";
 
 const QC_FOCUS_SEGMENTS_KEY = "beautyvoice.qc.focus_segments";
 const QC_FOCUS_SEGMENT_LEGACY_KEY = "beautyvoice.qc.focus_segment_id";
@@ -49,7 +50,19 @@ function extractIssueSegmentIds(issue) {
   return Array.from(new Set(ids));
 }
 
+function resolveIssueTitle(issue, t) {
+  const type = String(issue?.type || "").trim();
+  if (type === "coverage_missing") return t("qc.issueType.coverageMissing");
+  if (type === "coverage_out_of_order") return t("qc.issueType.coverageOutOfOrder");
+  if (type === "character_variant_groups") return t("qc.issueType.characterVariantGroups");
+  if (type === "long_segment") return t("qc.issueType.longSegment");
+  if (type === "duplicate_group") return t("qc.issueType.duplicateGroup");
+  if (type === "possible_missing_segments") return t("qc.issueType.coverageMissing");
+  return issue?.title || issue?.type || "-";
+}
+
 export default function ParseQcPage({ onNavigate }) {
+  const { t, language } = useI18n();
   const { currentProject, parseQcReport, loadProjectParseQc } = useProjectStore();
   const scriptSegments = useScriptStore((state) => state.script?.segments || []);
   const loadProjectScript = useScriptStore((state) => state.loadProjectScript);
@@ -63,7 +76,7 @@ export default function ParseQcPage({ onNavigate }) {
     try {
       await loadProjectParseQc(currentProject.id);
     } catch (err) {
-      setError(formatError("质检加载失败", err));
+      setError(formatError(t("qc.loadFailed"), err));
     } finally {
       setIsLoading(false);
     }
@@ -143,6 +156,20 @@ export default function ParseQcPage({ onNavigate }) {
     onNavigate?.("script");
   }
 
+  function localizeIssueDescription(value) {
+    const raw = String(value || "");
+    if (!raw) return "";
+    if (language === "zh") {
+      return raw
+        .replace(/^Possible missing segments$/i, t("qc.issueType.coverageMissing"))
+        .replace(/^Involved segments:/i, t("qc.issueList.involvedSegments"))
+        .replace(/\bHigh\b/g, t("qc.badge.high"))
+        .replace(/\bMedium\b/g, t("qc.badge.medium"))
+        .replace(/\bLow\b/g, t("qc.badge.low"));
+    }
+    return raw;
+  }
+
   return (
     <div className="pageGrid" style={{ gap: 16 }}>
       <GlassCard>
@@ -150,48 +177,48 @@ export default function ParseQcPage({ onNavigate }) {
           <div className="sectionHeaderLeft">
             <h2 className="cardTitle">
               <ShieldCheck size={16} />
-              解析质检
+              {t("qc.title")}
             </h2>
-            <p className="cardSubtitle">规则告警不会阻断流程，可直接跳转到对应片段处理。</p>
+            <p className="cardSubtitle">{t("qc.subtitle")}</p>
           </div>
           <Button variant="secondary" onClick={() => loadReport()} disabled={isLoading} icon={RefreshCw}>
-            {isLoading ? "刷新中..." : "刷新"}
+            {isLoading ? t("common.refreshing") : t("common.refresh")}
           </Button>
         </div>
         {!currentProject?.id ? (
-          <EmptyState title="请先选择项目" description="回到文本输入页解析后再查看质检结果。" />
+          <EmptyState title={t("qc.empty.selectProjectTitle")} description={t("qc.empty.selectProjectDesc")} />
         ) : (
           <div className="controlRow" style={{ gap: 8, flexWrap: "wrap" }}>
-            <span className="statusBadge default">问题 {summary.issue_count ?? 0}</span>
-            <span className="statusBadge error">高 {summary.high_count ?? 0}</span>
-            <span className="statusBadge warning">中 {summary.medium_count ?? 0}</span>
-            <span className="statusBadge default">低 {summary.low_count ?? 0}</span>
-            <span className="statusBadge default">覆盖率 {(Number(summary.coverage_ratio ?? 0) * 100).toFixed(1)}%</span>
+            <span className="statusBadge default">{t("qc.badge.issues")} {summary.issue_count ?? 0}</span>
+            <span className="statusBadge error">{t("qc.badge.high")} {summary.high_count ?? 0}</span>
+            <span className="statusBadge warning">{t("qc.badge.medium")} {summary.medium_count ?? 0}</span>
+            <span className="statusBadge default">{t("qc.badge.low")} {summary.low_count ?? 0}</span>
+            <span className="statusBadge default">{t("qc.badge.coverage")} {(Number(summary.coverage_ratio ?? 0) * 100).toFixed(1)}%</span>
           </div>
         )}
         {error ? <div className="errorText">{error}</div> : null}
       </GlassCard>
 
       <GlassCard>
-        <h2 className="cardTitle">指标</h2>
+        <h2 className="cardTitle">{t("qc.metrics.title")}</h2>
         <div className="listStack">
-          <div className="statRow"><span>原文字符</span><strong>{metrics.source_char_count ?? 0}</strong></div>
-          <div className="statRow"><span>片段数</span><strong>{metrics.segment_count ?? 0}</strong></div>
-          <div className="statRow"><span>疑似漏段</span><strong>{metrics.coverage_missing_count ?? 0}</strong></div>
-          <div className="statRow"><span>顺序异常</span><strong>{metrics.coverage_out_of_order_count ?? 0}</strong></div>
-          <div className="statRow"><span>角色变体组</span><strong>{metrics.character_variant_group_count ?? 0}</strong></div>
-          <div className="statRow"><span>超长片段</span><strong>{metrics.long_segment_count ?? 0}</strong></div>
-          <div className="statRow"><span>重复组</span><strong>{metrics.duplicate_group_count ?? 0}</strong></div>
+          <div className="statRow"><span>{t("qc.metrics.sourceChars")}</span><strong>{metrics.source_char_count ?? 0}</strong></div>
+          <div className="statRow"><span>{t("qc.metrics.segmentCount")}</span><strong>{metrics.segment_count ?? 0}</strong></div>
+          <div className="statRow"><span>{t("qc.metrics.missing")}</span><strong>{metrics.coverage_missing_count ?? 0}</strong></div>
+          <div className="statRow"><span>{t("qc.metrics.orderAnomaly")}</span><strong>{metrics.coverage_out_of_order_count ?? 0}</strong></div>
+          <div className="statRow"><span>{t("qc.metrics.variantGroups")}</span><strong>{metrics.character_variant_group_count ?? 0}</strong></div>
+          <div className="statRow"><span>{t("qc.metrics.overlong")}</span><strong>{metrics.long_segment_count ?? 0}</strong></div>
+          <div className="statRow"><span>{t("qc.metrics.duplicateGroups")}</span><strong>{metrics.duplicate_group_count ?? 0}</strong></div>
         </div>
       </GlassCard>
 
       <GlassCard>
         <h2 className="cardTitle">
           <AlertTriangle size={16} />
-          告警列表
+          {t("qc.issueList.title")}
         </h2>
         {!issues.length ? (
-          <EmptyState title="暂无告警" description="当前规则未发现显著风险。" />
+          <EmptyState title={t("qc.issueList.emptyTitle")} description={t("qc.issueList.emptyDesc")} />
         ) : (
           <div className="listStack">
             {issues.map((issue) => {
@@ -203,30 +230,36 @@ export default function ParseQcPage({ onNavigate }) {
                 <div key={issue.id} className="statRow" style={{ alignItems: "flex-start", gap: 10 }}>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1, minWidth: 0 }}>
                     <div className="controlRow" style={{ gap: 8, flexWrap: "wrap" }}>
-                      <strong>{issue.title || issue.type}</strong>
-                      <span className={`statusBadge ${severityTone(issue.severity)}`}>{issue.severity || "low"}</span>
+                      <strong>{resolveIssueTitle(issue, t)}</strong>
+                      <span className={`statusBadge ${severityTone(issue.severity)}`}>
+                        {normalizeSeverity(issue.severity) === "high"
+                          ? t("qc.badge.high")
+                          : normalizeSeverity(issue.severity) === "medium"
+                            ? t("qc.badge.medium")
+                            : t("qc.badge.low")}
+                      </span>
                     </div>
-                    <span className="muted" style={{ wordBreak: "break-word" }}>{issue.description || ""}</span>
-                    {segmentIds.length ? <span className="muted">涉及片段：{formatSegmentList(segmentIds, 6)}</span> : null}
+                    <span className="muted" style={{ wordBreak: "break-word" }}>{localizeIssueDescription(issue.description || "")}</span>
+                    {segmentIds.length ? <span className="muted">{t("qc.issueList.involvedSegments")} {formatSegmentList(segmentIds, 6)}</span> : null}
                     {missingItems.length ? (
                       <div className="listStack" style={{ marginTop: 6 }}>
                         {missingItems.slice(0, 4).map((item) => (
                           <div key={`${issue.id}-${item.segment_id}`} style={{ border: "1px solid var(--border-subtle)", borderRadius: 8, padding: 8 }}>
                             <div className="controlRow" style={{ justifyContent: "space-between", gap: 8 }}>
-                              <strong style={{ fontSize: 12 }}>片段 {formatSegmentTag(item.segment_id)}</strong>
-                              <span className="muted" style={{ fontSize: 12 }}>相似度 {(Number(item.similarity || 0) * 100).toFixed(1)}%</span>
+                              <strong style={{ fontSize: 12 }}>{t("qc.issueList.segment")} {formatSegmentTag(item.segment_id)}</strong>
+                              <span className="muted" style={{ fontSize: 12 }}>{t("qc.issueList.similarity")} {(Number(item.similarity || 0) * 100).toFixed(1)}%</span>
                             </div>
-                            {item.before_context ? <div className="muted" style={{ fontSize: 12 }}>前文：{item.before_context}</div> : null}
-                            <div className="muted" style={{ fontSize: 12 }}>片段：{item.segment_text || "-"}</div>
-                            {item.after_context ? <div className="muted" style={{ fontSize: 12 }}>后文：{item.after_context}</div> : null}
+                            {item.before_context ? <div className="muted" style={{ fontSize: 12 }}>{t("qc.issueList.contextBefore")} {item.before_context}</div> : null}
+                            <div className="muted" style={{ fontSize: 12 }}>{t("qc.issueList.segment")} {item.segment_text || "-"}</div>
+                            {item.after_context ? <div className="muted" style={{ fontSize: 12 }}>{t("qc.issueList.contextAfter")} {item.after_context}</div> : null}
                             <div style={{ marginTop: 6, fontSize: 12 }}>
-                              <div className="muted">候选原文：{item.source_candidate || "（未找到近似句）"}</div>
-                              {item.source_diff ? <pre className="codeBlock" style={{ marginTop: 4 }}>原文 diff: {item.source_diff}</pre> : null}
-                              {item.segment_diff ? <pre className="codeBlock" style={{ marginTop: 4 }}>片段 diff: {item.segment_diff}</pre> : null}
+                              <div className="muted">{t("qc.issueList.sourceCandidate")} {item.source_candidate || t("qc.issueList.noSimilarSentence")}</div>
+                              {item.source_diff ? <pre className="codeBlock" style={{ marginTop: 4 }}>{t("qc.issueList.sourceDiff")} {item.source_diff}</pre> : null}
+                              {item.segment_diff ? <pre className="codeBlock" style={{ marginTop: 4 }}>{t("qc.issueList.segmentDiff")} {item.segment_diff}</pre> : null}
                             </div>
                             <div className="controlRow" style={{ marginTop: 6 }}>
                               <Button variant="secondary" size="sm" onClick={() => jumpToIssue(issue, item.segment_id)}>
-                                定位此片段
+                                {t("qc.issueList.locateThisSegment")}
                               </Button>
                             </div>
                           </div>
@@ -236,7 +269,7 @@ export default function ParseQcPage({ onNavigate }) {
                   </div>
                   {segmentIds[0] ? (
                     <Button variant="secondary" size="sm" onClick={() => jumpToIssue(issue)}>
-                      定位片段
+                      {t("qc.issueList.locateSegment")}
                     </Button>
                   ) : null}
                 </div>
