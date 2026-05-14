@@ -1302,6 +1302,25 @@ export default function SpeechRecognitionPage({ onNavigate }) {
         projectId: project.id,
         script: scriptPayload,
       });
+      try {
+        if (pendingAudio?.blob) {
+          const sourceAudioForm = new FormData();
+          sourceAudioForm.append("file", pendingAudio.blob, pendingAudio.fileName || "audio.wav");
+          const sourceAudioResponse = await fetch(`${API_BASE_URL}/projects/${project.id}/source-audio`, {
+            method: "POST",
+            body: sourceAudioForm,
+          });
+          if (!sourceAudioResponse.ok) {
+            const message = await readErrorMessage(sourceAudioResponse, `HTTP ${sourceAudioResponse.status}`);
+            throw new Error(message);
+          }
+        }
+      } catch (sourceAudioError) {
+        useUiStore.getState().pushToast({
+          title: `原音频保存失败：${sourceAudioError?.message || sourceAudioError}`,
+          tone: "warning",
+        });
+      }
       await selectProject(project.id, { suppressToast: true });
       await loadProjectScript(project.id);
       setTranslationResult(String(payload?.translated_text || "").trim());

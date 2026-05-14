@@ -11,6 +11,7 @@ from typing import Any, Awaitable, Callable
 
 from backend.models import LlmParseRequest, Project
 from backend.persistence import append_project_event, save_project
+from .project_source_audio_service import save_project_source_audio_mp3
 
 CHUNK_DURATION_MS = 10 * 60 * 1000
 CHUNK_OVERLAP_MS = 2 * 1000
@@ -356,6 +357,16 @@ async def create_project_from_audio(
         warnings_count=len(warnings),
         speaker_labels=speaker_labels,
     )
+    try:
+        save_project_source_audio_mp3(
+            project=project,
+            input_path=audio_path,
+            audio_name=audio_name,
+            output_dir=state.settings.output_dir,
+            segments=effective_segments,
+        )
+    except Exception as exc:
+        warnings.append(f"识别原音频保存失败：{exc}")
     saved = save_project(state.settings.projects_dir, project)
 
     append_project_event(
@@ -372,6 +383,22 @@ async def create_project_from_audio(
             },
         },
     )
+    if saved.audio_assets.source_audio_mp3_relpath:
+        append_project_event(
+            state.settings.projects_dir,
+            saved.id,
+            {
+                "source": "project",
+                "status": saved.status,
+                "event": {
+                    "type": "source_audio_saved",
+                    "message": "已保存裁剪后的识别原音频",
+                    "start_ms": saved.audio_assets.source_audio_start_ms,
+                    "end_ms": saved.audio_assets.source_audio_end_ms,
+                    "duration_ms": saved.audio_assets.source_audio_duration_ms,
+                },
+            },
+        )
     await emit({"type": "project_created", "project_id": saved.id})
     for failed in failed_chunks:
         append_project_event(

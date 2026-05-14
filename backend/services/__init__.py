@@ -26,6 +26,7 @@ from .project_snapshot_service import (
 from .project_import_service import find_project_file_match, reset_imported_audio_assets
 from .project_parse_qc_service import build_project_parse_qc_report
 from .project_maintenance_service import deduplicate_project_file_projects, merge_project_file_shadows
+from .project_source_audio_service import resolve_project_source_audio_path, upload_project_source_audio
 from .project_script_crud_service import (
     add_segment as add_project_segment,
     delete_segment as delete_project_segment,
@@ -50,6 +51,7 @@ from .tts_path_service import (
     project_postprocess_assets_dir,
     project_processed_chapters_dir,
     project_processed_dir,
+    project_source_audio_dir,
     project_segment_waveforms_dir,
     project_segments_dir,
     project_subtitles_dir,
@@ -119,6 +121,8 @@ __all__ = [
     "update_project_voice_assignments",
     "find_project_file_match",
     "build_project_parse_qc_report",
+    "resolve_project_source_audio_path",
+    "upload_project_source_audio",
     "batch_update_project_segments",
     "merge_adjacent_project_segments",
     "merge_project_character",
@@ -135,6 +139,7 @@ __all__ = [
     "project_postprocess_assets_dir",
     "project_processed_chapters_dir",
     "project_processed_dir",
+    "project_source_audio_dir",
     "project_segment_waveforms_dir",
     "project_segments_dir",
     "project_subtitles_dir",

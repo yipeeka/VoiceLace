@@ -35,6 +35,10 @@ def project_postprocess_assets_dir(*, output_dir: Path, project_id: str) -> Path
     return project_output_root(output_dir=output_dir, project_id=project_id) / "postprocess_assets"
 
 
+def project_source_audio_dir(*, output_dir: Path, project_id: str) -> Path:
+    return project_output_root(output_dir=output_dir, project_id=project_id) / "source_audio"
+
+
 def project_segment_waveforms_dir(*, output_dir: Path, project_id: str) -> Path:
     return project_waveforms_dir(output_dir=output_dir, project_id=project_id) / "segments"
 

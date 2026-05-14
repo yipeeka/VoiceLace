@@ -15,6 +15,7 @@ import Button from "../components/ui/Button";
 import { useProjectStore } from "../stores/useProjectStore";
 import { useScriptStore } from "../stores/useScriptStore";
 import { useUiStore } from "../stores/useUiStore";
+import { API_BASE_URL } from "../utils/api";
 import { formatError } from "../utils/errors";
 import { buildProjectFilePayload, saveProjectFile } from "../utils/projectFile";
 import { buildSegmentEditorDraft, createSegmentDraft, normalizeSegmentFromEditorDraft } from "../utils/segmentEditorState";
@@ -127,6 +128,14 @@ function safeDownloadName(value, fallback = "script") {
   return raw.replace(/[\\/:|*?"<>]/g, "_");
 }
 
+function escapeSelectorValue(value) {
+  const raw = String(value || "");
+  if (globalThis.CSS?.escape) {
+    return globalThis.CSS.escape(raw);
+  }
+  return raw.replace(/["\\]/g, "\\$&");
+}
+
 function buildSrtTextFromSegments(segments) {
   const rows = (Array.isArray(segments) ? segments : [])
     .map((segment) => {
@@ -159,6 +168,7 @@ function SortableSegmentCard({
   segment,
   isEditing,
   isInsertAnchor,
+  isSourceActive,
   draft,
   isFocused,
   qcSeverity,
@@ -213,9 +223,10 @@ function SortableSegmentCard({
       style={{
         ...style,
         ...(qcStyle || {}),
+        ...(isSourceActive ? { outline: "2px solid color-mix(in srgb, var(--accent-primary) 72%, transparent)", outlineOffset: "-2px" } : {}),
         ...(isFocused ? { outline: "1px solid var(--accent-primary)", outlineOffset: "-1px" } : {}),
       }}
-      className={`segmentCard ${isEditing ? "editing" : ""} ${isInsertAnchor ? "insertAnchor" : ""} ${qcSeverity ? `qc-${qcSeverity}` : ""}`}
+      className={`segmentCard ${isEditing ? "editing" : ""} ${isInsertAnchor ? "insertAnchor" : ""} ${isSourceActive ? "sourceActive" : ""} ${qcSeverity ? `qc-${qcSeverity}` : ""}`}
     >
       {/* Drag handle */}
       {canEdit && !isEditing && (
@@ -378,6 +389,7 @@ export default function ScriptEditorPage() {
   } = useScriptStore();
   const fileInputRef = useRef(null);
   const lastProjectIdRef = useRef(null);
+  const segmentListRef = useRef(null);
 
   const [savedScript, setSavedScript] = useState(() => normalizeDraftScript(script));
   const [draftScript, setDraftScript] = useState(() => normalizeDraftScript(script));
@@ -393,6 +405,8 @@ export default function ScriptEditorPage() {
   const [activeSpeakerFilter, setActiveSpeakerFilter] = useState("all");
   const [diffPreviewOpen, setDiffPreviewOpen] = useState(false);
   const [batchToolsOpen, setBatchToolsOpen] = useState(false);
+  const [sourceAudioCurrentTime, setSourceAudioCurrentTime] = useState(0);
+  const [sourceAudioPlaying, setSourceAudioPlaying] = useState(false);
   const setProjectSaveAction = useUiStore((state) => state.setProjectSaveAction);
   const clearProjectSaveAction = useUiStore((state) => state.clearProjectSaveAction);
 
@@ -525,6 +539,36 @@ export default function ScriptEditorPage() {
     () => filterSegmentsBySpeaker(segments, activeSpeakerFilter),
     [segments, activeSpeakerFilter]
   );
+  const sourceAudioAsset = currentProject?.audio_assets || {};
+  const sourceAudioRelpath = String(sourceAudioAsset?.source_audio_mp3_relpath || "");
+  const sourceAudioStartMs = Number.isFinite(Number(sourceAudioAsset?.source_audio_start_ms))
+    ? Number(sourceAudioAsset.source_audio_start_ms)
+    : 0;
+  const sourceAudioEndMs = Number.isFinite(Number(sourceAudioAsset?.source_audio_end_ms))
+    ? Number(sourceAudioAsset.source_audio_end_ms)
+    : 0;
+  const sourceAudioUrl = currentProject?.id && sourceAudioRelpath
+    ? `${API_BASE_URL}/projects/${currentProject.id}/source-audio?asset=${encodeURIComponent(sourceAudioRelpath)}`
+    : "";
+  const sourceAudioAbsoluteMs = sourceAudioStartMs + Math.max(0, Math.round(Number(sourceAudioCurrentTime || 0) * 1000));
+  const sourceActiveSegmentId = useMemo(() => {
+    if (!sourceAudioUrl || !sourceAudioPlaying) {
+      return "";
+    }
+    const active = (segments || [])
+      .map((segment) => {
+        const startMs = Number(segment?.source_start_ms);
+        const endMs = Number(segment?.source_end_ms);
+        if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs < 0 || endMs <= startMs) {
+          return null;
+        }
+        return { id: segment.id, startMs, endMs };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs)
+      .find((segment) => sourceAudioAbsoluteMs >= segment.startMs && sourceAudioAbsoluteMs < segment.endMs);
+    return active?.id || "";
+  }, [segments, sourceAudioAbsoluteMs, sourceAudioPlaying, sourceAudioUrl]);
   const reportQcHighlightBySegmentId = useMemo(
     () => buildQcHighlightBySegmentId(parseQcReport?.issues),
     [parseQcReport?.issues]
@@ -558,7 +602,7 @@ export default function ScriptEditorPage() {
     if (!focusSegmentId) {
       return;
     }
-    const nodes = document.querySelectorAll("[data-segment-id]");
+    const nodes = segmentListRef.current?.querySelectorAll("[data-segment-id]") || document.querySelectorAll("[data-segment-id]");
     for (const node of nodes) {
       if (node?.getAttribute("data-segment-id") === focusSegmentId) {
         node.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -566,6 +610,28 @@ export default function ScriptEditorPage() {
       }
     }
   }, [focusSegmentId, visibleSegments.length]);
+
+  useEffect(() => {
+    setSourceAudioCurrentTime(0);
+    setSourceAudioPlaying(false);
+  }, [sourceAudioUrl]);
+
+  useEffect(() => {
+    if (!sourceAudioPlaying || !sourceActiveSegmentId || !segmentListRef.current) {
+      return;
+    }
+    const node = segmentListRef.current.querySelector(`[data-segment-id="${escapeSelectorValue(sourceActiveSegmentId)}"]`);
+    if (!node) {
+      return;
+    }
+    const container = segmentListRef.current;
+    const containerRect = container.getBoundingClientRect();
+    const nodeRect = node.getBoundingClientRect();
+    container.scrollTo({
+      top: container.scrollTop + nodeRect.top - containerRect.top,
+      behavior: "smooth",
+    });
+  }, [sourceActiveSegmentId, sourceAudioPlaying]);
 
   useEffect(() => {
     if (activeSpeakerFilter === "all") {
@@ -1079,14 +1145,40 @@ export default function ScriptEditorPage() {
           ) : null}
         </div>
 
+        {sourceAudioUrl ? (
+          <div className="scriptSourceAudioPanel">
+            <div className="scriptSourceAudioMeta">
+              <span className="statusBadge">识别原音频</span>
+              <span className="muted">
+                {formatTimelineMs(sourceAudioStartMs)}
+                {sourceAudioEndMs > sourceAudioStartMs ? ` -> ${formatTimelineMs(sourceAudioEndMs)}` : ""}
+              </span>
+            </div>
+            <audio
+              key={sourceAudioUrl}
+              controls
+              preload="metadata"
+              src={sourceAudioUrl}
+              onTimeUpdate={(event) => setSourceAudioCurrentTime(event.currentTarget.currentTime)}
+              onPlay={(event) => {
+                setSourceAudioCurrentTime(event.currentTarget.currentTime);
+                setSourceAudioPlaying(true);
+              }}
+              onPause={() => setSourceAudioPlaying(false)}
+              onEnded={() => setSourceAudioPlaying(false)}
+            />
+          </div>
+        ) : null}
+
         {visibleSegments.length ? (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             <SortableContext items={visibleSegments.map((s) => s.id)} strategy={verticalListSortingStrategy}>
-              <div className="listStack">
+              <div className="listStack scriptSegmentScrollList" ref={segmentListRef}>
                 {visibleSegments.map((segment) => (
                   <SortableSegmentCard
                     key={segment.id}
                     segment={segment}
+                    isSourceActive={sourceActiveSegmentId === segment.id}
                     isFocused={focusSegmentId === segment.id}
                     qcSeverity={effectiveQcHighlightBySegmentId[segment.id] || ""}
                     isEditing={editingId === segment.id}

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import logging
+import shutil
+import tempfile
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from backend.models import (
@@ -42,11 +45,13 @@ from backend.services import (
     merge_project_character,
     merge_project_file_shadows as merge_project_file_shadows_service,
     rename_project_character,
+    resolve_project_source_audio_path,
     reorder_project_script,
     update_project_script,
     update_project_record,
     update_project_segment,
     update_project_voice_assignments,
+    upload_project_source_audio,
     search_replace_project_segments,
     split_project_segment,
     get_project_snapshot,
@@ -165,6 +170,43 @@ async def import_project_archive(file: UploadFile = File(...), state=Depends(get
 @router.get("/{project_id}")
 async def get_project(project_id: str, state=Depends(get_app_state)):
     return get_project_record(project_id, projects_dir=state.settings.projects_dir)
+
+
+@router.post("/{project_id}/source-audio")
+async def upload_source_audio(project_id: str, file: UploadFile = File(...), state=Depends(get_app_state)):
+    suffix = Path(file.filename or "source.wav").suffix or ".wav"
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            temp_path = Path(tmp.name)
+            shutil.copyfileobj(file.file, tmp)
+        return upload_project_source_audio(
+            project_id=project_id,
+            input_path=temp_path,
+            audio_name=file.filename,
+            projects_dir=state.settings.projects_dir,
+            output_dir=state.settings.output_dir,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        if temp_path:
+            temp_path.unlink(missing_ok=True)
+
+
+@router.get("/{project_id}/source-audio")
+async def get_source_audio(project_id: str, state=Depends(get_app_state)):
+    try:
+        path = resolve_project_source_audio_path(
+            project_id=project_id,
+            projects_dir=state.settings.projects_dir,
+            output_dir=state.settings.output_dir,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(path, media_type="audio/mpeg", filename=path.name)
 
 
 @router.put("/{project_id}")
