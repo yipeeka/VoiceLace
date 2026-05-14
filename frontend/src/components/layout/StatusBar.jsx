@@ -166,7 +166,7 @@ export default function StatusBar() {
 
       <div className="statusBarItem" style={{ marginLeft: "auto", border: "none" }}>
         <span style={{ color: "var(--text-muted)", fontSize: 11 }}>
-          {wsStatus === "open" ? "WS 已连接" : wsStatus === "reconnecting" ? "WS 重连中" : "WS 未连接"} · BeautyVoiceTTS v0.1
+          {wsStatus === "open" ? "WS 已连接" : wsStatus === "reconnecting" ? "WS 重连中" : "WS 未连接"} · VoiceLace v0.1
         </span>
       </div>
     </div>

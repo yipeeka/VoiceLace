@@ -1,4 +1,4 @@
-# BeautyVoiceTTS
+# VoiceLace
 
 本项目是一个本地运行的多角色有声书工作台，核心流程是：
 

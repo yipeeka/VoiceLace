@@ -51,7 +51,7 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
               exit={{ opacity: 0, width: 0 }}
               transition={{ duration: 0.2 }}
             >
-              <div className="title">BeautyVoice</div>
+              <div className="title">VoiceLace</div>
               <div className="subtitle">AI 有声书工作台</div>
             </motion.div>
           )}
