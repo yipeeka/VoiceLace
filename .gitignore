@@ -9,5 +9,6 @@ frontend/dist/
 frontend/node_modules/
 
 models/
+docs/
 
 *.log
