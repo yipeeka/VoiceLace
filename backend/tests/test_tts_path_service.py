@@ -20,7 +20,7 @@ from backend.services.tts_path_service import (
 
 class TtsPathServiceTest(unittest.TestCase):
     def test_project_path_builders(self) -> None:
-        output_dir = Path("E:/tmp/output")
+        output_dir = Path("output")
         project_id = "pid-123"
         self.assertEqual(project_output_root(output_dir=output_dir, project_id=project_id), output_dir / "projects" / project_id)
         self.assertEqual(project_segments_dir(output_dir=output_dir, project_id=project_id), output_dir / "projects" / project_id / "segments")

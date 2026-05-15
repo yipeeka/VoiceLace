@@ -1577,9 +1577,10 @@ class ApiSmokeTest(unittest.TestCase):
             self.client.delete(f"/api/v1/projects/{project_id}")
 
     def test_transcribe_missing_file_returns_404(self) -> None:
+        missing_audio_path = self.app_state.settings.voices_dir / "not_exists.wav"
         response = self.client.post(
             "/api/v1/voices/transcribe",
-            json={"audio_path": "E:/softs/BeautyVoiceTTS/backend/data/voices/not_exists.wav"},
+            json={"audio_path": str(missing_audio_path)},
         )
         self.assertEqual(response.status_code, 404)
         body = response.json()

@@ -62,7 +62,7 @@ class AppState:
         self.asr_engine.pyannote_model_id = loaded_config.pyannote_model_id
         self.asr_engine.pyannote_auth_token = loaded_config.pyannote_auth_token
         self.asr_engine.pyannote_device = loaded_config.pyannote_device
-        self.voice_manager = VoiceManager(self.settings.voices_dir)
+        self.voice_manager = VoiceManager(self.settings.voices_dir, project_root=self.settings.base_dir.parent)
         self.tts_queue_lock = asyncio.Lock()
         self.music_task_lock = asyncio.Lock()
         self.music_assist_lock = asyncio.Lock()

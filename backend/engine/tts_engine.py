@@ -224,7 +224,7 @@ class TTSEngine:
             if preset:
                 profile = preset.resolved_omnivoice_profile()
                 if profile.voice_mode == "clone" and profile.ref_audio_path:
-                    kwargs["ref_audio"] = profile.ref_audio_path
+                    kwargs["ref_audio"] = self._resolve_audio_path(profile.ref_audio_path)
                     if profile.ref_text:
                         kwargs["ref_text"] = profile.ref_text
                     # Clone preset-level defaults for inference params.
@@ -326,9 +326,10 @@ class TTSEngine:
                         kwargs["denoise"] = bool(profile.denoise)
 
                 if profile and profile.voice_mode == "clone" and profile.ref_audio_path:
-                    kwargs["reference_wav_path"] = profile.ref_audio_path
+                    resolved_ref_audio_path = self._resolve_audio_path(profile.ref_audio_path)
+                    kwargs["reference_wav_path"] = resolved_ref_audio_path
                     if profile.use_hifi_clone and profile.ref_text:
-                        kwargs["prompt_wav_path"] = profile.ref_audio_path
+                        kwargs["prompt_wav_path"] = resolved_ref_audio_path
                         kwargs["prompt_text"] = profile.ref_text
                 if style_prompt:
                     model_text = f"({style_prompt}){model_text}"
@@ -353,6 +354,12 @@ class TTSEngine:
 
         self._write_mock_silence(output_path)
         return output_path
+
+    def _resolve_audio_path(self, value: str) -> str:
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = settings.base_dir.parent / path
+        return str(path.resolve())
 
     def _sanitize_instruct(self, instruct: str) -> str:
         if not instruct:

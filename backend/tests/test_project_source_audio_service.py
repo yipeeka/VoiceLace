@@ -10,6 +10,9 @@ from backend.persistence import load_project, save_project
 import backend.services.project_source_audio_service as service
 
 
+TEST_OUTPUT_ROOT = Path(__file__).resolve().parents[2] / "tmp_test_outputs"
+
+
 class ProjectSourceAudioServiceTest(unittest.TestCase):
     def test_compute_source_audio_window_uses_current_script_segments(self) -> None:
         segments = [
@@ -28,7 +31,7 @@ class ProjectSourceAudioServiceTest(unittest.TestCase):
             ])
 
     def test_save_project_source_audio_mp3_updates_assets(self) -> None:
-        root = Path("E:/softs/BeautyVoiceTTS/tmp_test_outputs") / f"source-audio-{uuid.uuid4().hex[:8]}"
+        root = TEST_OUTPUT_ROOT / f"source-audio-{uuid.uuid4().hex[:8]}"
         shutil.rmtree(root, ignore_errors=True)
         try:
             output_dir = root / "output"

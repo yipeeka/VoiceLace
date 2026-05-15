@@ -53,6 +53,21 @@ def _is_within(path: Path, root: Path) -> bool:
         return False
 
 
+def _resolve_project_path(path: str | Path, state) -> Path:
+    candidate = Path(str(path)).expanduser()
+    if not candidate.is_absolute():
+        candidate = state.settings.base_dir.parent / candidate
+    return candidate.resolve()
+
+
+def _allowed_reference_audio_roots(state) -> list[Path]:
+    project_root = state.settings.base_dir.parent.resolve()
+    return [
+        state.settings.voices_dir.resolve(),
+        (project_root / "samples").resolve(),
+    ]
+
+
 def _normalize_preset(preset: VoicePreset) -> VoicePreset:
     return preset.model_copy(
         update={
@@ -181,7 +196,7 @@ async def list_presets(state=Depends(get_app_state)):
 @router.post("/presets")
 async def create_preset(payload: VoicePreset, state=Depends(get_app_state)):
     presets = state.voice_manager.list_presets()
-    preset = _normalize_preset(payload.model_copy(update={"id": payload.id or str(uuid4())}))
+    preset = state.voice_manager.normalize_preset_paths(_normalize_preset(payload.model_copy(update={"id": payload.id or str(uuid4())})))
     presets.append(preset)
     state.voice_manager.save_presets(presets)
     return preset
@@ -189,7 +204,7 @@ async def create_preset(payload: VoicePreset, state=Depends(get_app_state)):
 
 @router.put("/presets/{preset_id}")
 async def update_preset(preset_id: str, payload: VoicePreset, state=Depends(get_app_state)):
-    updated = _normalize_preset(payload.model_copy(update={"id": preset_id}))
+    updated = state.voice_manager.normalize_preset_paths(_normalize_preset(payload.model_copy(update={"id": preset_id})))
     presets = [
         updated if preset.id == preset_id else preset
         for preset in state.voice_manager.list_presets()
@@ -228,7 +243,7 @@ async def reorder_presets(payload: ReorderVoicePresetsRequest, state=Depends(get
 
 @router.post("/upload-ref")
 async def upload_reference_audio(file: UploadFile = File(...), state=Depends(get_app_state)):
-    target = state.settings.voices_dir / file.filename
+    target = state.settings.voices_dir / Path(file.filename or "reference.wav").name
     target.write_bytes(await file.read())
     duration = 0
     try:
@@ -245,7 +260,11 @@ async def upload_reference_audio(file: UploadFile = File(...), state=Depends(get
         except Exception:
             duration = 0
     quality_report = analyze_reference_audio(target)
-    return {"file_path": str(target), "duration": duration, "quality_report": quality_report.model_dump(mode="json")}
+    return {
+        "file_path": state.voice_manager.to_storage_path(target),
+        "duration": duration,
+        "quality_report": quality_report.model_dump(mode="json"),
+    }
 
 
 @router.post("/presets/{preset_id}/quality-check")
@@ -276,7 +295,7 @@ async def quality_check_preset(
             if payload and payload.backend == backend_name:
                 raise HTTPException(status_code=400, detail=f"{backend_name} 尚未配置参考音频")
             continue
-        report = analyze_reference_audio(Path(ref_audio_path).expanduser())
+        report = analyze_reference_audio(_resolve_project_path(ref_audio_path, state))
         quality_reports[backend_name] = report
         checked[backend_name] = report.model_dump(mode="json")
 
@@ -381,10 +400,10 @@ async def recommend_presets(payload: VoiceRecommendRequest, state=Depends(get_ap
 
 @router.get("/reference-audio")
 async def get_reference_audio(path: str = Query(...), state=Depends(get_app_state)):
-    audio_path = Path(path).expanduser().resolve()
-    voices_root = state.settings.voices_dir.resolve()
-    if not _is_within(audio_path, voices_root):
-        raise HTTPException(status_code=403, detail="Reference audio path is outside voices directory")
+    audio_path = _resolve_project_path(path, state)
+    allowed_roots = _allowed_reference_audio_roots(state)
+    if not any(_is_within(audio_path, root) for root in allowed_roots):
+        raise HTTPException(status_code=403, detail="Reference audio path is outside allowed reference audio directories")
     if not audio_path.exists() or not audio_path.is_file():
         raise HTTPException(status_code=404, detail=f"Reference audio not found: {audio_path}")
     media_type = mimetypes.guess_type(audio_path.name)[0] or "audio/wav"
@@ -393,7 +412,7 @@ async def get_reference_audio(path: str = Query(...), state=Depends(get_app_stat
 
 @router.post("/transcribe")
 async def transcribe_audio(payload: TranscribeRequest, state=Depends(get_app_state)):
-    path = Path(payload.audio_path).expanduser()
+    path = _resolve_project_path(payload.audio_path, state)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Audio file not found: {path}")
     try:

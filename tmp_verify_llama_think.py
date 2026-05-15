@@ -1,11 +1,12 @@
 import inspect
 import json
+import os
 from pathlib import Path
 
 from llama_cpp import Llama
 
 
-MODEL_PATH = r"D:\ComfyUI_windows_portable\ComfyUI\models\LLM\GGUF\Qwen\Qwen3.5-27B-GGUF\Qwen3.5-27B-UD-IQ3_XXS.gguf"
+MODEL_PATH = os.environ.get("BV_VERIFY_LLAMA_MODEL_PATH", "")
 
 
 def run(enable_thinking: bool) -> None:
@@ -53,6 +54,8 @@ def run(enable_thinking: bool) -> None:
 
 
 if __name__ == "__main__":
+    if not MODEL_PATH:
+        raise SystemExit("Set BV_VERIFY_LLAMA_MODEL_PATH to a local GGUF model path before running.")
     print("model_exists=", Path(MODEL_PATH).exists())
     run(False)
     run(True)
