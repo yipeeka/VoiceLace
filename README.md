@@ -10,6 +10,9 @@ Local-first by default with `llama-cpp-python`, `OmniVoice`, `VoxCPM2`, `Whisper
 > [!WARNING]
 > 项目仍在快速迭代中，建议先按“源码启动”跑通，再切换自己的本地模型和声音预设。  
 > This project is moving quickly. Run the source workflow first, then switch to your own local models and voice presets.
+>
+> 目前仅在 Windows 上完成测试。  
+> This project has only been tested on Windows so far.
 
 ## Features / 功能
 
