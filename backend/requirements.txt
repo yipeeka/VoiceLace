@@ -3,4 +3,20 @@ uvicorn[standard]>=0.30,<1.0
 pydantic>=2.8,<3.0
 python-multipart>=0.0.9,<1.0
 python-dotenv>=1.0,<2.0
+httpx>=0.27,<1.0
+mcp[cli]>=1.27,<2
 pyannote.audio>=4.0,<5.0
+llama-cpp-python @ git+https://github.com/JamePeng/llama-cpp-python
+openai
+torch
+torchaudio
+torchcodec
+diffusers>=0.38.0
+safetensors>=0.8.0rc0
+omnivoice>=0.1.4
+soundfile
+librosa
+openai-whisper
+faster-whisper
+pydub
+voxcpm
