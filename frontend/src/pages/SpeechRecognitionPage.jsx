@@ -1,11 +1,11 @@
-import { FileText, FolderPlus, Languages, Mic, Square, Trash2, Upload, WandSparkles } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import GlassCard from "../components/shared/GlassCard";
+import AsrRecognitionCard from "../components/speech/AsrRecognitionCard";
+import RecognitionPreviewCard from "../components/speech/RecognitionPreviewCard";
+import SpeechProjectToolbarSection from "../components/speech/SpeechProjectToolbarSection";
+import SpeechUtilityTabs from "../components/speech/SpeechUtilityTabs";
 import DubbingProjectTargetDialog from "../components/text/DubbingProjectTargetDialog";
-import ProjectToolbarCard from "../components/text/ProjectToolbarCard";
-import Button from "../components/ui/Button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/Tabs";
 import { useProjectStore } from "../stores/useProjectStore";
 import { useSettingsStore } from "../stores/useSettingsStore";
 import { useScriptStore } from "../stores/useScriptStore";
@@ -20,6 +20,17 @@ import {
   shortProjectId,
   toProjectFileDisplayName,
 } from "../utils/projectToolbar";
+import {
+  buildDubbingProjectName,
+  buildDubbingSegmentsFromPreview,
+  buildTranslatedDubbingScriptPayload,
+  collapseWhisperSegments,
+  formatTimestamp,
+  renderCuesAsSrt,
+  stripTimelineText,
+  getDubbingTaskLabel,
+  validateEditedSubtitleSrt,
+} from "../utils/speechRecognitionFormat";
 import { runTaskChannel } from "../utils/taskChannel";
 import { appendSpeechText, replaceSpeechText } from "../utils/speechText";
 
@@ -183,83 +194,6 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     });
   }, [alignments, speakerMap]);
 
-  const formatTimestamp = useCallback((ms) => {
-    const total = Math.max(0, Number(ms || 0));
-    const hh = Math.floor(total / 3600000);
-    const mm = Math.floor((total % 3600000) / 60000);
-    const ss = Math.floor((total % 60000) / 1000);
-    const mmm = Math.floor(total % 1000);
-    const pad2 = (v) => String(v).padStart(2, "0");
-    const pad3 = (v) => String(v).padStart(3, "0");
-    return `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}.${pad3(mmm)}`;
-  }, []);
-
-  const formatSrtTimestamp = useCallback((ms) => formatTimestamp(ms).replace(".", ","), [formatTimestamp]);
-
-  const renderCuesAsSrt = useCallback((cues) => (Array.isArray(cues) ? cues : [])
-    .map((cue, index) => {
-      const text = String(cue?.raw_text || cue?.text || "").trim();
-      const speaker = String(cue?.speaker || "").trim();
-      const body = speaker && speaker !== "narrator" && !/^\s*[^：:\n]{1,40}\s*[：:]/.test(text)
-        ? `${speaker}：${text}`
-        : text;
-      return [
-        String(index + 1),
-        `${formatSrtTimestamp(cue?.start_ms)} --> ${formatSrtTimestamp(cue?.end_ms)}`,
-        body,
-      ].join("\n");
-    })
-    .join("\n\n"), [formatSrtTimestamp]);
-
-  const parseTimestampMs = useCallback((value) => {
-    const raw = String(value || "").trim().replace(",", ".");
-    const match = raw.match(/^(\d{1,2}):(\d{2}):(\d{2})\.(\d{1,3})$/);
-    if (!match) return null;
-    const [, hh, mm, ss, ms] = match;
-    return ((Number(hh) * 60 + Number(mm)) * 60 + Number(ss)) * 1000 + Number(String(ms).padEnd(3, "0").slice(0, 3));
-  }, []);
-
-  const splitSpeakerText = useCallback((value, fallbackSpeaker = "narrator") => {
-    const raw = String(value || "").trim();
-    const match = raw.match(/^\s*([^：:\n]{1,40})\s*[：:]\s*(.+)$/s);
-    if (!match) {
-      return { speaker: fallbackSpeaker || "narrator", text: raw };
-    }
-    const speaker = String(match[1] || "").trim() || fallbackSpeaker || "narrator";
-    const text = String(match[2] || "").trim();
-    return { speaker, text };
-  }, []);
-
-  const validateEditedSubtitleSrt = useCallback((value) => {
-    const text = String(value || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
-    if (!text) {
-      throw new Error("字幕预览为空，请先预览字幕或输入 SRT 内容。");
-    }
-    const blocks = text.split(/\n\s*\n+/).map((block) => block.trim()).filter(Boolean);
-    if (!blocks.length) {
-      throw new Error("未找到可用 SRT 字幕块。");
-    }
-    const timeRe = /^(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})/;
-    blocks.forEach((block, index) => {
-      const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
-      const timeLineIndex = lines.findIndex((line) => timeRe.test(line));
-      if (timeLineIndex < 0) {
-        throw new Error(`第 ${index + 1} 个字幕块缺少有效时间轴。`);
-      }
-      const match = lines[timeLineIndex].match(timeRe);
-      const startMs = parseTimestampMs(match?.[1]);
-      const endMs = parseTimestampMs(match?.[2]);
-      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
-        throw new Error(`第 ${index + 1} 个字幕块时间轴无效，需满足 start < end。`);
-      }
-      const body = lines.slice(timeLineIndex + 1).join("\n").trim();
-      if (!body) {
-        throw new Error(`第 ${index + 1} 个字幕块正文为空。`);
-      }
-    });
-    return `${text}\n`;
-  }, [parseTimestampMs]);
-
   const mappedTranscript = useMemo(() => {
     if (!speakerLabels) return transcript;
     if (!remappedAlignments.length) return transcript;
@@ -290,16 +224,6 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       .join("\n");
   }, [remappedAlignments, formatTimestamp, speakerLabels]);
 
-  const collapseWhisperSegments = useCallback((text) => {
-    const raw = String(text || "").trim();
-    if (!raw) return "";
-    const parts = raw.split(/\r?\n+/).map((item) => item.trim()).filter(Boolean);
-    if (!parts.length) return "";
-    if (parts.length === 1) return parts[0];
-    const hasCjk = /[\u4e00-\u9fff]/.test(raw);
-    return hasCjk ? parts.join("") : parts.join(" ");
-  }, []);
-
   const asrBackendConfigured = asrBackend === "qwen3_crispasr" ? "qwen3_crispasr" : "whisper";
   const asrLanguageOptions = useMemo(() => [
     { value: "auto", label: "自动" },
@@ -317,9 +241,6 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     : (speakerLabels
       ? mappedTranscript
       : (asrBackendConfigured === "whisper" ? collapseWhisperSegments(plainText) : plainText));
-  const stripTimelineText = useCallback((text) => String(text || "")
-    .replace(/\[\d{2}:\d{2}:\d{2}[.,]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[.,]\d{3}\]\s*/g, "")
-    .trim(), []);
   const previewText = editedPreviewText;
   const translationPlainInputText = stripTimelineText(editedPreviewText);
   const canInsert = useMemo(() => Boolean((previewText || "").trim()), [previewText]);
@@ -391,65 +312,11 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   }, []);
 
   const parseEditedPreviewDubbingSegments = useCallback(() => {
-    const usableTimeline = (remappedAlignments || [])
-      .map((item, index) => ({
-        id: String(item?.id || `asr-seg-${index + 1}`),
-        speaker: String(item?.speaker || "narrator").trim() || "narrator",
-        text: String(item?.text || "").trim(),
-        start_ms: Number.isFinite(Number(item?.start_ms)) ? Number(item.start_ms) : null,
-        end_ms: Number.isFinite(Number(item?.end_ms)) ? Number(item.end_ms) : null,
-      }))
-      .filter((item) => item.text && item.start_ms !== null && item.end_ms !== null && item.end_ms > item.start_ms);
-    if (!usableTimeline.length) {
-      throw new Error("请先完成 Whisper 识别并拿到可用时间轴片段。");
-    }
-    const lines = String(editedPreviewText || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    if (!lines.length) {
-      throw new Error("识别预览为空，请先编辑或完成识别。");
-    }
-    const timelineRe = /^\s*\[(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\]\s*(.+)$/s;
-    const hasTimelineLines = lines.some((line) => timelineRe.test(line));
-    if (hasTimelineLines) {
-      return lines.map((line, index) => {
-        const match = line.match(timelineRe);
-        if (!match) {
-          throw new Error(`第 ${index + 1} 行不是有效时间轴格式。`);
-        }
-        const startMs = parseTimestampMs(match[1]);
-        const endMs = parseTimestampMs(match[2]);
-        if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
-          throw new Error(`第 ${index + 1} 行时间轴无效，需满足 start < end。`);
-        }
-        const base = usableTimeline[index] || {};
-        const parsed = splitSpeakerText(match[3], base.speaker || "narrator");
-        if (!parsed.text) {
-          throw new Error(`第 ${index + 1} 行文本为空。`);
-        }
-        return {
-          id: String(base.id || `asr-seg-${index + 1}`),
-          speaker: parsed.speaker,
-          text: parsed.text,
-          start_ms: startMs,
-          end_ms: endMs,
-        };
-      });
-    }
-    if (lines.length !== usableTimeline.length) {
-      throw new Error(`普通文本模式需要 ${usableTimeline.length} 行非空文本，目前为 ${lines.length} 行。请切换“显示时间轴”后按时间轴格式编辑，或保持逐段等行。`);
-    }
-    return lines.map((line, index) => {
-      const base = usableTimeline[index];
-      const parsed = splitSpeakerText(line, base.speaker);
-      if (!parsed.text) {
-        throw new Error(`第 ${index + 1} 行文本为空。`);
-      }
-      return {
-        ...base,
-        speaker: parsed.speaker,
-        text: parsed.text,
-      };
+    return buildDubbingSegmentsFromPreview({
+      alignments: remappedAlignments,
+      previewText: editedPreviewText,
     });
-  }, [editedPreviewText, parseTimestampMs, remappedAlignments, splitSpeakerText]);
+  }, [editedPreviewText, remappedAlignments]);
 
   useEffect(() => {
     if (isQwen3Backend) {
@@ -1193,7 +1060,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     }
     setIsBuildingDubbingProject(true);
     setTranslationError("");
-    const taskLabel = translationMode === "passthrough" ? "直通配音任务排队中" : (translationMode === "polish_only" ? "润色配音任务排队中" : "翻译配音任务排队中");
+    const taskLabel = getDubbingTaskLabel(translationMode);
     setDubbingTask({ taskId: "", status: "queued", stageLabel: taskLabel, processed: 0, total: normalizedAlignments.length, percent: 0, cacheHits: 0 });
     try {
       const response = await fetch(`${API_BASE_URL}/llm/translate-dubbing-segments/task`, {
@@ -1296,10 +1163,11 @@ export default function SpeechRecognitionPage({ onNavigate }) {
         throw new Error("未返回可用分段翻译结果。");
       }
 
-      const audioStem = String(pendingAudio?.fileName || "").replace(/\.[^.]+$/, "");
-      const baseName = (projectName || "").trim() || audioStem || "翻译配音";
-      const modeProjectSuffix = translationMode === "passthrough" ? "直通配音" : (translationMode === "polish_only" ? "润色配音" : "翻译配音");
-      const nextProjectName = `${baseName}-${modeProjectSuffix}`;
+      const nextProjectName = buildDubbingProjectName({
+        projectName,
+        audioFileName: pendingAudio?.fileName,
+        mode: translationMode,
+      });
       const target = await requestDubbingProjectTarget({
         kindLabel: "生成翻译配音项目",
         defaultName: nextProjectName,
@@ -1313,43 +1181,14 @@ export default function SpeechRecognitionPage({ onNavigate }) {
         throw new Error("没有可用项目。");
       }
 
-      const scriptPayload = {
+      const scriptPayload = buildTranslatedDubbingScriptPayload({
+        payload,
         title: target.createNew ? finalProjectName : (target.projectName || project.name || nextProjectName),
-        source_text: String(payload?.translated_text || "").trim(),
-        metadata: {
-          asr_source: true,
-          dubbing_source: true,
-          dubbing_mode: String(payload?.mode || translationMode),
-          dubbing_target_language: String(translationTargetLanguage || "中文"),
-          dubbing_source_backend: String(translationSource || ""),
-          dubbing_segment_count: Number(translatedSegments.length),
-        },
-        characters: [],
-        segments: translatedSegments.map((segment, index) => {
-          const segText = String(segment?.text || "").trim();
-          const sourceText = String(segment?.source_text || "").trim();
-          const startMs = Number.isFinite(Number(segment?.start_ms)) ? Number(segment.start_ms) : null;
-          const endMs = Number.isFinite(Number(segment?.end_ms)) ? Number(segment.end_ms) : null;
-          const durationMs = Number.isFinite(Number(segment?.duration_ms))
-            ? Number(segment.duration_ms)
-            : (startMs !== null && endMs !== null && endMs >= startMs ? endMs - startMs : null);
-          const overrides = segment?.tts_overrides && typeof segment.tts_overrides === "object" ? segment.tts_overrides : {};
-          return {
-            id: String(segment?.id || `dub-seg-${index + 1}`),
-            index,
-            type: "dialogue",
-            speaker: String(segment?.speaker || "narrator"),
-            text: segText,
-            emotion: "neutral",
-            non_verbal: [],
-            tts_overrides: overrides,
-            source_text: sourceText,
-            source_start_ms: startMs,
-            source_end_ms: endMs,
-            source_duration_ms: durationMs,
-          };
-        }),
-      };
+        translationMode,
+        translationSource,
+        translationTargetLanguage,
+        translatedSegments,
+      });
 
       await saveScript({
         projectId: project.id,
@@ -1809,389 +1648,133 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   return (
     <div className="speechPageLayout">
       <div className="speechPageColumn">
-        <GlassCard>
-        <ProjectToolbarCard
+        <SpeechProjectToolbarSection
+          archiveInputRef={archiveInputRef}
           currentProject={currentProject}
           currentProjectMeta={currentProjectMeta}
-          projectOptions={projectOptions}
-          projectName={newProjectName}
-          renameProjectName={renameProjectName}
-          isParsing={isProjectOpsBusy}
-          archiveInputRef={archiveInputRef}
-          projectFileInputRef={projectFileInputRef}
+          importWarnings={importWarnings}
+          isProjectOpsBusy={isProjectOpsBusy}
+          moreMenuItems={moreMenuItems}
+          newProjectName={newProjectName}
+          onCreateProject={handleCreateProject}
+          onImportArchive={handleImportArchive}
+          onOpenProjectFile={handleOpenProjectFile}
+          onOpenProjectFileClick={handleOpenProjectFileClick}
           onProjectNameChange={setNewProjectName}
           onProjectNameKeyDown={(event) => event.key === "Enter" && handleCreateProject()}
+          onRenameProject={handleRenameProject}
           onRenameProjectNameChange={setRenameProjectName}
           onRenameProjectNameKeyDown={(event) => event.key === "Enter" && handleRenameProject()}
           onSelectProject={handleSelectProject}
-          onCreateProject={handleCreateProject}
-          onRenameProject={handleRenameProject}
-          onOpenProjectFileClick={handleOpenProjectFileClick}
-          onProjectFileInputChange={handleOpenProjectFile}
-          onImportArchive={handleImportArchive}
-          moreMenuItems={moreMenuItems}
+          projectFileInputRef={projectFileInputRef}
+          projectOptions={projectOptions}
+          renameProjectName={renameProjectName}
         />
-        {importWarnings?.length ? (
-          <div className="statusBadge warning" style={{ marginTop: 2, display: "block", textAlign: "left" }}>
-            {importWarnings.map((warning, idx) => (
-              <div key={`${idx}-${warning}`}>导入提示 {idx + 1}: {warning}</div>
-            ))}
-          </div>
-        ) : null}
-        </GlassCard>
 
-        <GlassCard>
-        <h2 className="cardTitle">
-          <Mic size={16} />
-          语音识别
-        </h2>
-        <p className="cardSubtitle">支持录音与上传音频，识别结果可直接接入文本输入。</p>
-
-        <div className="muted">ASR 后端：{asrBackendConfigured === "qwen3_crispasr" ? "Qwen3-ASR (CrispASR)" : "Whisper / Faster-Whisper"}</div>
-
-        <div className="editorGrid three" style={{ marginTop: 6 }}>
-          <div className="formGroup">
-            <label className="formLabel">ASR 后端</label>
-            <select
-              className="textInput"
-              value={asrBackendConfigured}
-              onChange={(event) => setAsrBackend(event.target.value)}
-              disabled={isTranscribing || isRecording || isCreatingProject}
-            >
-              <option value="whisper">Whisper / Faster-Whisper</option>
-              <option value="qwen3_crispasr">Qwen3-ASR (CrispASR)</option>
-            </select>
-          </div>
-          <div className="formGroup">
-            <label className="formLabel">识别语言</label>
-            <select
-              className="textInput"
-              value={asrLanguage || "auto"}
-              onChange={(event) => setAsrLanguage(event.target.value)}
-              disabled={isTranscribing || isRecording || isCreatingProject}
-            >
-              {asrLanguageOptions.map((item) => (
-                <option key={item.value} value={item.value}>{item.label}</option>
-              ))}
-            </select>
-          </div>
-          {showTimestampToggle ? (
-            <div className="muted" style={{ alignSelf: "end" }}>
-              Qwen3-ASR 当前为纯识别模式（不提供时间轴/说话人标签）
-            </div>
-          ) : null}
-        </div>
-
-        {!isQwen3Backend ? (
-          <>
-            <label className="controlRow" style={{ cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={speakerLabels}
-                onChange={(event) => setSpeakerLabels(event.target.checked)}
-                disabled={isTranscribing || isRecording || isCreatingProject}
-                style={{ width: 14, height: 14 }}
-              />
-              <span style={{ fontSize: 13 }}>输出说话人标签（说话人1：文本）</span>
-            </label>
-            {speakerLabelHint ? <div className="muted">{speakerLabelHint}</div> : null}
-          </>
-        ) : null}
-
-        <div className="controlRow">
-          <Button variant={isRecording ? "danger" : "primary"} onClick={isRecording ? handleStopRecording : handleStartRecording} disabled={isTranscribing || isCreatingProject} icon={isRecording ? Square : Mic}>
-            {isRecording ? "停止录音" : "开始录音"}
-          </Button>
-          <label className="btn btn-secondary" style={{ cursor: isTranscribing || isCreatingProject ? "not-allowed" : "pointer", opacity: isTranscribing || isCreatingProject ? 0.45 : 1 }}>
-            <Upload size={15} />
-            上传音频
-            <input type="file" accept="audio/*" onChange={handleUpload} disabled={isTranscribing || isRecording || isCreatingProject} style={{ display: "none" }} />
-          </label>
-          <Button variant="primary" onClick={handleRecognize} disabled={isTranscribing || isRecording || isCreatingProject || !pendingAudio?.blob || Boolean(asrUnavailableReason)}>
-            开始识别
-          </Button>
-          <Button variant="danger" onClick={handleAbortRecognize} disabled={!isTranscribing}>
-            终止识别
-          </Button>
-          <Button variant="secondary" onClick={handleUnloadAsr} disabled={isTranscribing || isRecording || isCreatingProject}>
-            卸载 ASR
-          </Button>
-        </div>
-        {asrUnavailableReason ? <div className="statusBadge warning">{asrUnavailableReason}</div> : null}
-
-        {pendingAudio?.url ? (
-          <audio controls preload="metadata" style={{ width: "100%" }} src={pendingAudio.url} />
-        ) : null}
-
-        {isTranscribing ? <div className="statusBadge default">识别中...</div> : null}
-        {isCreatingProject ? <div className="statusBadge default">正在分块转写并创建项目...</div> : null}
-        {backendUsed ? <div className="muted">实际后端：{backendUsed}</div> : null}
-        {modelFiles?.main_model_path ? <div className="muted" title={modelFiles.main_model_path}>模型：{modelFiles.main_model_path}</div> : null}
-        {error ? <div className="errorText">{error}</div> : null}
-        {warnings.length ? (
-          <div className="statusBadge warning" style={{ display: "block", textAlign: "left" }}>
-            {warnings.join(" | ")}
-          </div>
-        ) : null}
-        {projectTask?.chunkProgress?.total ? (
-          <div className="muted">
-            分块进度：{Number(projectTask.chunkProgress.completed || 0)} / {Number(projectTask.chunkProgress.total || 0)}
-            {projectTask.status ? ` · 状态：${projectTask.status}` : ""}
-          </div>
-        ) : null}
-        {projectTask?.warnings?.length ? (
-          <div className="statusBadge warning" style={{ display: "block", textAlign: "left" }}>
-            {projectTask.warnings.join(" | ")}
-          </div>
-        ) : null}
-        {projectTask?.failedChunks?.length ? (
-          <div className="errorText">失败分块：{projectTask.failedChunks.map((item) => `#${item.index + 1}`).join(", ")}</div>
-        ) : null}
-        {projectTask?.parseTaskId ? <div className="muted">自动解析任务：{projectTask.parseTaskId}</div> : null}
-        </GlassCard>
+        <AsrRecognitionCard
+          asrBackendConfigured={asrBackendConfigured}
+          asrLanguage={asrLanguage}
+          asrLanguageOptions={asrLanguageOptions}
+          asrUnavailableReason={asrUnavailableReason}
+          backendUsed={backendUsed}
+          error={error}
+          isCreatingProject={isCreatingProject}
+          isQwen3Backend={isQwen3Backend}
+          isRecording={isRecording}
+          isTranscribing={isTranscribing}
+          modelFiles={modelFiles}
+          onAbortRecognize={handleAbortRecognize}
+          onAsrBackendChange={setAsrBackend}
+          onAsrLanguageChange={setAsrLanguage}
+          onRecognize={handleRecognize}
+          onSpeakerLabelsChange={setSpeakerLabels}
+          onStartRecording={handleStartRecording}
+          onStopRecording={handleStopRecording}
+          onUnloadAsr={handleUnloadAsr}
+          onUpload={handleUpload}
+          pendingAudio={pendingAudio}
+          projectTask={projectTask}
+          showTimestampToggle={showTimestampToggle}
+          speakerLabelHint={speakerLabelHint}
+          speakerLabels={speakerLabels}
+          warnings={warnings}
+        />
       </div>
 
       <div className="speechPageColumn">
-        <GlassCard>
-        <div className="sectionHeader">
-          <h2 className="cardTitle">
-            <WandSparkles size={16} />
-            识别预览
-          </h2>
-          {!isQwen3Backend ? (
-            <label className="controlRow" style={{ cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={showTimeline}
-                onChange={(event) => setShowTimeline(event.target.checked)}
-                disabled={isTranscribing || isRecording || isCreatingProject || !remappedAlignments.length}
-                style={{ width: 14, height: 14 }}
-              />
-              <span style={{ fontSize: 13 }}>显示时间轴</span>
-            </label>
-          ) : null}
-        </div>
-        <textarea
-          className="textArea"
-          style={{ minHeight: 260 }}
-          value={previewText}
-          onChange={(event) => setEditedPreviewText(event.target.value)}
-          placeholder="识别结果将显示在这里。"
+        <RecognitionPreviewCard
+          alignments={remappedAlignments}
+          canInsert={canInsert}
+          isBusy={isTranscribing || isRecording || isCreatingProject}
+          isQwen3Backend={isQwen3Backend}
+          onAppendToText={handleAppendToText}
+          onClearResult={handleClearResult}
+          onPreviewTextChange={setEditedPreviewText}
+          onReplaceText={handleReplaceText}
+          onShowTimelineChange={setShowTimeline}
+          onSpeakerMapEntryChange={updateSpeakerMapEntry}
+          plainText={plainText}
+          previewText={previewText}
+          showTimeline={showTimeline}
+          speakerLabels={speakerLabels}
+          speakerMap={speakerMap}
+          transcript={transcript}
         />
-        {speakerLabels && Array.isArray(alignments) && alignments.length ? (
-          <div className="listStack" style={{ marginTop: 8 }}>
-            <div className="muted">说话人映射（空值会回退原标签，可重名用于合并）</div>
-            <div className="muted">当前预览由分段时间轴实时生成，可直接改右侧目标名。</div>
-            {Object.keys(speakerMap || {}).map((source) => (
-              <div key={source} className="editorGrid two">
-                <div className="muted">{source}</div>
-                <input
-                  className="textInput"
-                  value={speakerMap?.[source] ?? ""}
-                  onChange={(event) => updateSpeakerMapEntry(source, event.target.value)}
-                  placeholder={source}
-                  disabled={isTranscribing || isRecording || isCreatingProject}
-                />
-              </div>
-            ))}
-          </div>
-        ) : null}
-        <div className="controlRow">
-          <Button variant="primary" onClick={handleAppendToText} disabled={!canInsert}>
-            追加到文本输入
-          </Button>
-          <Button variant="secondary" onClick={handleReplaceText} disabled={!canInsert}>
-            替换文本输入
-          </Button>
-          <Button variant="ghost" onClick={handleClearResult} disabled={!transcript && !plainText && !previewText}>
-            清空结果
-          </Button>
-        </div>
-        </GlassCard>
 
-        <GlassCard>
-          <Tabs value={utilityTab} onValueChange={setUtilityTab}>
-            <TabsList>
-              <TabsTrigger value="translate">翻译润色</TabsTrigger>
-              <TabsTrigger value="subtitle">字幕配音</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="translate" className="speechUtilityTabContent">
-              <h2 className="cardTitle speechUtilityTitle"><Languages size={16} /> 翻译润色</h2>
-              <p className="cardSubtitle speechUtilitySubtitle">从识别预览读取文本，按选定来源执行“仅润色”或“翻译+润色”。</p>
-              <div className="editorGrid three">
-                <div className="formGroup">
-                  <label className="formLabel">来源</label>
-                  <select className="textInput" value={translationSource} onChange={(e) => setTranslationSource(e.target.value)} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>
-                    <option value="primary_local">模型1（主模型）</option>
-                    <option value="secondary_local">模型2（小模型）</option>
-                    <option value="openai">OpenAI API</option>
-                    <option value="gemini">Gemini API</option>
-                  </select>
-                </div>
-                <div className="formGroup">
-                  <label className="formLabel">模式</label>
-                  <select className="textInput" value={translationMode} onChange={(e) => setTranslationMode(e.target.value)} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>
-                    <option value="passthrough">直通</option>
-                    <option value="polish_only">仅润色</option>
-                    <option value="translate_polish">翻译+润色</option>
-                  </select>
-                </div>
-                <div className="formGroup">
-                  <label className="formLabel">目标语言</label>
-                  <select className="textInput" value={translationTargetLanguage} onChange={(e) => setTranslationTargetLanguage(e.target.value)} disabled={translationMode !== "translate_polish" || isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>
-                    <option value="中文">中文</option>
-                    <option value="英文">英文</option>
-                    <option value="日文">日文</option>
-                  </select>
-                </div>
-              </div>
-              <div className="controlRow speechUtilityActions">
-                <Button variant="secondary" onClick={handleLoadTranslationEngine} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>加载翻译引擎</Button>
-                <Button variant="secondary" onClick={handleUnloadTranslationEngine} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>卸载翻译引擎</Button>
-                <Button variant="primary" onClick={handleTranslatePolish} disabled={isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject || (translationMode !== "passthrough" && !isTranslationEngineLoaded)}>
-                  {translationMode === "passthrough" ? "直通预览" : "翻译润色"}
-                </Button>
-                <Button variant="primary" icon={FolderPlus} onClick={handleCreateDubbingProject} disabled={!canBuildDubbingProject || isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject}>
-                  {isBuildingDubbingProject ? "创建配音项目中..." : "生成翻译配音项目"}
-                </Button>
-                <Button variant="danger" onClick={handleAbortTranslate} disabled={!isTranslating && !isBuildingDubbingProject}>
-                  {isBuildingDubbingProject ? "终止配音翻译" : "终止翻译"}
-                </Button>
-              </div>
-              <div className="muted">引擎状态：{translationEngineStatus?.loaded ? "已加载" : "未加载"} · 来源：{translationEngineStatus?.source || "未选择"} · 后端：{translationEngineStatus?.backend || "unknown"}</div>
-              {translationEngineStatus?.model_name ? <div className="muted">模型：{translationEngineStatus.model_name}</div> : null}
-              {!isQwen3Backend && translationMode === "passthrough" ? <div className="muted">直通配音会按 Whisper 时间轴分段，并自动写入每段 speed/duration，不调用翻译引擎。</div> : null}
-              {!isQwen3Backend && translationMode !== "passthrough" ? <div className="muted">配音项目会按 Whisper 时间轴分段，并自动写入每段 speed/duration。</div> : null}
-              {isQwen3Backend ? <div className="muted">Qwen3-ASR 当前为纯识别模式，不支持时间轴匹配配音项目创建。</div> : null}
-              {translationEngineStatus?.error ? <div className="errorText">{translationEngineStatus.error}</div> : null}
-              {translationError ? <div className="errorText">{translationError}</div> : null}
-              {isBuildingDubbingProject || dubbingTask.stageLabel ? (
-                <div className="muted">
-                  配音翻译：{dubbingTask.stageLabel || dubbingTask.status || "处理中"}
-                  {dubbingTask.total ? ` · ${dubbingTask.processed}/${dubbingTask.total}` : ""}
-                  {dubbingTask.percent ? ` · ${Math.round(dubbingTask.percent)}%` : ""}
-                  {dubbingTask.cacheHits ? ` · 缓存命中 ${dubbingTask.cacheHits}` : ""}
-                </div>
-              ) : null}
-              <textarea className="textArea" style={{ minHeight: 220 }} value={translationResult} onChange={(event) => setTranslationResult(event.target.value)} placeholder="翻译润色结果将显示在这里。" />
-              <div className="controlRow">
-                <Button variant="primary" onClick={handleAppendTranslationToText} disabled={!canInsertTranslation}>追加到文本输入</Button>
-                <Button variant="secondary" onClick={handleReplaceTranslationToText} disabled={!canInsertTranslation}>替换文本输入</Button>
-                <Button variant="ghost" onClick={clearTranslationResult} disabled={!translationResult}>清空翻译结果</Button>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="subtitle" className="speechUtilityTabContent">
-              <h2 className="cardTitle speechUtilityTitle"><FileText size={16} /> 字幕配音</h2>
-              <p className="cardSubtitle speechUtilitySubtitle">从 SRT/ASS 字幕创建带时间轴锁定的配音项目，翻译配音需先翻译并确认预览。</p>
-              <div className="editorGrid three">
-                <div className="formGroup">
-                  <label className="formLabel">字幕文件</label>
-                  <input className="textInput" type="file" accept=".srt,.ass,text/plain" onChange={handleSubtitleFileChange} disabled={isPreviewingSubtitle || isTranslatingSubtitle || isCreatingSubtitleProject} />
-                </div>
-                <div className="formGroup">
-                  <label className="formLabel">项目名称</label>
-                  <input className="textInput" value={subtitleProjectName} onChange={(event) => setSubtitleProjectName(event.target.value)} placeholder="留空按字幕文件命名" disabled={isCreatingSubtitleProject} />
-                </div>
-                <div className="formGroup">
-                  <label className="formLabel">配音模式</label>
-                  <select className="textInput" value={subtitleMode} onChange={(event) => handleSubtitleModeChange(event.target.value)} disabled={isPreviewingSubtitle || isTranslatingSubtitle || isCreatingSubtitleProject}>
-                    <option value="original">原文配音</option>
-                    <option value="translated">翻译配音</option>
-                  </select>
-                </div>
-              </div>
-              <div className="editorGrid three">
-                <div className="formGroup">
-                  <label className="formLabel">双语字幕行</label>
-                  <select className="textInput" value={subtitleLinePolicy} onChange={(event) => handleSubtitleLinePolicyChange(event.target.value)} disabled={isPreviewingSubtitle || isTranslatingSubtitle || isCreatingSubtitleProject}>
-                    <option value="auto">自动</option>
-                    <option value="first_line">第一行</option>
-                    <option value="second_line">第二行</option>
-                    <option value="all">全部</option>
-                  </select>
-                </div>
-                <div className="formGroup">
-                  <label className="formLabel">翻译来源</label>
-                  <select className="textInput" value={translationSource} onChange={(event) => setTranslationSource(event.target.value)} disabled={subtitleMode !== "translated" || isPreviewingSubtitle || isTranslatingSubtitle || isCreatingSubtitleProject}>
-                    <option value="primary_local">模型1（主模型）</option>
-                    <option value="secondary_local">模型2（小模型）</option>
-                    <option value="openai">OpenAI API</option>
-                    <option value="gemini">Gemini API</option>
-                  </select>
-                </div>
-                <div className="formGroup">
-                  <label className="formLabel">目标语言</label>
-                  <select className="textInput" value={translationTargetLanguage} onChange={(event) => setTranslationTargetLanguage(event.target.value)} disabled={subtitleMode !== "translated" || isPreviewingSubtitle || isTranslatingSubtitle || isCreatingSubtitleProject}>
-                    <option value="中文">中文</option>
-                    <option value="英文">英文</option>
-                    <option value="日文">日文</option>
-                  </select>
-                </div>
-              </div>
-              <div className="controlRow speechUtilityActions">
-                <Button variant="secondary" onClick={handleLoadTranslationEngine} disabled={subtitleMode !== "translated" || isLoadingTranslationEngine || isTranslatingSubtitle || isCreatingSubtitleProject}>加载翻译引擎</Button>
-                <Button variant="secondary" onClick={handleUnloadTranslationEngine} disabled={subtitleMode !== "translated" || isLoadingTranslationEngine || isTranslatingSubtitle || isCreatingSubtitleProject}>卸载翻译引擎</Button>
-                <Button variant="secondary" icon={Upload} onClick={() => previewSubtitleFile(subtitleFile, subtitleMode, subtitleLinePolicy, true)} disabled={!subtitleFile || isPreviewingSubtitle || isTranslatingSubtitle || isCreatingSubtitleProject}>{isPreviewingSubtitle ? "解析中..." : "预览字幕"}</Button>
-                <Button variant="primary" onClick={handleTranslateSubtitle} disabled={subtitleMode !== "translated" || !subtitleFile || !isTranslationEngineLoaded || isTranslatingSubtitle || isCreatingSubtitleProject}>{isTranslatingSubtitle ? "翻译中..." : "翻译字幕"}</Button>
-                <Button variant="primary" icon={FolderPlus} onClick={handleCreateSubtitleDubbingProject} disabled={!canCreateSubtitleProject} title={subtitleCreateDisabledReason}>{isCreatingSubtitleProject ? "创建中..." : "创建字幕配音项目"}</Button>
-                <Button variant="danger" onClick={handleAbortSubtitleTranslate} disabled={!isTranslatingSubtitle}>终止字幕翻译</Button>
-              </div>
-              <div className="muted">翻译引擎：{translationEngineStatus?.loaded ? "已加载" : "未加载"} · 来源：{translationEngineStatus?.source || "未选择"} · 后端：{translationEngineStatus?.backend || "unknown"}</div>
-              {subtitleMode === "translated" && ["openai", "gemini"].includes(translationSource) ? <div className="muted">API 翻译预览会并发处理；本地模型为保护模型实例保持串行。</div> : null}
-              {isTranslatingSubtitle || subtitleTask.stageLabel ? (
-                <div className="muted">
-                  字幕翻译：{subtitleTask.stageLabel || subtitleTask.status || "处理中"}
-                  {subtitleTask.total ? ` · ${subtitleTask.processed}/${subtitleTask.total}` : ""}
-                  {subtitleTask.percent ? ` · ${Math.round(subtitleTask.percent)}%` : ""}
-                  {subtitleTask.cacheHits ? ` · 缓存命中 ${subtitleTask.cacheHits}` : ""}
-                </div>
-              ) : null}
-              {subtitleCreateDisabledReason && subtitleFile ? <div className="muted">{subtitleCreateDisabledReason}</div> : null}
-              {subtitleError ? <div className="errorText">{subtitleError}</div> : null}
-              {subtitlePreview ? (
-                <div className="listStack" style={{ marginTop: 10 }}>
-                  <div className="muted">格式：{String(subtitlePreview.format || "").toUpperCase()} · 分段：{subtitlePreview.segment_count || 0} · 说话人：{(subtitlePreview.speakers || []).join("、") || "narrator"}</div>
-                  {(subtitlePreview.warnings || []).slice(0, 4).map((warning, index) => <div key={`subtitle-warning-${index}`} className="muted">提示：{warning}</div>)}
-                  <textarea
-                    className="textArea"
-                    style={{ minHeight: 280 }}
-                    value={editedSubtitleSrtText}
-                    onChange={(event) => {
-                      setEditedSubtitleSrtText(event.target.value);
-                      setSubtitlePreview((current) => {
-                        if (!current?.translated_segments) return current;
-                        return {
-                          ...current,
-                          translated_segments: undefined,
-                          translated_text: "",
-                          cues: (current.cues || []).map((cue) => ({ ...cue, translated_text: "" })),
-                        };
-                      });
-                    }}
-                    placeholder="字幕全文预览将显示在这里，可直接按 SRT 格式编辑。"
-                    disabled={isPreviewingSubtitle || isTranslatingSubtitle || isCreatingSubtitleProject}
-                  />
-                  {(subtitlePreview.cues || []).some((cue) => cue?.translated_text) ? (
-                    <div className="listStack">
-                      {(subtitlePreview.cues || []).map((cue) => (
-                        <div key={cue.id} className="segmentMetaRow" style={{ alignItems: "flex-start" }}>
-                          <span className="statusBadge">{formatTimestamp(cue.start_ms)} - {formatTimestamp(cue.end_ms)}</span>
-                          <span className="muted" style={{ minWidth: 72 }}>{cue.speaker || "narrator"}</span>
-                          <span style={{ flex: 1, whiteSpace: "pre-wrap" }}>
-                            {cue.text}
-                            {cue.translated_text ? <><br /><span className="muted">译文：</span>{cue.translated_text}</> : null}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </TabsContent>
-          </Tabs>
-        </GlassCard>
+        <SpeechUtilityTabs
+          canBuildDubbingProject={canBuildDubbingProject}
+          canCreateSubtitleProject={canCreateSubtitleProject}
+          canInsertTranslation={canInsertTranslation}
+          clearTranslationResult={clearTranslationResult}
+          dubbingTask={dubbingTask}
+          editedSubtitleSrtText={editedSubtitleSrtText}
+          isBuildingDubbingProject={isBuildingDubbingProject}
+          isCreatingProject={isCreatingProject}
+          isCreatingSubtitleProject={isCreatingSubtitleProject}
+          isLoadingTranslationEngine={isLoadingTranslationEngine}
+          isPreviewingSubtitle={isPreviewingSubtitle}
+          isQwen3Backend={isQwen3Backend}
+          isTranslating={isTranslating}
+          isTranslatingSubtitle={isTranslatingSubtitle}
+          isTranslationEngineLoaded={isTranslationEngineLoaded}
+          onAbortSubtitleTranslate={handleAbortSubtitleTranslate}
+          onAbortTranslate={handleAbortTranslate}
+          onAppendTranslationToText={handleAppendTranslationToText}
+          onCreateDubbingProject={handleCreateDubbingProject}
+          onCreateSubtitleDubbingProject={handleCreateSubtitleDubbingProject}
+          onLoadTranslationEngine={handleLoadTranslationEngine}
+          onPreviewSubtitleFile={previewSubtitleFile}
+          onReplaceTranslationToText={handleReplaceTranslationToText}
+          onSubtitleFileChange={handleSubtitleFileChange}
+          onSubtitleLinePolicyChange={handleSubtitleLinePolicyChange}
+          onSubtitleModeChange={handleSubtitleModeChange}
+          onSubtitleProjectNameChange={setSubtitleProjectName}
+          onTranslatePolish={handleTranslatePolish}
+          onTranslateSubtitle={handleTranslateSubtitle}
+          onUnloadTranslationEngine={handleUnloadTranslationEngine}
+          onUtilityTabChange={setUtilityTab}
+          setEditedSubtitleSrtText={setEditedSubtitleSrtText}
+          setSubtitlePreview={setSubtitlePreview}
+          setTranslationMode={setTranslationMode}
+          setTranslationResult={setTranslationResult}
+          setTranslationSource={setTranslationSource}
+          setTranslationTargetLanguage={setTranslationTargetLanguage}
+          subtitleCreateDisabledReason={subtitleCreateDisabledReason}
+          subtitleError={subtitleError}
+          subtitleFile={subtitleFile}
+          subtitleLinePolicy={subtitleLinePolicy}
+          subtitleMode={subtitleMode}
+          subtitlePreview={subtitlePreview}
+          subtitleProjectName={subtitleProjectName}
+          subtitleTask={subtitleTask}
+          translationEngineStatus={translationEngineStatus}
+          translationError={translationError}
+          translationMode={translationMode}
+          translationResult={translationResult}
+          translationSource={translationSource}
+          translationTargetLanguage={translationTargetLanguage}
+          utilityTab={utilityTab}
+        />
       </div>
       <DubbingProjectTargetDialog
         open={dubbingProjectDialog.open}

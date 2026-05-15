@@ -1,8 +1,7 @@
-import { GripVertical, Mic, Plus, Search, Sparkles, Star, Trash2 } from "lucide-react";
+import { Mic, Plus, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
-import { arrayMove, rectSortingStrategy, SortableContext, useSortable } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
+import { PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { arrayMove } from "@dnd-kit/sortable";
 
 import AudioPlayer from "../components/shared/AudioPlayer";
 import CharacterBadge from "../components/shared/CharacterBadge";
@@ -14,346 +13,32 @@ import { ConfirmDialog } from "../components/ui/Dialog";
 import Select from "../components/ui/Select";
 import Slider from "../components/ui/Slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/Tabs";
+import ReferenceAudioPlayer from "../components/voice/ReferenceAudioPlayer";
+import VoicePresetGridSection from "../components/voice/VoicePresetGridSection";
 import { useProjectStore } from "../stores/useProjectStore";
 import { useScriptStore } from "../stores/useScriptStore";
 import { useUiStore } from "../stores/useUiStore";
 import { useVoiceStore } from "../stores/useVoiceStore";
-import { API_ORIGIN } from "../utils/api";
 import { buildProjectFilePayload, saveProjectFile } from "../utils/projectFile";
-
-const GENDER_OPTIONS = [
-  { value: "", label: "未指定" },
-  { value: "female", label: "Female（女声）" },
-  { value: "male", label: "Male（男声）" },
-];
-
-const AGE_OPTIONS = [
-  { value: "",        label: "未指定" },
-  { value: "child",  label: "Child（儿童）" },
-  { value: "young",  label: "Young（青年）" },
-  { value: "middle", label: "Middle-aged（中年）" },
-  { value: "old",    label: "Old（老年）" },
-];
-
-const PITCH_OPTIONS = [
-  { value: "",      label: "未指定" },
-  { value: "low",   label: "Low（低沉）" },
-  { value: "medium", label: "Medium（适中）" },
-  { value: "high",  label: "High（高亢）" },
-];
-
-const STYLE_OPTIONS = [
-  { value: "",          label: "未指定" },
-  { value: "calm",      label: "Calm（平静）" },
-  { value: "gentle",    label: "Gentle（温柔）" },
-  { value: "assertive", label: "Assertive（坚定）" },
-  { value: "lively",    label: "Lively（活泼）" },
-  { value: "whisper",   label: "Whisper（低语）" },
-  { value: "dramatic",  label: "Dramatic（戏剧）" },
-];
-
-const BACKEND_OPTIONS = [
-  { value: "omnivoice", label: "OmniVoice" },
-  { value: "voxcpm2", label: "VoxCPM2" },
-];
-const RECOMMEND_SOURCE_OPTIONS = [
-  { value: "secondary_local", label: "小模型（默认）" },
-  { value: "primary_local", label: "主模型" },
-  { value: "openai", label: "OpenAI API" },
-  { value: "gemini", label: "Gemini API" },
-  { value: "rule", label: "规则推荐（不走 LLM）" },
-];
-const QUALITY_FILTER_OPTIONS = [
-  { value: "all", label: "全部质量" },
-  { value: "pass", label: "质量通过" },
-  { value: "warning", label: "质量告警" },
-  { value: "fail", label: "质量失败" },
-  { value: "unknown", label: "未检测" },
-];
-
-const DEFAULT_OMNIVOICE_PROFILE = {
-  voice_mode: "design",
-  ref_audio_path: "",
-  ref_text: "",
-  gender: "",
-  age: "",
-  pitch: "",
-  style: "",
-  accent: "",
-  dialect: "",
-  custom_instruct: "",
-  speed: 1.0,
-  clone_denoise: true,
-  clone_num_step: 32,
-  clone_guidance_scale: 2.0,
-};
-
-const DEFAULT_VOXCPM2_PROFILE = {
-  voice_mode: "design",
-  design_instruction: "",
-  control_instruction: "",
-  ref_audio_path: "",
-  ref_text: "",
-  use_hifi_clone: false,
-  cfg_value: 2.0,
-  inference_timesteps: 10,
-  denoise: false,
-};
-
-function buildLegacyInstructionFromPreset(preset = {}) {
-  return [
-    preset.gender,
-    preset.age,
-    preset.pitch,
-    preset.style,
-    preset.accent,
-    preset.dialect,
-    preset.custom_instruct,
-  ].filter(Boolean).join(", ");
-}
-
-function resolveOmniProfile(preset = {}) {
-  const profile = preset?.backend_profiles?.omnivoice || {};
-  return {
-    ...DEFAULT_OMNIVOICE_PROFILE,
-    ...profile,
-    voice_mode: profile.voice_mode || preset.voice_mode || "design",
-    ref_audio_path: profile.ref_audio_path ?? preset.ref_audio_path ?? "",
-    ref_text: profile.ref_text ?? preset.ref_text ?? "",
-    gender: profile.gender ?? preset.gender ?? "",
-    age: profile.age ?? preset.age ?? "",
-    pitch: profile.pitch ?? preset.pitch ?? "",
-    style: profile.style ?? preset.style ?? "",
-    accent: profile.accent ?? preset.accent ?? "",
-    dialect: profile.dialect ?? preset.dialect ?? "",
-    custom_instruct: profile.custom_instruct ?? preset.custom_instruct ?? "",
-    speed: Number(profile.speed ?? preset.speed ?? 1),
-    clone_denoise: profile.clone_denoise ?? preset.clone_denoise ?? true,
-    clone_num_step: Number(profile.clone_num_step ?? preset.clone_num_step ?? 32),
-    clone_guidance_scale: Number(profile.clone_guidance_scale ?? preset.clone_guidance_scale ?? 2),
-  };
-}
-
-function resolveVoxProfile(preset = {}) {
-  const profile = preset?.backend_profiles?.voxcpm2 || {};
-  return {
-    ...DEFAULT_VOXCPM2_PROFILE,
-    ...profile,
-    voice_mode: profile.voice_mode || preset.voice_mode || "design",
-    design_instruction: (profile.design_instruction ?? buildLegacyInstructionFromPreset(preset) ?? "").trim(),
-    control_instruction: (profile.control_instruction ?? profile.design_instruction ?? buildLegacyInstructionFromPreset(preset) ?? "").trim(),
-    ref_audio_path: profile.ref_audio_path ?? preset.ref_audio_path ?? "",
-    ref_text: profile.ref_text ?? preset.ref_text ?? "",
-    use_hifi_clone: Boolean(profile.use_hifi_clone ?? false),
-    cfg_value: profile.cfg_value == null ? 2.0 : Number(profile.cfg_value),
-    inference_timesteps: profile.inference_timesteps == null ? 10 : Number(profile.inference_timesteps),
-    denoise: profile.denoise == null ? false : Boolean(profile.denoise),
-  };
-}
-
-function getProfileModeFromPreset(preset = {}, backend = "omnivoice") {
-  const normalized = (backend || "omnivoice").toLowerCase();
-  if (normalized === "voxcpm2") {
-    return preset?.backend_profiles?.voxcpm2?.voice_mode || preset?.voice_mode || "design";
-  }
-  return preset?.backend_profiles?.omnivoice?.voice_mode || preset?.voice_mode || "design";
-}
-
-function getProfileModeFromPayload(payload = {}, backend = "omnivoice") {
-  const normalized = (backend || "omnivoice").toLowerCase();
-  if (normalized === "voxcpm2") {
-    return payload?.backend_profiles?.voxcpm2?.voice_mode || payload?.voice_mode || "design";
-  }
-  return payload?.backend_profiles?.omnivoice?.voice_mode || payload?.voice_mode || "design";
-}
-
-function buildReferenceAudioUrl(path) {
-  const value = (path || "").trim();
-  if (!value) return "";
-  return `${API_ORIGIN}/api/v1/voices/reference-audio?path=${encodeURIComponent(value)}`;
-}
-
-function parseTags(text) {
-  return Array.from(
-    new Set(
-      String(text || "")
-        .split(/[,，\s]+/)
-        .map((item) => item.trim())
-        .filter(Boolean)
-    )
-  );
-}
-
-function resolvePresetQualityStatus(preset, backend = "omnivoice") {
-  const report = preset?.quality_reports?.[backend];
-  return report?.status || "unknown";
-}
-
-function qualityStatusLabel(status) {
-  if (status === "pass") return "质量通过";
-  if (status === "warning") return "质量告警";
-  if (status === "fail") return "质量失败";
-  return "未检测";
-}
-
-function isPlaceholderCharacterDescription(name, description) {
-  const value = String(description || "").replace(/\s+/g, "");
-  const normalizedName = String(name || "").replace(/\s+/g, "");
-  if (!value) return false;
-  return value === "角色档案" || value === `${normalizedName}的角色档案` || value === `${normalizedName}角色档案` || value.endsWith("的角色档案");
-}
-
-function ReferenceAudioPlayer({ audioPath }) {
-  const audioUrl = buildReferenceAudioUrl(audioPath);
-  if (!audioUrl) return null;
-  return <AudioPlayer audioUrl={audioUrl} height={44} compact />;
-}
-
-const emptyForm = {
-  name: "",
-  voice_mode: "design",
-  description: "",
-  gender: "",
-  age: "",
-  pitch: "",
-  style: "",
-  accent: "",
-  dialect: "",
-  custom_instruct: "",
-  tags: [],
-  favorite: false,
-  suitable_role_description: "",
-  quality_reports: {},
-  speed: 1.0,
-  clone_denoise: true,
-  clone_num_step: 32,
-  clone_guidance_scale: 2.0,
-  backend_profiles: {
-    omnivoice: { ...DEFAULT_OMNIVOICE_PROFILE },
-    voxcpm2: { ...DEFAULT_VOXCPM2_PROFILE },
-  },
-};
-
-function SortablePresetCard({
-  preset,
-  displayBackend,
-  isSelected,
-  onToggleSelect,
-  onPreview,
-  onDelete,
-  onUseSlotA,
-  onUseSlotB,
-  onCycleMode,
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: preset.id,
-  });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.75 : 1,
-  };
-  const displayMode = preset?.voice_mode || "auto";
-  const qualityStatus = resolvePresetQualityStatus(preset, displayBackend || "omnivoice");
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={`presetCard ${isSelected ? "selected" : ""}`}
-      onClick={onToggleSelect}
-    >
-      <button
-        type="button"
-        className="primaryButton ghostButton"
-        title="拖拽调整顺序"
-        aria-label="拖拽调整顺序"
-        style={{
-          alignSelf: "flex-end",
-          cursor: isDragging ? "grabbing" : "grab",
-          padding: "4px 6px",
-          border: "1px solid rgba(255,255,255,0.22)",
-          background: "rgba(255,255,255,0.08)",
-        }}
-        onClick={(e) => e.stopPropagation()}
-        {...attributes}
-        {...listeners}
-      >
-        <GripVertical size={14} />
-      </button>
-      <div className="presetAvatar">
-        {preset.gender === "female" ? "♀" : preset.gender === "male" ? "♂" : "🎙"}
-      </div>
-      <div className="presetName" title={preset.name}>{preset.name}</div>
-      <div className="presetMetaRow">
-        {preset.favorite ? <span className="presetFavorite"><Star size={12} fill="currentColor" /> 收藏</span> : null}
-        <span className={`statusBadge ${qualityStatus === "pass" ? "success" : qualityStatus === "warning" ? "warning" : qualityStatus === "fail" ? "error" : "default"}`}>
-          {qualityStatusLabel(qualityStatus)}
-        </span>
-      </div>
-      {Array.isArray(preset.tags) && preset.tags.length ? (
-        <div className="presetTags">
-          {preset.tags.slice(0, 3).map((tag) => (
-            <span key={`${preset.id}-${tag}`} className="presetTag">{tag}</span>
-          ))}
-        </div>
-      ) : null}
-      <button
-        type="button"
-        className={`presetModeBadge presetModeButton ${displayMode}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          onCycleMode?.();
-        }}
-        title="点击切换 voice_mode"
-      >
-        {String(displayMode || "auto").toUpperCase()}
-      </button>
-      <div className="controlRow" style={{ marginTop: 4 }}>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={(e) => {
-            e.stopPropagation();
-            onPreview();
-          }}
-        >
-          试听
-        </Button>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={(e) => {
-            e.stopPropagation();
-            onUseSlotA?.();
-          }}
-        >
-          放入A
-        </Button>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={(e) => {
-            e.stopPropagation();
-            onUseSlotB?.();
-          }}
-        >
-          放入B
-        </Button>
-        <Button
-          variant="danger"
-          size="sm"
-          icon={Trash2}
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-        />
-      </div>
-    </div>
-  );
-}
+import {
+  AGE_OPTIONS,
+  BACKEND_OPTIONS,
+  DEFAULT_OMNIVOICE_PROFILE,
+  DEFAULT_VOXCPM2_PROFILE,
+  GENDER_OPTIONS,
+  PITCH_OPTIONS,
+  RECOMMEND_SOURCE_OPTIONS,
+  STYLE_OPTIONS,
+  emptyForm,
+  getProfileModeFromPayload,
+  getProfileModeFromPreset,
+  isPlaceholderCharacterDescription,
+  parseTags,
+  qualityStatusLabel,
+  resolveOmniProfile,
+  resolvePresetQualityStatus,
+  resolveVoxProfile,
+} from "../utils/voiceConfigData";
 
 export default function VoiceConfigPage() {
   const { currentProject, currentProjectFileHandle, bindCurrentProjectFile, refreshCurrentProject } = useProjectStore();
@@ -1424,118 +1109,50 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
           {error && <div className="errorText">⚠ {error}</div>}
         </GlassCard>
 
-        {/* Preset grid */}
-        <GlassCard>
-          <h2 className="cardTitle">声音预设</h2>
-          <p className="cardSubtitle">可拖拽调整预设顺序，新的顺序会自动保存。</p>
-          <div className="editorGrid">
-            <div className="formGroup">
-              <label className="formLabel">搜索</label>
-              <div style={{ position: "relative" }}>
-                <Search size={14} style={{ position: "absolute", left: 10, top: 10, color: "var(--text-muted)" }} />
-                <input
-                  className="textInput"
-                  style={{ paddingLeft: 32 }}
-                  value={searchKeyword}
-                  onChange={(e) => setSearchKeyword(e.target.value)}
-                  placeholder="按名称、标签、描述搜索"
-                />
-              </div>
-            </div>
-            <div className="formGroup">
-              <label className="formLabel">标签筛选</label>
-              <Select
-                value={tagFilter}
-                onValueChange={(value) => setTagFilter(value)}
-                options={[{ value: "all", label: "全部标签" }, ...allTags.map((tag) => ({ value: tag, label: tag }))]}
-              />
-            </div>
-          </div>
-          <div className="editorGrid">
-            <div className="formGroup">
-              <label className="formLabel">质量筛选</label>
-              <Select
-                value={qualityFilter}
-                onValueChange={(value) => setQualityFilter(value)}
-                options={QUALITY_FILTER_OPTIONS}
-              />
-            </div>
-            <label className="checkRow" style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 24 }}>
-              <input
-                type="checkbox"
-                checked={favoriteOnly}
-                onChange={(e) => setFavoriteOnly(e.target.checked)}
-              />
-              <span>只看收藏</span>
-            </label>
-          </div>
-          {presets.length ? (
-            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handlePresetDragEnd}>
-              <SortableContext items={displayPresetIds} strategy={rectSortingStrategy}>
-                <div className="presetGrid">
-                  {!displayPresets.length ? (
-                    <div className="presetCard" style={{ minHeight: 140, justifyContent: "center", alignItems: "center" }}>
-                      <span className="muted">当前筛选无匹配预设</span>
-                    </div>
-                  ) : null}
-                  {displayPresets.map((preset) => (
-                    <SortablePresetCard
-                      key={preset.id}
-                      preset={preset}
-                      displayBackend={activeBackend}
-                      isSelected={selectedPresetId === preset.id}
-                      onToggleSelect={() => {
-                        if (preset.id === selectedPresetId) {
-                          setSelectedPresetId(null);
-                          setForm({ ...emptyForm });
-                          setActiveBackend("omnivoice");
-                          return;
-                        }
-                        setSelectedPresetId(preset.id);
-                      }}
-                      onDelete={() => setDeleteTarget(preset.id)}
-                      onPreview={() => handlePreviewPreset(preset)}
-                      onUseSlotA={() => {
-                        setPreviewSlotPreset("a", preset.id);
-                        setSelectedPresetId(preset.id);
-                      }}
-                      onUseSlotB={() => {
-                        setPreviewSlotPreset("b", preset.id);
-                        setSelectedPresetId(preset.id);
-                      }}
-                      onCycleMode={() => {
-                        handleCyclePresetVoiceMode(preset).catch((error) => {
-                          useUiStore.getState().pushToast({
-                            title: `切换模式失败：${error?.message || "未知错误"}`,
-                            tone: "error",
-                          });
-                        });
-                      }}
-                    />
-                  ))}
-                  {/* Add new card */}
-                  <div
-                    className="presetCard"
-                    style={{ borderStyle: "dashed", cursor: "pointer", alignItems: "center", justifyContent: "center", minHeight: 140 }}
-                    onClick={() => {
-                      setSelectedPresetId(null);
-                      setForm({ ...emptyForm });
-                      setActiveBackend("omnivoice");
-                    }}
-                  >
-                    <Plus size={24} style={{ color: "var(--text-muted)" }} />
-                    <span className="muted">新建预设</span>
-                  </div>
-                </div>
-              </SortableContext>
-            </DndContext>
-          ) : (
-            <EmptyState
-              title="还没有声音预设"
-              description="在上方表单中填写并点击「创建预设」"
-            />
-          )}
-        </GlassCard>
+        <VoicePresetGridSection
+          activeBackend={activeBackend}
+          allTags={allTags}
+          displayPresetIds={displayPresetIds}
+          displayPresets={displayPresets}
+          favoriteOnly={favoriteOnly}
+          onCyclePresetVoiceMode={(preset) => {
+            handleCyclePresetVoiceMode(preset).catch((error) => {
+              useUiStore.getState().pushToast({
+                title: `切换模式失败：${error?.message || "未知错误"}`,
+                tone: "error",
+              });
+            });
+          }}
+          onDragEnd={handlePresetDragEnd}
+          onFavoriteOnlyChange={setFavoriteOnly}
+          onNewPreset={() => {
+            setSelectedPresetId(null);
+            setForm({ ...emptyForm });
+            setActiveBackend("omnivoice");
+          }}
+          onPreviewPreset={handlePreviewPreset}
+          onQualityFilterChange={setQualityFilter}
+          onSearchKeywordChange={setSearchKeyword}
+          onSelectPreset={(preset) => {
+            if (preset.id === selectedPresetId) {
+              setSelectedPresetId(null);
+              setForm({ ...emptyForm });
+              setActiveBackend("omnivoice");
+              return;
+            }
+            setSelectedPresetId(preset.id);
+          }}
+          onSetDeleteTarget={setDeleteTarget}
+          onSetPreviewSlotPreset={setPreviewSlotPreset}
+          onSetSelectedPresetId={setSelectedPresetId}
+          onTagFilterChange={setTagFilter}
+          presets={presets}
+          qualityFilter={qualityFilter}
+          searchKeyword={searchKeyword}
+          selectedPresetId={selectedPresetId}
+          sensors={sensors}
+          tagFilter={tagFilter}
+        />
       </div>
 
       {/* RIGHT: Assignment + preview */}

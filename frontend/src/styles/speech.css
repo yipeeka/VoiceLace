@@ -1,0 +1,130 @@
+/* Speech recognition page */
+.speechPageLayout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.speechPageColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+@media (max-width: 1080px) {
+  .speechPageLayout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1320px) {
+  .speechPageLayout .editorGrid.three {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 980px) {
+  .speechPageLayout .editorGrid.three {
+    grid-template-columns: 1fr;
+  }
+}
+
+.speechUtilityTabContent {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.speechUtilityTitle {
+  align-items: flex-start;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.speechUtilitySubtitle {
+  margin-top: 0;
+  line-height: 1.55;
+}
+
+.speechUtilityActions {
+  gap: 8px;
+  align-items: stretch;
+}
+
+.speechUtilityActions .btn {
+  min-height: 40px;
+}
+
+.speechAsrGrid {
+  margin-top: 6px;
+}
+
+.speechAsrHint {
+  align-self: end;
+}
+
+.inlineCheckRow {
+  cursor: pointer;
+}
+
+.inlineCheckRow input {
+  width: 14px;
+  height: 14px;
+}
+
+.inlineCheckRow span {
+  font-size: 13px;
+}
+
+.speechPreviewTextArea {
+  min-height: 260px;
+}
+
+.speechSpeakerMapList {
+  margin-top: 8px;
+}
+
+.translationResultTextArea {
+  min-height: 220px;
+}
+
+.subtitlePreviewList {
+  margin-top: 10px;
+}
+
+.subtitlePreviewTextArea {
+  min-height: 280px;
+}
+
+.subtitleCueRow {
+  align-items: flex-start;
+}
+
+.subtitleCueSpeaker {
+  min-width: 72px;
+}
+
+.subtitleCueText {
+  flex: 1;
+  white-space: pre-wrap;
+}
+
+.uploadAudioButton.disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.hiddenFileInput {
+  display: none;
+}
+
+.fullWidthAudio {
+  width: 100%;
+}
+
+.projectImportWarnings {
+  margin-top: 2px;
+  display: block;
+  text-align: left;
+}

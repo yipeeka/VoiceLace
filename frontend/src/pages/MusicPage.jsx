@@ -1,6 +1,7 @@
-import { Bot, ChevronDown, ChevronUp, Download, LoaderCircle, Music, Pause, Pencil, Play, RefreshCw, Save, SendHorizontal, Sparkles, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Download, Music, Pause, Pencil, Play, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import MusicAssistPanel from "../components/music/MusicAssistPanel";
 import AudioPlayer from "../components/shared/AudioPlayer";
 import GlassCard from "../components/shared/GlassCard";
 import StatusBadge from "../components/shared/StatusBadge";
@@ -13,251 +14,32 @@ import { useUiStore } from "../stores/useUiStore";
 import { API_ORIGIN, api, getWsBaseUrl } from "../utils/api";
 import { buildProjectFilePayload, saveProjectFile } from "../utils/projectFile";
 import { getErrorMessage } from "../utils/errors";
-
-const DEFAULT_FORM = {
-  task_type: "text2music",
-  prompt: "",
-  lyrics: "",
-  audio_duration: 30,
-  vocal_language: "unknown",
-  num_inference_steps: 8,
-  seed: "",
-  source_asset_name: "",
-  reference_asset_name: "",
-  bpm: "",
-  keyscale: "",
-  timesignature: "",
-  track_name: "",
-  complete_track_classes: "",
-  repainting_start: "",
-  repainting_end: "",
-  audio_cover_strength: "1.0",
-  guidance_scale: "7.0",
-  shift: "3.0",
-};
-
-const ACTIVE_STATUSES = new Set(["queued", "running", "cancel_requested"]);
-
-const STATUS_META = {
-  idle: { label: "空闲", tone: "default" },
-  queued: { label: "排队中", tone: "warning" },
-  running: { label: "生成中", tone: "warning" },
-  cancel_requested: { label: "取消中", tone: "warning" },
-  done: { label: "已完成", tone: "success" },
-  canceled: { label: "已取消", tone: "default" },
-  error: { label: "失败", tone: "warning" },
-};
-
-const LANGUAGE_OPTIONS = [
-  { value: "unknown", label: "自动/未知" },
-  { value: "zh", label: "中文 (zh)" },
-  { value: "en", label: "英文 (en)" },
-  { value: "ja", label: "日文 (ja)" },
-  { value: "ko", label: "韩文 (ko)" },
-];
-
-const TURBO_SHIFT_OPTIONS = [
-  { value: "1.0", label: "1.0 - 细节更多" },
-  { value: "2.0", label: "2.0 - 平衡" },
-  { value: "3.0", label: "3.0 - 结构更清晰" },
-];
-const BASE_MIN_INFERENCE_STEPS = 32;
-const BASE_MAX_INFERENCE_STEPS = 100;
-const TURBO_DEFAULT_INFERENCE_STEPS = 8;
-const BASE_DEFAULT_INFERENCE_STEPS = 50;
-const MUSIC_CATEGORY_ALL = "all";
-const MUSIC_CATEGORY_UNCATEGORIZED = "uncategorized";
-
-const BPM_OPTIONS = [
-  { value: "", label: "不指定" },
-  { value: "60", label: "60" },
-  { value: "70", label: "70" },
-  { value: "80", label: "80" },
-  { value: "90", label: "90" },
-  { value: "100", label: "100" },
-  { value: "110", label: "110" },
-  { value: "120", label: "120" },
-  { value: "130", label: "130" },
-  { value: "140", label: "140" },
-  { value: "150", label: "150" },
-  { value: "160", label: "160" },
-  { value: "180", label: "180" },
-];
-
-const KEYSCALE_OPTIONS = [
-  { value: "", label: "不指定" },
-  { value: "C major", label: "C major" },
-  { value: "G major", label: "G major" },
-  { value: "D major", label: "D major" },
-  { value: "A major", label: "A major" },
-  { value: "E major", label: "E major" },
-  { value: "B major", label: "B major" },
-  { value: "F# major", label: "F# major" },
-  { value: "F major", label: "F major" },
-  { value: "Bb major", label: "Bb major" },
-  { value: "Eb major", label: "Eb major" },
-  { value: "Ab major", label: "Ab major" },
-  { value: "A minor", label: "A minor" },
-  { value: "E minor", label: "E minor" },
-  { value: "B minor", label: "B minor" },
-  { value: "F# minor", label: "F# minor" },
-  { value: "C# minor", label: "C# minor" },
-  { value: "G# minor", label: "G# minor" },
-  { value: "D minor", label: "D minor" },
-  { value: "G minor", label: "G minor" },
-  { value: "C minor", label: "C minor" },
-  { value: "F minor", label: "F minor" },
-];
-
-const TIMESIGNATURE_OPTIONS = [
-  { value: "", label: "不指定" },
-  { value: "4/4", label: "4/4" },
-  { value: "3/4", label: "3/4" },
-  { value: "2/4", label: "2/4" },
-  { value: "6/8", label: "6/8" },
-  { value: "12/8", label: "12/8" },
-  { value: "5/4", label: "5/4" },
-  { value: "7/8", label: "7/8" },
-];
-
-const ASSIST_SOURCE_OPTIONS = [
-  { value: "secondary_local", label: "小模型（本地）" },
-  { value: "primary_local", label: "主模型（本地）" },
-  { value: "openai", label: "OpenAI API" },
-  { value: "gemini", label: "Gemini API" },
-];
-
-const TASK_TYPE_OPTIONS = [
-  { value: "text2music", label: "Text2Music" },
-  { value: "cover", label: "Cover" },
-  { value: "repaint", label: "Repaint" },
-  { value: "lego", label: "Lego" },
-  { value: "extract", label: "Extract" },
-  { value: "complete", label: "Complete" },
-];
-
-const MUSIC_MODEL_VARIANT_OPTIONS = [
-  { value: "turbo", label: "Turbo" },
-  { value: "base", label: "Base" },
-];
-
-const TRACK_NAME_OPTIONS = [
-  { value: "", label: "选择轨道" },
-  { value: "vocals", label: "vocals" },
-  { value: "drums", label: "drums" },
-  { value: "bass", label: "bass" },
-  { value: "guitar", label: "guitar" },
-  { value: "piano", label: "piano" },
-  { value: "strings", label: "strings" },
-  { value: "other", label: "other" },
-];
-
-function toNumberOrNull(value) {
-  if (value === "" || value === null || value === undefined) {
-    return null;
-  }
-  const num = Number(value);
-  return Number.isFinite(num) ? num : null;
-}
-
-function getDefaultInferenceSteps(modelVariant) {
-  return String(modelVariant || "turbo").toLowerCase() === "base"
-    ? BASE_DEFAULT_INFERENCE_STEPS
-    : TURBO_DEFAULT_INFERENCE_STEPS;
-}
-
-function normalizeSelectOptionValue(value, options, fallback = "") {
-  const raw = String(value ?? "").trim();
-  if (!raw) return fallback;
-  const exact = options.find((item) => item.value === raw);
-  if (exact) return exact.value;
-  const normalized = raw.toLowerCase();
-  const matched = options.find((item) => String(item.value || "").toLowerCase() === normalized);
-  return matched ? matched.value : fallback;
-}
-
-function normalizeNearestNumericOptionValue(value, options, fallback = "") {
-  if (value === "" || value === null || value === undefined) {
-    return fallback;
-  }
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) {
-    return fallback;
-  }
-  const candidates = options
-    .map((item) => Number(item.value))
-    .filter((item) => Number.isFinite(item));
-  if (candidates.length === 0) {
-    return fallback;
-  }
-  const nearest = candidates.reduce((best, item) => {
-    const bestDelta = Math.abs(best - numeric);
-    const itemDelta = Math.abs(item - numeric);
-    if (itemDelta < bestDelta) return item;
-    if (itemDelta === bestDelta && item < best) return item;
-    return best;
-  }, candidates[0]);
-  return String(nearest);
-}
-
-function formatFileSize(size) {
-  const bytes = Number(size || 0);
-  if (bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  let value = bytes;
-  let index = 0;
-  while (value >= 1024 && index < units.length - 1) {
-    value /= 1024;
-    index += 1;
-  }
-  return `${value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)} ${units[index]}`;
-}
-
-function formatDateTime(value) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
-}
-
-function inferAssetNameFromResult(result) {
-  const outputPath = result?.output_path;
-  if (!outputPath) return "";
-  const normalized = String(outputPath).replaceAll("\\", "/");
-  const parts = normalized.split("/");
-  return parts[parts.length - 1] || "";
-}
-
-function parseMusicEvent(data) {
-  if (!data) return null;
-  if (typeof data === "string") {
-    try {
-      return JSON.parse(data);
-    } catch {
-      return null;
-    }
-  }
-  if (typeof data === "object") {
-    return data;
-  }
-  return null;
-}
-
-function normalizeAssetCategories(rawCategories) {
-  const out = [];
-  const seen = new Set();
-  for (const item of Array.isArray(rawCategories) ? rawCategories : []) {
-    const id = String(item?.id || "").trim();
-    const name = String(item?.name || "").trim();
-    if (!id || !name || seen.has(id)) continue;
-    seen.add(id);
-    out.push({ id, name, builtin: Boolean(item?.builtin) });
-  }
-  if (!seen.has(MUSIC_CATEGORY_UNCATEGORIZED)) {
-    out.unshift({ id: MUSIC_CATEGORY_UNCATEGORIZED, name: "未分类", builtin: true });
-  }
-  return out;
-}
+import {
+  ACTIVE_MUSIC_STATUSES,
+  BASE_MAX_INFERENCE_STEPS,
+  BASE_MIN_INFERENCE_STEPS,
+  BPM_OPTIONS,
+  DEFAULT_MUSIC_FORM,
+  KEYSCALE_OPTIONS,
+  LANGUAGE_OPTIONS,
+  MUSIC_CATEGORY_ALL,
+  MUSIC_CATEGORY_UNCATEGORIZED,
+  MUSIC_MODEL_VARIANT_OPTIONS,
+  MUSIC_STATUS_META,
+  TASK_TYPE_OPTIONS,
+  TIMESIGNATURE_OPTIONS,
+  TRACK_NAME_OPTIONS,
+  TURBO_SHIFT_OPTIONS,
+  formatDateTime,
+  formatFileSize,
+  getDefaultInferenceSteps,
+  inferAssetNameFromResult,
+  normalizeAssetCategories,
+  normalizeNearestNumericOptionValue,
+  normalizeSelectOptionValue,
+  parseMusicEvent,
+  toNumberOrNull,
+} from "../utils/musicPageData";
 
 export default function MusicPage({ onNavigate }) {
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -270,7 +52,7 @@ export default function MusicPage({ onNavigate }) {
   const setProjectSaveAction = useUiStore((s) => s.setProjectSaveAction);
   const clearProjectSaveAction = useUiStore((s) => s.clearProjectSaveAction);
 
-  const [form, setForm] = useState(DEFAULT_FORM);
+  const [form, setForm] = useState(DEFAULT_MUSIC_FORM);
   const [taskId, setTaskId] = useState("");
   const [taskStatus, setTaskStatus] = useState("idle");
   const [taskStage, setTaskStage] = useState("");
@@ -319,9 +101,9 @@ export default function MusicPage({ onNavigate }) {
   const uploadInputRef = useRef(null);
   const autoRefreshedTaskIdRef = useRef("");
 
-  const statusMeta = STATUS_META[taskStatus] || STATUS_META.idle;
+  const statusMeta = MUSIC_STATUS_META[taskStatus] || MUSIC_STATUS_META.idle;
   const musicEnabled = systemStatus?.config?.music_enabled !== false;
-  const isMusicTaskActive = ACTIVE_STATUSES.has(taskStatus);
+  const isMusicTaskActive = ACTIVE_MUSIC_STATUSES.has(taskStatus);
   const isAssistBusy = isAssistLoading || isAssistUnloading || isAssistChatting || isAssistFinalizing;
   const taskType = (form.task_type || "text2music").toLowerCase();
   const needsSourceAsset = ["cover", "repaint", "lego", "extract", "complete"].includes(taskType);
@@ -342,7 +124,7 @@ export default function MusicPage({ onNavigate }) {
   const selectedTaskSupported = !supportedTaskTypes || supportedTaskTypes.includes(taskType);
   const shiftMin = 1.0;
   const shiftMax = isTurboModel ? 3.0 : 5.0;
-  const wsUrl = taskId && ACTIVE_STATUSES.has(taskStatus)
+  const wsUrl = taskId && ACTIVE_MUSIC_STATUSES.has(taskStatus)
     ? `${getWsBaseUrl()}/ws/music-progress/${taskId}`
     : "";
 
@@ -758,7 +540,7 @@ export default function MusicPage({ onNavigate }) {
   });
 
   useEffect(() => {
-    if (!taskId || !ACTIVE_STATUSES.has(taskStatus)) {
+    if (!taskId || !ACTIVE_MUSIC_STATUSES.has(taskStatus)) {
       return;
     }
     let stopped = false;
@@ -1004,7 +786,7 @@ export default function MusicPage({ onNavigate }) {
   }
 
   async function handleCancel() {
-    if (!taskId || !ACTIVE_STATUSES.has(taskStatus)) {
+    if (!taskId || !ACTIVE_MUSIC_STATUSES.has(taskStatus)) {
       return;
     }
     setIsCancelling(true);
@@ -1206,87 +988,25 @@ export default function MusicPage({ onNavigate }) {
           </p>
 
           {hideTextMusicInputs ? null : (
-            <div className="musicAssistPanel">
-            <div className="sectionHeader" style={{ marginBottom: 8 }}>
-              <h3 className="cardTitle" style={{ fontSize: 14 }}>
-                <Bot size={16} /> AI 音乐助手（对话模式）
-              </h3>
-              <div className="secondary">
-                {assistStatus?.loaded ? `已加载：${assistStatus?.source || "-"}` : "未加载"}
-              </div>
-            </div>
-            <div className="editorGrid three" style={{ marginBottom: 8 }}>
-              <div className="formGroup">
-                <label className="formLabel">LLM 来源</label>
-                <Select value={assistSource} onValueChange={setAssistSource} options={ASSIST_SOURCE_OPTIONS} />
-              </div>
-              <div className="formGroup">
-                <label className="formLabel">助手状态</label>
-                <div className="secondary" style={{ paddingTop: 9 }}>
-                  {assistStatus?.backend || "-"}
-                </div>
-              </div>
-            </div>
-            <div className="controlRow" style={{ marginBottom: 10 }}>
-              <Button
-                variant="secondary"
-                disabled={isAssistBusy || isMusicTaskActive}
-                onClick={handleAssistLoad}
-              >
-                {isAssistLoading ? <><LoaderCircle size={14} className="spin" /> 加载中...</> : "加载模型"}
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={isAssistBusy || isMusicTaskActive || !assistStatus?.loaded}
-                onClick={handleAssistUnload}
-              >
-                {isAssistUnloading ? <><LoaderCircle size={14} className="spin" /> 卸载中...</> : "卸载模型"}
-              </Button>
-              <Button
-                variant="primary"
-                icon={Sparkles}
-                disabled={isAssistBusy || isMusicTaskActive || !assistStatus?.loaded || assistMessages.length === 0}
-                onClick={handleAssistFinalize}
-              >
-                {isAssistFinalizing ? "填入中..." : "生成并填入"}
-              </Button>
-              <Button
-                variant="ghost"
-                icon={Trash2}
-                disabled={isAssistBusy || isMusicTaskActive}
-                onClick={handleClearAssistConversation}
-              >
-                删除对话
-              </Button>
-            </div>
-            <div className="musicAssistMessages">
-              {assistMessages.map((item, index) => (
-                <div key={`${item.role}-${index}`} className={`musicAssistMessage ${item.role}`}>
-                  <div className="musicAssistRole">{item.role === "assistant" ? "助手" : "你"}</div>
-                  <div className="musicAssistContent">{item.content}</div>
-                </div>
-              ))}
-            </div>
-            <div className="musicAssistComposer">
-              <textarea
-                className="textArea compactArea"
-                value={assistInput}
-                onChange={(event) => setAssistInput(event.target.value)}
-                placeholder="例如：我要做温暖电影感钢琴配乐，30秒，适合女性旁白开场"
-              />
-              <Button
-                variant="secondary"
-                icon={SendHorizontal}
-                disabled={isAssistBusy || isMusicTaskActive || !assistStatus?.loaded || !assistInput.trim()}
-                onClick={handleAssistSend}
-              >
-                {isAssistChatting ? "发送中..." : "发送"}
-              </Button>
-            </div>
-            {assistStatus?.error ? (
-              <div className="errorText">{assistStatus.error}</div>
-            ) : null}
-            </div>
+            <MusicAssistPanel
+              assistInput={assistInput}
+              assistMessages={assistMessages}
+              assistSource={assistSource}
+              assistStatus={assistStatus}
+              isAssistBusy={isAssistBusy}
+              isAssistChatting={isAssistChatting}
+              isAssistFinalizing={isAssistFinalizing}
+              isAssistLoading={isAssistLoading}
+              isAssistUnloading={isAssistUnloading}
+              isMusicTaskActive={isMusicTaskActive}
+              onAssistFinalize={handleAssistFinalize}
+              onAssistLoad={handleAssistLoad}
+              onAssistSend={handleAssistSend}
+              onAssistUnload={handleAssistUnload}
+              onClearAssistConversation={handleClearAssistConversation}
+              onInputChange={setAssistInput}
+              onSourceChange={setAssistSource}
+            />
           )}
 
           <div className="editorGrid three">
@@ -1617,7 +1337,7 @@ export default function MusicPage({ onNavigate }) {
             <div className="controlRow">
               <Button
                 variant="primary"
-                disabled={isSubmitting || !musicEnabled || ACTIVE_STATUSES.has(taskStatus) || !selectedTaskSupported}
+                disabled={isSubmitting || !musicEnabled || ACTIVE_MUSIC_STATUSES.has(taskStatus) || !selectedTaskSupported}
                 onClick={handleGenerate}
               >
                 {isSubmitting ? "提交中..." : "开始生成"}
@@ -1627,14 +1347,14 @@ export default function MusicPage({ onNavigate }) {
             <div className="controlRow">
               <Button
                 variant="primary"
-                disabled={isSubmitting || !musicEnabled || ACTIVE_STATUSES.has(taskStatus) || !selectedTaskSupported}
+                disabled={isSubmitting || !musicEnabled || ACTIVE_MUSIC_STATUSES.has(taskStatus) || !selectedTaskSupported}
                 onClick={handleGenerate}
               >
                 {isSubmitting ? "提交中..." : "开始生成"}
               </Button>
               <Button
                 variant="secondary"
-                disabled={!taskId || !ACTIVE_STATUSES.has(taskStatus) || isCancelling}
+                disabled={!taskId || !ACTIVE_MUSIC_STATUSES.has(taskStatus) || isCancelling}
                 onClick={handleCancel}
               >
                 {isCancelling ? "取消中..." : "取消任务"}

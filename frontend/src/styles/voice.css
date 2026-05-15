@@ -1,0 +1,119 @@
+/* ─────────────────────────────────────────────────────────────
+   VOICE PRESET CARDS
+───────────────────────────────────────────────────────────── */
+.presetGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.presetCard {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  cursor: pointer;
+  transition: border-color var(--duration-fast) ease,
+              box-shadow var(--duration-fast) ease,
+              transform var(--duration-fast) ease;
+}
+
+.presetCard:hover {
+  border-color: rgba(255,255,255,0.16);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.presetCard.selected {
+  border-color: var(--accent-primary);
+  box-shadow: var(--shadow-glow);
+}
+
+.presetAvatar {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--accent-gradient-subtle);
+  border: 1px solid var(--border-accent);
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+}
+
+.presetName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.presetMetaRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 22px;
+}
+
+.presetFavorite {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #f59e0b;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.presetTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.presetTag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--bg-soft) 88%, transparent);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.presetModeBadge {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  width: fit-content;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.presetModeButton {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.presetModeBadge.design {
+  background: var(--accent-secondary-dim);
+  color: var(--accent-secondary);
+}
+.presetModeBadge.clone {
+  background: var(--accent-primary-dim);
+  color: var(--accent-primary);
+}
+.presetModeBadge.auto {
+  background: var(--success-dim);
+  color: var(--success);
+}
