@@ -67,12 +67,12 @@ Starter config / 推荐起步配置：
 
 ```env
 BV_LLM_BACKEND=llama_cpp
-BV_LLM_MODEL_PATH=E:\models\Qwen3.5-9B-UD-Q4_K_XL.gguf
+BV_LLM_MODEL_PATH=.\models\Qwen3.5-9B-UD-Q4_K_XL.gguf
 BV_LLM_CHAT_FORMAT=chatml
 BV_LLM_N_CTX=8192
 BV_LLM_N_GPU_LAYERS=-1
 
-BV_TTS_MODEL_PATH=E:\softs\VoiceLace\models\OmniVoice
+BV_TTS_MODEL_PATH=.\models\OmniVoice
 BV_TTS_DEVICE=cuda:0
 
 BV_ASR_MODEL_PATH=base
@@ -80,15 +80,15 @@ BV_ASR_DEVICE=cuda:0
 
 BV_MUSIC_ENABLED=false
 BV_MUSIC_MODEL_VARIANT=turbo
-BV_MUSIC_TURBO_MODEL_DIR=E:\models\ACE-Step\acestep-v15-xl-turbo-diffusers
-BV_MUSIC_BASE_MODEL_DIR=E:\models\ACE-Step\acestep-v15-xl-base-diffusers
+BV_MUSIC_TURBO_MODEL_DIR=.\models\ACE-Step\acestep-v15-xl-turbo-diffusers
+BV_MUSIC_BASE_MODEL_DIR=.\models\ACE-Step\acestep-v15-xl-base-diffusers
 BV_MUSIC_DEVICE_MODE=cpu_offload
 ```
 
 For higher quality, switch to / 如果更看重效果，可以换成：
 
 ```env
-BV_LLM_MODEL_PATH=E:\models\Qwen3.5-27B-UD-IQ3_XXS.gguf
+BV_LLM_MODEL_PATH=.\models\Qwen3.5-27B-UD-IQ3_XXS.gguf
 ```
 
 ### 3. Start / 启动
@@ -142,7 +142,7 @@ npm run dev
 
 Suggestions / 建议：
 - Use both models through the `llama_cpp` backend. / 两个模型都按 `llama_cpp` 后端使用。
-- Use absolute paths for model files. / 模型文件可放任意位置，填写绝对路径即可。
+- Use either absolute paths or repository-relative paths for model files. / 模型文件既可以放在任意位置并填写绝对路径，也可以直接使用仓库相对路径。
 - If Settings asks for `clip_model_path`, configure `LLM CLIP Model Path`. / 如果系统设置提示需要 `clip_model_path`，请补上 `LLM CLIP 模型路径`。
 
 ---
@@ -207,7 +207,7 @@ BV_SECONDARY_LLM_REPEAT_PENALTY=1.0
 BV_SECONDARY_LLM_MAX_TOKENS=1024
 BV_SECONDARY_ENABLE_LLAMA_CPP_THINK_MODE=false
 
-BV_TTS_MODEL_PATH=E:\softs\VoiceLace\models\OmniVoice
+BV_TTS_MODEL_PATH=.\models\OmniVoice
 BV_VOXCPM_TTS_MODEL_PATH=openbmb/VoxCPM2
 BV_TTS_DEVICE=cuda:0
 
