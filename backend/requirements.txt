@@ -9,6 +9,8 @@ openai
 torch
 torchaudio
 torchcodec
+diffusers>=0.38.0
+safetensors>=0.8.0rc0
 omnivoice>=0.1.4
 soundfile
 librosa

@@ -1,4 +1,4 @@
-# BeautyVoiceTTS 项目打开与最近项目显示方案
+# VoiceLace 项目打开与最近项目显示方案
 
 ## 文档状态
 
@@ -205,7 +205,7 @@
 
 ## 8.1 去掉 ZIP 导入自动改名
 
-在 [project_routes.py](/E:/softs/BeautyVoiceTTS/backend/api/project_routes.py) 中调整：
+在 [project_routes.py](/E:/softs/VoiceLace/backend/api/project_routes.py) 中调整：
 
 - 删除 `imported_project.name = f"{imported_project.name} (Imported)"` 逻辑
 
@@ -278,7 +278,7 @@
 
 ## 9.3 应用启动恢复逻辑
 
-在 [App.jsx](/E:/softs/BeautyVoiceTTS/frontend/src/App.jsx) 中建议补齐：
+在 [App.jsx](/E:/softs/VoiceLace/frontend/src/App.jsx) 中建议补齐：
 
 1. 先 `loadProjects()`
 2. 读取本地 `lastOpenedProjectId`

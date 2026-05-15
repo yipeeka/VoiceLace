@@ -2,7 +2,7 @@
 
 ## 1. 背景与目标
 
-BeautyVoiceTTS 当前已具备完整的文本解析、剧本编辑、声音配置、合成导出链路。VoxCPM2 的支持应作为新的 TTS 合成后端加入，不修改 LLM 解析链路，不修改快速解析 Step3 enrich prompt。
+VoiceLace 当前已具备完整的文本解析、剧本编辑、声音配置、合成导出链路。VoxCPM2 的支持应作为新的 TTS 合成后端加入，不修改 LLM 解析链路，不修改快速解析 Step3 enrich prompt。
 
 本次目标：
 

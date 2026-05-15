@@ -28,7 +28,7 @@ class ProjectSourceAudioServiceTest(unittest.TestCase):
             ])
 
     def test_save_project_source_audio_mp3_updates_assets(self) -> None:
-        root = Path("E:/softs/BeautyVoiceTTS/tmp_test_outputs") / f"source-audio-{uuid.uuid4().hex[:8]}"
+        root = Path("E:/softs/VoiceLace/tmp_test_outputs") / f"source-audio-{uuid.uuid4().hex[:8]}"
         shutil.rmtree(root, ignore_errors=True)
         try:
             output_dir = root / "output"

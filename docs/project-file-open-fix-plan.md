@@ -1,4 +1,4 @@
-# BeautyVoiceTTS 项目文件打开语义修复与改进计划
+# VoiceLace 项目文件打开语义修复与改进计划
 
 ## 文档状态
 
@@ -97,7 +97,7 @@
 
 ## 5.1 后端导入接口语义错误
 
-当前 [project_routes.py](/E:/softs/BeautyVoiceTTS/backend/api/project_routes.py) 中：
+当前 [project_routes.py](/E:/softs/VoiceLace/backend/api/project_routes.py) 中：
 
 - `/projects/import/project-file`
 

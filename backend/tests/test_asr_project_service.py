@@ -55,7 +55,7 @@ class _FakeAsrEngine:
 
 class AsrProjectServiceTest(unittest.TestCase):
     def test_strip_embedded_auto_speaker_prefix_in_text(self) -> None:
-        root = Path("E:/softs/BeautyVoiceTTS/tmp_test_outputs") / f"asr-project-{uuid.uuid4().hex[:8]}"
+        root = Path("E:/softs/VoiceLace/tmp_test_outputs") / f"asr-project-{uuid.uuid4().hex[:8]}"
         shutil.rmtree(root, ignore_errors=True)
         try:
             projects_dir = root / "projects"
@@ -89,7 +89,7 @@ class AsrProjectServiceTest(unittest.TestCase):
             shutil.rmtree(root, ignore_errors=True)
 
     def test_partial_failed_still_creates_project_and_events(self) -> None:
-        root = Path("E:/softs/BeautyVoiceTTS/tmp_test_outputs") / f"asr-project-{uuid.uuid4().hex[:8]}"
+        root = Path("E:/softs/VoiceLace/tmp_test_outputs") / f"asr-project-{uuid.uuid4().hex[:8]}"
         shutil.rmtree(root, ignore_errors=True)
         try:
             projects_dir = root / "projects"
@@ -153,7 +153,7 @@ class AsrProjectServiceTest(unittest.TestCase):
             shutil.rmtree(root, ignore_errors=True)
 
     def test_all_chunks_failed_raises_error(self) -> None:
-        root = Path("E:/softs/BeautyVoiceTTS/tmp_test_outputs") / f"asr-project-{uuid.uuid4().hex[:8]}"
+        root = Path("E:/softs/VoiceLace/tmp_test_outputs") / f"asr-project-{uuid.uuid4().hex[:8]}"
         shutil.rmtree(root, ignore_errors=True)
         try:
             projects_dir = root / "projects"

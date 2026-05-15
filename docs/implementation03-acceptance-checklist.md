@@ -32,7 +32,7 @@ Base URL: `http://localhost:8000/api/v1`
 ### 后端
 
 ```powershell
-E:\softs\BeautyVoiceTTS\.venv\Scripts\python.exe -m unittest backend.tests.test_api_smoke backend.tests.test_task_flows backend.tests.test_persistence
+E:\softs\VoiceLace\.venv\Scripts\python.exe -m unittest backend.tests.test_api_smoke backend.tests.test_task_flows backend.tests.test_persistence
 ```
 
 - [ ] 全部通过
@@ -42,7 +42,7 @@ E:\softs\BeautyVoiceTTS\.venv\Scripts\python.exe -m unittest backend.tests.test_
 ### 前端
 
 ```powershell
-cd E:\softs\BeautyVoiceTTS\frontend
+cd E:\softs\VoiceLace\frontend
 npm test
 ```
 

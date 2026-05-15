@@ -18,8 +18,8 @@
 可选回归命令：
 
 ```powershell
-E:\softs\BeautyVoiceTTS\.venv\Scripts\pythonw.exe -m unittest backend.tests.test_api_smoke backend.tests.test_task_flows backend.tests.test_persistence
-cd E:\softs\BeautyVoiceTTS\frontend
+E:\softs\VoiceLace\.venv\Scripts\pythonw.exe -m unittest backend.tests.test_api_smoke backend.tests.test_task_flows backend.tests.test_persistence
+cd E:\softs\VoiceLace\frontend
 npm test
 ```
 

@@ -4,8 +4,8 @@
 语音识别、字幕导入、文本解析、剧本编辑、角色配音、音乐生成、局部重生成与工程导入导出，全都在你的电脑上完成。  
 Speech recognition, subtitle import, script parsing, script editing, voice casting, music generation, partial regeneration, and project import/export all run on your own machine.
 
-默认优先本地运行：`llama-cpp-python` / `OmniVoice` / `Whisper` / `Qwen3-ASR` / `ACE-Step`，不依赖云端 API。  
-Local-first by default with `llama-cpp-python`, `OmniVoice`, `Whisper`, `Qwen3-ASR`, and `ACE-Step`, with cloud APIs optional.
+默认优先本地运行：`llama-cpp-python` / `OmniVoice` / `VoxCPM2` / `Whisper` / `Qwen3-ASR` / `ACE-Step`，不依赖云端 API。  
+Local-first by default with `llama-cpp-python`, `OmniVoice`, `VoxCPM2`, `Whisper`, `Qwen3-ASR`, and `ACE-Step`, with cloud APIs optional.
 
 > [!WARNING]
 > 项目仍在快速迭代中，建议先按“源码启动”跑通，再切换自己的本地模型和声音预设。  
@@ -21,7 +21,8 @@ Local-first by default with `llama-cpp-python`, `OmniVoice`, `Whisper`, `Qwen3-A
 | Parse QC / 解析质检 | Inspect parsed structure before production and catch speaker/segment issues early. 在进入制作前检查解析结构，尽早发现说话人和分段问题。 |
 | Script Editor / 剧本编辑 | Edit segments, insert/delete lines, adjust speaker/type/text/emotion/TTS overrides, and save as project data. 编辑片段、增删行、调整角色/类型/文本/情绪/TTS 覆盖项，并保存为项目数据。 |
 | Voice Profiles / 声音配置 | Create, preview, sort, and bind character voices for narration, dialogue, and voice cloning workflows. 创建、试听、排序和绑定角色声音，支持旁白、对白和声音克隆流程。 |
-| TTS Synthesis / 语音合成 | Generate full projects or only changed segments with OmniVoice / VoxCPM2 backend selection and waveform previews. 使用 OmniVoice / VoxCPM2 全量合成或仅重生成改动片段，并预览波形。 |
+| TTS Synthesis / 语音合成 | Generate full projects or only changed segments with OmniVoice / VoxCPM2 backend selection, waveform previews, and generated subtitles. 使用 OmniVoice / VoxCPM2 全量合成或仅重生成改动片段，支持波形预览和字幕生成。 |
+| Segment Review / 逐段对照修改 | Compare generated audio against each script segment, revise text or voice settings, and regenerate only affected segments. 对照每段生成音频修改剧本文本或声音配置，并只重生成受影响片段。 |
 | Music Generation / 音乐生成 | Generate or upload music assets with local ACE-Step Diffusers models, use the AI music assistant, and bind tracks as `BGM` or `Ambience`. 使用本地 ACE-Step Diffusers 生成或上传音乐素材，通过 AI 音乐助手生成表单，并绑定为 `BGM` 或 `Ambience`。 |
 | Realtime Tasks / 实时任务 | Track LLM, ASR, TTS, and music jobs through WebSocket progress, cancellation, and event replay. 通过 WebSocket 跟踪 LLM、ASR、TTS 和音乐任务进度，支持取消和事件回放。 |
 | Project Management / 工程管理 | Import/export project files or archives, rename projects, clean duplicates, and keep runtime data local. 导入/导出项目文件或压缩包，重命名项目、清理重复项，并将运行时数据保存在本地。 |
@@ -46,6 +47,8 @@ Notes / 说明：
   `backend/requirements.txt` 中的 `llama-cpp-python` 已指向 [JamePeng/llama-cpp-python](https://github.com/JamePeng/llama-cpp-python)。
 - Dependencies have been merged into one file; there is no separate real-model requirements file anymore.  
   依赖已合并为一个文件，不再区分基础依赖和真实模型依赖。
+- ACE-Step music generation requires `diffusers==0.38.0` and `safetensors==0.8.0rc0`, both included in `backend/requirements.txt`.  
+  ACE-Step 音乐生成需要 `diffusers==0.38.0` 和 `safetensors==0.8.0rc0`，二者已写入 `backend/requirements.txt`。
 - `ffmpeg` is recommended for audio/video workflows.  
   音频/视频相关流程建议额外安装 `ffmpeg`。
 
@@ -69,7 +72,7 @@ BV_LLM_CHAT_FORMAT=chatml
 BV_LLM_N_CTX=8192
 BV_LLM_N_GPU_LAYERS=-1
 
-BV_TTS_MODEL_PATH=E:\softs\BeautyVoiceTTS\models\OmniVoice
+BV_TTS_MODEL_PATH=E:\softs\VoiceLace\models\OmniVoice
 BV_TTS_DEVICE=cuda:0
 
 BV_ASR_MODEL_PATH=base
@@ -144,6 +147,29 @@ Suggestions / 建议：
 
 ---
 
+## TTS Backend Guide / TTS 后端选择
+
+| Backend / 后端 | Strengths / 优势 | Best for / 适合场景 |
+|---|---|---|
+| `OmniVoice` | Fast dubbing, broad multilingual support, strong cold-language coverage, and tag-style controls for age, pitch, dialect, and non-verbal cues. 快速配音、多语言和冷门语言覆盖强，支持用年龄、音调、方言、非语言标签等指令批量控制声音。 | Realtime dubbing, AI customer service, live translation, digital human dialogue, and multilingual or mixed-language input. 实时配音、AI 客服、实时翻译、数字人对话，以及多语种或混合语种输入。 |
+| `VoxCPM2` | Audiobook-oriented quality, more natural expression, high-fidelity output, and natural-language voice design. 更偏有声书质量，强调自然表现力、高音质，以及用自然语言描述虚拟人声。 | Audiobooks, high-quality voice cloning, film/TV post-production, studio-grade narration, and premium content creation. 有声书、高质量语音克隆、影视后期、录音棚级旁白和高端内容创作。 |
+
+Choose `OmniVoice` if / 选择 `OmniVoice` 如果：
+- You need uncommon languages or mixed multilingual input. / 你需要处理冷门语言或多语种混合输入。
+- Your scenario is extremely latency-sensitive, such as AI customer service, realtime translation, or digital human dialogue. / 你的应用场景对延迟极其敏感，如 AI 客服、实时翻译、数字人对话。
+- You want batch voice generation through tag-style instructions like age, pitch, or dialect. / 你希望通过年龄、音调、方言等标签化指令来批量生成声音。
+
+Choose `VoxCPM2` if / 选择 `VoxCPM2` 如果：
+- You want studio-grade sound quality and very natural expressiveness. / 你追求录音棚级音质和极其自然的表现力。
+- You need high-quality voice cloning for audiobooks, film/TV post-production, or premium content. / 你需要用于有声书、影视后期或高端内容创作的高质量语音克隆。
+- You prefer natural-language voice design for unique virtual voices, similar to Vibe Coding. / 你更喜欢用自然语言描述来创造独一无二的虚拟人声，类似 Vibe Coding 风格。
+
+summary / 总结：
+- `OmniVoice`: fast, multilingual, better for dubbing, realtime use, and instruction/tag-based batch voice creation. / `OmniVoice`：快速、多语言，更适合配音、实时场景和标签化批量声音生成。
+- `VoxCPM2`: higher fidelity, more natural, better for audiobooks, voice cloning, and premium production. / `VoxCPM2`：音质更高、更自然，更适合有声书、语音克隆和高端内容制作。
+
+---
+
 ## Configuration / 安装与配置
 
 ### `.env` example / `.env` 常用项
@@ -181,7 +207,7 @@ BV_SECONDARY_LLM_REPEAT_PENALTY=1.0
 BV_SECONDARY_LLM_MAX_TOKENS=1024
 BV_SECONDARY_ENABLE_LLAMA_CPP_THINK_MODE=false
 
-BV_TTS_MODEL_PATH=E:\softs\BeautyVoiceTTS\models\OmniVoice
+BV_TTS_MODEL_PATH=E:\softs\VoiceLace\models\OmniVoice
 BV_VOXCPM_TTS_MODEL_PATH=openbmb/VoxCPM2
 BV_TTS_DEVICE=cuda:0
 
@@ -272,6 +298,8 @@ Runtime data lives under `backend/data`. / 运行时数据默认位于 `backend/
 - Segment status shows synced, missing audio, and needs-regeneration states. / 每段会显示同步、缺失音频和待重生成状态。
 - Supports single-segment and batch regeneration. / 支持单段重生成和批量重生成。
 - Full audio and segment audio both support waveform preview. / 完整音频与分段音频都支持波形显示。
+- Full synthesis also generates subtitle assets, keeping audio, subtitles, and waveform data aligned. / 全量合成会同步生成字幕资产，让音频、字幕和波形数据保持一致。
+- You can compare generated audio segment by segment, adjust script text or voice settings, and regenerate only the affected segments. / 可以对照每段生成音频逐段修改剧本文本或声音配置，并只重生成受影响片段。
 - Bound `BGM` / `Ambience` assets are used in the post-processing area. / 若项目绑定了 `BGM` / `Ambience`，合成导出页会在后处理区域使用这些素材。
 
 ### TTS Assets / TTS 资产

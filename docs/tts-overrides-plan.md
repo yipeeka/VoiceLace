@@ -1,4 +1,4 @@
-# BeautyVoiceTTS `tts_overrides` 实施方案
+# VoiceLace `tts_overrides` 实施方案
 
 ## 文档状态
 
@@ -314,7 +314,7 @@ async def synthesize_to_file(
 
 当前合成流程中，片段级 `tts_overrides` 虽然参与缓存 key，但没有真正传到引擎。
 
-实施时需要在 [backend/api/tts_routes.py](/E:/softs/BeautyVoiceTTS/backend/api/tts_routes.py) 中补齐：
+实施时需要在 [backend/api/tts_routes.py](/E:/softs/VoiceLace/backend/api/tts_routes.py) 中补齐：
 
 - 从 `segment.tts_overrides` 读取值
 - 调用 `synthesize_to_file(..., tts_overrides=segment.tts_overrides)`

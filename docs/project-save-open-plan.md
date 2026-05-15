@@ -1,4 +1,4 @@
-# BeautyVoiceTTS 项目保存与打开方案
+# VoiceLace 项目保存与打开方案
 
 ## 文档状态
 
@@ -201,7 +201,7 @@
 
 ### 9.1 文本输入页
 
-在 [TextInputPage.jsx](/E:/softs/BeautyVoiceTTS/frontend/src/pages/TextInputPage.jsx) 中新增两个能力：
+在 [TextInputPage.jsx](/E:/softs/VoiceLace/frontend/src/pages/TextInputPage.jsx) 中新增两个能力：
 
 - `保存项目`
 - `打开项目文件`
@@ -219,7 +219,7 @@
 
 ### 9.2 剧本编辑页
 
-在 [ScriptEditorPage.jsx](/E:/softs/BeautyVoiceTTS/frontend/src/pages/ScriptEditorPage.jsx) 中新增：
+在 [ScriptEditorPage.jsx](/E:/softs/VoiceLace/frontend/src/pages/ScriptEditorPage.jsx) 中新增：
 
 - `保存项目`
 
@@ -374,4 +374,4 @@
 - 轻量项目文件：解决随时保存、随时继续编辑
 - 完整工程 ZIP：解决完整归档与完整迁移
 
-这是当前 BeautyVoiceTTS 状态模型下最稳妥、最符合用户预期的方案，也能最大程度复用现有项目持久化基础。
+这是当前 VoiceLace 状态模型下最稳妥、最符合用户预期的方案，也能最大程度复用现有项目持久化基础。

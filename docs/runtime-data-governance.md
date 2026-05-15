@@ -54,7 +54,7 @@ This document defines runtime data boundaries under `backend/data` and a safe cl
 
 ## Safe Cleanup Commands (PowerShell)
 
-Run from repository root `E:\softs\BeautyVoiceTTS`.
+Run from repository root `E:\softs\VoiceLace`.
 
 Clean temporary test files:
 
