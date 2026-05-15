@@ -1,4 +1,4 @@
-# BeautyVoiceTTS 剧本编辑状态统一改造计划
+# VoiceLace 剧本编辑状态统一改造计划
 
 ## 背景
 
@@ -122,7 +122,7 @@
 
 ### 3.1 ScriptEditorPage 状态结构重构
 
-当前 [ScriptEditorPage.jsx](E:/softs/BeautyVoiceTTS/frontend/src/pages/ScriptEditorPage.jsx) 中已有：
+当前 [ScriptEditorPage.jsx](E:/softs/VoiceLace/frontend/src/pages/ScriptEditorPage.jsx) 中已有：
 
 - `drafts`
 - `segmentOrder`
@@ -345,7 +345,7 @@
 
 ## Phase 5：后端判定原因码补强
 
-为支持保存后更准确的重新生成标记，建议在 [tts_routes.py](E:/softs/BeautyVoiceTTS/backend/api/tts_routes.py) 的 `stale-report` 中完善原因码。
+为支持保存后更准确的重新生成标记，建议在 [tts_routes.py](E:/softs/VoiceLace/backend/api/tts_routes.py) 的 `stale-report` 中完善原因码。
 
 建议支持：
 
@@ -469,4 +469,5 @@
 - 未保存状态混乱
 - 添加/删除/修改行为不一致
 - 合成导出页面标记不稳定
+
 

@@ -1,4 +1,4 @@
-# BeautyVoiceTTS 详细实施计划 v3.1
+# VoiceLace 详细实施计划 v3.1
 
 ## 主题
 
@@ -51,9 +51,9 @@
 ### 已有能力
 
 - 当前已有完整工程 ZIP 导出接口：
-  [backend/api/tts_routes.py](/E:/softs/BeautyVoiceTTS/backend/api/tts_routes.py)
+  [backend/api/tts_routes.py](/E:/softs/VoiceLace/backend/api/tts_routes.py)
 - 当前已有项目 JSON 持久化：
-  [backend/persistence.py](/E:/softs/BeautyVoiceTTS/backend/persistence.py)
+  [backend/persistence.py](/E:/softs/VoiceLace/backend/persistence.py)
 - 当前已有分段音频生成与整本拼接
 - 当前已有单段音频播放与整本导出
 - 当前已有按项目保存的剧本、角色、声音分配、合成参数
@@ -151,7 +151,7 @@ class ProjectAudioAssets(BaseModel):
     archive_schema_version: int = 2
 ```
 
-然后在 [backend/models/project.py](/E:/softs/BeautyVoiceTTS/backend/models/project.py) 中为 `Project` 增加：
+然后在 [backend/models/project.py](/E:/softs/VoiceLace/backend/models/project.py) 中为 `Project` 增加：
 
 ```python
 audio_assets: ProjectAudioAssets = Field(default_factory=ProjectAudioAssets)
@@ -166,7 +166,7 @@ audio_assets: ProjectAudioAssets = Field(default_factory=ProjectAudioAssets)
 
 每段音频需要一个稳定指纹，用于判断“当前文本和当前配置下的音频是否仍然有效”。
 
-建议复用并扩展当前 [backend/api/tts_routes.py](/E:/softs/BeautyVoiceTTS/backend/api/tts_routes.py) 中 `_segment_cache_key()` 的思路，统一为项目级 `segment_fingerprint()`。
+建议复用并扩展当前 [backend/api/tts_routes.py](/E:/softs/VoiceLace/backend/api/tts_routes.py) 中 `_segment_cache_key()` 的思路，统一为项目级 `segment_fingerprint()`。
 
 指纹至少应包含：
 
@@ -271,11 +271,11 @@ audio_assets: ProjectAudioAssets = Field(default_factory=ProjectAudioAssets)
   目标段来自 `generate`
   非目标段来自 `reuse_existing`
 
-这样可以最大程度复用当前 [backend/api/tts_routes.py](/E:/softs/BeautyVoiceTTS/backend/api/tts_routes.py) 的进度、混音、字幕和导出链路。
+这样可以最大程度复用当前 [backend/api/tts_routes.py](/E:/softs/VoiceLace/backend/api/tts_routes.py) 的进度、混音、字幕和导出链路。
 
 ### 4.8 跨页面“待重新生成”同步机制
 
-用户在 [frontend/src/pages/ScriptEditorPage.jsx](/E:/softs/BeautyVoiceTTS/frontend/src/pages/ScriptEditorPage.jsx) 做的修改，必须自然流入 [frontend/src/pages/SynthesisPage.jsx](/E:/softs/BeautyVoiceTTS/frontend/src/pages/SynthesisPage.jsx) 的“重新生成”工作流，而不是要求用户自己回忆改过哪些段。
+用户在 [frontend/src/pages/ScriptEditorPage.jsx](/E:/softs/VoiceLace/frontend/src/pages/ScriptEditorPage.jsx) 做的修改，必须自然流入 [frontend/src/pages/SynthesisPage.jsx](/E:/softs/VoiceLace/frontend/src/pages/SynthesisPage.jsx) 的“重新生成”工作流，而不是要求用户自己回忆改过哪些段。
 
 建议把现有状态报告扩展为“状态 + 原因码”结构，例如：
 
@@ -345,8 +345,8 @@ audio_assets: ProjectAudioAssets = Field(default_factory=ProjectAudioAssets)
 
 涉及文件：
 
-- [backend/persistence.py](/E:/softs/BeautyVoiceTTS/backend/persistence.py)
-- [backend/api/tts_routes.py](/E:/softs/BeautyVoiceTTS/backend/api/tts_routes.py)
+- [backend/persistence.py](/E:/softs/VoiceLace/backend/persistence.py)
+- [backend/api/tts_routes.py](/E:/softs/VoiceLace/backend/api/tts_routes.py)
 
 执行项：
 
@@ -372,7 +372,7 @@ audio_assets: ProjectAudioAssets = Field(default_factory=ProjectAudioAssets)
 
 涉及文件：
 
-- [backend/models/project.py](/E:/softs/BeautyVoiceTTS/backend/models/project.py)
+- [backend/models/project.py](/E:/softs/VoiceLace/backend/models/project.py)
 
 执行项：
 
@@ -399,7 +399,7 @@ audio_assets: ProjectAudioAssets = Field(default_factory=ProjectAudioAssets)
 
 涉及文件：
 
-- [backend/api/tts_routes.py](/E:/softs/BeautyVoiceTTS/backend/api/tts_routes.py)
+- [backend/api/tts_routes.py](/E:/softs/VoiceLace/backend/api/tts_routes.py)
 
 执行项：
 
@@ -424,7 +424,7 @@ audio_assets: ProjectAudioAssets = Field(default_factory=ProjectAudioAssets)
 
 涉及文件：
 
-- [backend/api/tts_routes.py](/E:/softs/BeautyVoiceTTS/backend/api/tts_routes.py)
+- [backend/api/tts_routes.py](/E:/softs/VoiceLace/backend/api/tts_routes.py)
 
 执行项：
 
@@ -487,8 +487,8 @@ audio_assets: ProjectAudioAssets = Field(default_factory=ProjectAudioAssets)
 
 涉及文件：
 
-- [backend/api/project_routes.py](/E:/softs/BeautyVoiceTTS/backend/api/project_routes.py)
-- [backend/persistence.py](/E:/softs/BeautyVoiceTTS/backend/persistence.py)
+- [backend/api/project_routes.py](/E:/softs/VoiceLace/backend/api/project_routes.py)
+- [backend/persistence.py](/E:/softs/VoiceLace/backend/persistence.py)
 
 执行项：
 
@@ -510,14 +510,14 @@ audio_assets: ProjectAudioAssets = Field(default_factory=ProjectAudioAssets)
 
 建议入口：
 
-- 主入口放在 [frontend/src/pages/TextInputPage.jsx](/E:/softs/BeautyVoiceTTS/frontend/src/pages/TextInputPage.jsx)
+- 主入口放在 [frontend/src/pages/TextInputPage.jsx](/E:/softs/VoiceLace/frontend/src/pages/TextInputPage.jsx)
 - 用户在开始文本创作前，就能直接导入现有工程继续编辑
 - 合成导出页保留快捷入口，形成工程进出闭环
 
 涉及文件：
 
-- [frontend/src/pages/TextInputPage.jsx](/E:/softs/BeautyVoiceTTS/frontend/src/pages/TextInputPage.jsx)
-- [frontend/src/stores/useProjectStore.js](/E:/softs/BeautyVoiceTTS/frontend/src/stores/useProjectStore.js)
+- [frontend/src/pages/TextInputPage.jsx](/E:/softs/VoiceLace/frontend/src/pages/TextInputPage.jsx)
+- [frontend/src/stores/useProjectStore.js](/E:/softs/VoiceLace/frontend/src/stores/useProjectStore.js)
 
 执行项：
 
@@ -541,8 +541,8 @@ audio_assets: ProjectAudioAssets = Field(default_factory=ProjectAudioAssets)
 
 涉及文件：
 
-- [frontend/src/pages/SynthesisPage.jsx](/E:/softs/BeautyVoiceTTS/frontend/src/pages/SynthesisPage.jsx)
-- [frontend/src/stores/useProjectStore.js](/E:/softs/BeautyVoiceTTS/frontend/src/stores/useProjectStore.js)
+- [frontend/src/pages/SynthesisPage.jsx](/E:/softs/VoiceLace/frontend/src/pages/SynthesisPage.jsx)
+- [frontend/src/stores/useProjectStore.js](/E:/softs/VoiceLace/frontend/src/stores/useProjectStore.js)
 
 执行项：
 
@@ -610,8 +610,8 @@ audio_assets: ProjectAudioAssets = Field(default_factory=ProjectAudioAssets)
 
 涉及文件：
 
-- [backend/api/tts_routes.py](/E:/softs/BeautyVoiceTTS/backend/api/tts_routes.py)
-- [backend/models/api_models.py](/E:/softs/BeautyVoiceTTS/backend/models/api_models.py)
+- [backend/api/tts_routes.py](/E:/softs/VoiceLace/backend/api/tts_routes.py)
+- [backend/models/api_models.py](/E:/softs/VoiceLace/backend/models/api_models.py)
 
 验收标准：
 
@@ -646,8 +646,8 @@ audio_assets: ProjectAudioAssets = Field(default_factory=ProjectAudioAssets)
 
 涉及文件：
 
-- [frontend/src/pages/SynthesisPage.jsx](/E:/softs/BeautyVoiceTTS/frontend/src/pages/SynthesisPage.jsx)
-- [frontend/src/stores/useSynthesisStore.js](/E:/softs/BeautyVoiceTTS/frontend/src/stores/useSynthesisStore.js)
+- [frontend/src/pages/SynthesisPage.jsx](/E:/softs/VoiceLace/frontend/src/pages/SynthesisPage.jsx)
+- [frontend/src/stores/useSynthesisStore.js](/E:/softs/VoiceLace/frontend/src/stores/useSynthesisStore.js)
 
 执行项：
 
@@ -671,9 +671,9 @@ audio_assets: ProjectAudioAssets = Field(default_factory=ProjectAudioAssets)
 
 涉及文件：
 
-- [frontend/src/pages/SynthesisPage.jsx](/E:/softs/BeautyVoiceTTS/frontend/src/pages/SynthesisPage.jsx)
-- [frontend/src/pages/ScriptEditorPage.jsx](/E:/softs/BeautyVoiceTTS/frontend/src/pages/ScriptEditorPage.jsx)
-- [frontend/src/stores/useScriptStore.js](/E:/softs/BeautyVoiceTTS/frontend/src/stores/useScriptStore.js)
+- [frontend/src/pages/SynthesisPage.jsx](/E:/softs/VoiceLace/frontend/src/pages/SynthesisPage.jsx)
+- [frontend/src/pages/ScriptEditorPage.jsx](/E:/softs/VoiceLace/frontend/src/pages/ScriptEditorPage.jsx)
+- [frontend/src/stores/useScriptStore.js](/E:/softs/VoiceLace/frontend/src/stores/useScriptStore.js)
 
 执行项：
 
@@ -876,3 +876,4 @@ MVP 建议：
 12. `P4-2` UI 标识、预勾选与测试补齐
 
 本文件即为后续实施的主计划基线。
+

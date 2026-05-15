@@ -1,4 +1,4 @@
-# BeautyVoiceTTS 预设导入去重实施方案
+# VoiceLace 预设导入去重实施方案
 
 ## 目标
 
@@ -471,3 +471,4 @@ def resolve_imported_preset(
 - 参考音频按哈希复用
 
 这是当前最稳妥、最可控、也最符合长期维护成本的实现方向。
+

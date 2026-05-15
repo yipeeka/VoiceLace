@@ -127,7 +127,7 @@ cd ..
 
 ## `.env` 常用项
 
-参考 [`.env.example`](/E:/softs/BeautyVoiceTTS/.env.example)。
+参考 [`.env.example`](/E:/softs/VoiceLace/.env.example)。
 
 ```env
 BV_LLM_BACKEND=llama_cpp
@@ -150,7 +150,7 @@ BV_OPENAI_MODEL=gpt-4.1-mini
 BV_GEMINI_API_KEY=your-gemini-key
 BV_GEMINI_MODEL=gemini-2.5-flash
 
-BV_TTS_MODEL_PATH=E:\softs\BeautyVoiceTTS\models\OmniVoice
+BV_TTS_MODEL_PATH=E:\\softs\\VoiceLace\models\OmniVoice
 BV_TTS_DEVICE=cuda:0
 
 BV_ASR_MODEL_PATH=base
@@ -305,11 +305,12 @@ curl "http://127.0.0.1:8000/api/v1/system/status"
 - `tmp-tests/`：测试临时文件
 
 详细规则见：
-- [runtime-data-governance.md](/E:/softs/BeautyVoiceTTS/docs/runtime-data-governance.md)
+- [runtime-data-governance.md](/E:/softs/VoiceLace/docs/runtime-data-governance.md)
 
 ---
 
 ## 相关文档
 
-- [implementation03-acceptance-checklist.md](/E:/softs/BeautyVoiceTTS/docs/implementation03-acceptance-checklist.md)
-- [comprehensive-repair-improvement-plan.md](/E:/softs/BeautyVoiceTTS/docs/comprehensive-repair-improvement-plan.md)
+- [implementation03-acceptance-checklist.md](/E:/softs/VoiceLace/docs/implementation03-acceptance-checklist.md)
+- [comprehensive-repair-improvement-plan.md](/E:/softs/VoiceLace/docs/comprehensive-repair-improvement-plan.md)
+

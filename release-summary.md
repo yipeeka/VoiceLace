@@ -1,4 +1,4 @@
-# BeautyVoiceTTS Final Acceptance Summary
+# VoiceLace Final Acceptance Summary
 
 ## Scope
 
@@ -63,3 +63,4 @@ This summary records the completed improvements from `improve-plan.md` and the a
 
 - Runtime data governance:
   - See [docs/runtime-data-governance.md](./docs/runtime-data-governance.md)
+

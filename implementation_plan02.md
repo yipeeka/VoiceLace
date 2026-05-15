@@ -1,4 +1,4 @@
-# BeautyVoiceTTS 详细实施计划 v2 (基于 v1 深度审阅后修订)
+# VoiceLace 详细实施计划 v2 (基于 v1 深度审阅后修订)
 
 本文档是对 `implementation_plan01.md` 的全面审阅成果。在保留 v1 核心方向的基础上，通过逐行走查全部后端引擎、API 路由、前端 Store 和页面组件源码，补充了 v1 **遗漏的关键缺陷**、纠正了优先级排序中的逻辑错误、并新增了多个可独立交付的改进项。
 
@@ -399,3 +399,4 @@ Phase 3 (体验打磨，2-3 天)
 | 缓存误命中 | 中 | Cache key 包含 engine version + 全部推理参数；提供手动清缓存按钮 |
 | `pydub` 依赖 ffmpeg | 中 | 在 `requirements.txt` 注明；Mixer 无 pydub 时降级为当前字节拼接 |
 | 长文本 WebSocket 超时 | 低 | 分块模式下每块独立超时，不再需要 20 分钟全局超时 |
+

@@ -1,15 +1,15 @@
-# BeautyVoiceTTS 前端 UI 改进计划
+# VoiceLace 前端 UI 改进计划
 
 > 参考项目: [jamiepine/voicebox](https://github.com/jamiepine/voicebox) (14.8k ⭐)
 > 当前技术栈: Vite 7 + React 19 + Zustand 5 + Vanilla CSS + Lucide Icons + WaveSurfer.js
 
 ---
 
-## 一、VoiceBox 设计分析 → BeautyVoiceTTS 映射
+## 一、VoiceBox 设计分析 → VoiceLace 映射
 
 ### VoiceBox 关键 UI 特征
 
-| VoiceBox 特征 | 实现方式 | BeautyVoiceTTS 映射 |
+| VoiceBox 特征 | 实现方式 | VoiceLace 映射 |
 |---|---|---|
 | **深色主题 + 精致分层** | Tailwind 4 + CSS 变量，`bg-zinc-950` → `bg-zinc-900` → `bg-zinc-800` 三层深度 | 当前 `variables.css` 只有 1 层 `--glass-bg`，需要扩展为 3 层深度系统 |
 | **Voice Profile Cards** | 圆形头像/波形缩略图 + 语言标签 + 引擎标签 + 操作菜单 | 改造 `VoicePresetCardList` 为网格卡片，增加角色头像色块 + 模式标签 |
@@ -55,7 +55,7 @@ npm install @radix-ui/react-dialog @radix-ui/react-select @radix-ui/react-slider
 
 #### 1.3 色彩系统重构
 
-从 VoiceBox 的 zinc 深色系汲取灵感，但保留 BeautyVoiceTTS 独有的暖色调个性：
+从 VoiceBox 的 zinc 深色系汲取灵感，但保留 VoiceLace 独有的暖色调个性：
 
 ```css
 /* styles/variables.css — 完全重写 */
@@ -508,7 +508,7 @@ src/
 ## User Review Required
 
 > [!IMPORTANT]
-> **Radix UI vs 纯手写**: VoiceBox 重度使用 Radix UI 原语。当前 BeautyVoiceTTS 使用原生 HTML 控件。计划引入 Radix 替代 `<select>`, `<input[type=range]>`, `<dialog>` 等。这会增加 ~50KB (gzipped) 的依赖体积，但带来显著的无障碍访问和视觉一致性提升。**是否同意引入 Radix UI?**
+> **Radix UI vs 纯手写**: VoiceBox 重度使用 Radix UI 原语。当前 VoiceLace 使用原生 HTML 控件。计划引入 Radix 替代 `<select>`, `<input[type=range]>`, `<dialog>` 等。这会增加 ~50KB (gzipped) 的依赖体积，但带来显著的无障碍访问和视觉一致性提升。**是否同意引入 Radix UI?**
 
 > [!IMPORTANT]
 > **framer-motion**: 引入 framer-motion 用于页面切换和列表动画。bundle 增加 ~35KB (gzipped)。如果你更倾向轻量方案，可以用纯 CSS transitions + `AnimatePresence` 替代方案。**是否引入 framer-motion?**
@@ -534,3 +534,4 @@ npm run build  # 确保编译通过, 无类型/导入错误
 4. 所有 Radix 组件支持键盘导航 (Tab, Enter, Escape)
 5. framer-motion 动画在页面切换时流畅
 6. 手机端 (≤960px) 侧边栏自动折叠
+

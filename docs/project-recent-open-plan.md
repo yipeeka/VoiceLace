@@ -156,7 +156,7 @@
 
 例如：
 
-- `beautyvoicetts:lastOpenedProjectId`
+- `VoiceLace:lastOpenedProjectId`
 
 ## 7.2 新增“项目来源类型”状态
 
@@ -447,4 +447,5 @@
 5. 下拉框显示逻辑以“最近打开项目”为准
 
 这是当前问题下最清晰、最稳定、也最容易验收的一版方案。
+
 

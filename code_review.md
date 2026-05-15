@@ -1,4 +1,4 @@
-# BeautyVoiceTTS 代码审阅报告
+# VoiceLace 代码审阅报告
 
 > 审阅时间: 2026-04-21 · 对比上次审阅 (2026-04-17)
 > 审阅范围: 全栈 (FastAPI 后端 + React/Vite 前端)
@@ -56,7 +56,7 @@
 
 #### 3. `useSynthesisStore.js` — `startSynthesis` 与 `startPartialSynthesis` 超过 95% 代码重复
 
-[startSynthesis](file:///e:/softs/BeautyVoiceTTS/frontend/src/stores/useSynthesisStore.js#L29-L241) 和 [startPartialSynthesis](file:///e:/softs/BeautyVoiceTTS/frontend/src/stores/useSynthesisStore.js#L242-L463) 两个方法各自约 210 行，几乎完全相同。差异仅为：
+[startSynthesis](file:///E:/softs/VoiceLace/frontend/src/stores/useSynthesisStore.js#L29-L241) 和 [startPartialSynthesis](file:///E:/softs/VoiceLace/frontend/src/stores/useSynthesisStore.js#L242-L463) 两个方法各自约 210 行，几乎完全相同。差异仅为：
 - API endpoint (`/tts/synthesize` vs `/tts/synthesize/segments`)
 - 请求 body 多一个 `segment_ids` + `rebuild_full`
 - Toast 文案略有不同（"合成" vs "局部合成"）
@@ -93,7 +93,7 @@ def _gemini_response_schema(cls) -> dict[str, Any]:
 
 #### 5. Gemini 客户端用原始 `urllib` 手挛 HTTP — 缺少超时管理和连接复用
 
-[llm_clients.py](file:///e:/softs/BeautyVoiceTTS/backend/engine/llm_clients.py) 中的 Gemini 调用全部使用 `urllib.request`：
+[llm_clients.py](file:///E:/softs/VoiceLace/backend/engine/llm_clients.py) 中的 Gemini 调用全部使用 `urllib.request`：
 
 ```python
 import time  # ← 在函数体内 import
@@ -131,7 +131,7 @@ sample_rate = 22050  # 全局合成变量
 
 #### 7. `_run_synthesis_task` 过程函数仍然太长 (~275 行)
 
-[tts_routes.py L52-325](file:///e:/softs/BeautyVoiceTTS/backend/api/tts_routes.py#L52-L325)
+[tts_routes.py L52-325](file:///E:/softs/VoiceLace/backend/api/tts_routes.py#L52-L325)
 
 虽然核心业务已被抽到 service 层（`build_synthesis_scan_plan`, `process_synthesis_segment`, `finalize_rebuild_full` 等），但 `_run_synthesis_task` 本身仍然充当了"协调器"角色，包含：
 - 项目加载 / 保存
@@ -149,7 +149,7 @@ sample_rate = 22050  # 全局合成变量
 
 #### 8. `extract_json_object` 只返回第一个顶层 `{}` — 对数组型响应无能为力
 
-[llm_parser.py L140-171](file:///e:/softs/BeautyVoiceTTS/backend/engine/llm_parser.py#L140-L171)
+[llm_parser.py L140-171](file:///E:/softs/VoiceLace/backend/engine/llm_parser.py#L140-L171)
 
 如果 LLM 返回 `[{...}, {...}]`（数组），或者前面有垃圾文本后面跟了一个 JSON 数组，当前实现会返回空字符串。虽然 schema 要求 segments 被包裹在 `{...}` 里，但这是一个脆弱假设。
 
@@ -254,3 +254,4 @@ waveform-peaks-plan.md (15KB)
 | 🟢 P2-10 | 前端 store 层引入 TypeScript | 大 |
 | 🟢 P2-11 | `projectStore.test.mjs` 加入 test 命令 | 小 |
 | 🟢 P2-12 | 根目录 plan 文件归档 | 小 |
+

@@ -1,4 +1,4 @@
-# BeautyVoiceTTS 后端预生成波形 Peaks 实施方案
+# VoiceLace 后端预生成波形 Peaks 实施方案
 
 ## 结论
 
@@ -18,10 +18,10 @@
 
 当前代码里这类问题已经很明显：
 
-- [frontend/src/components/shared/AudioPlayer.jsx](/E:/softs/BeautyVoiceTTS/frontend/src/components/shared/AudioPlayer.jsx)
-- [frontend/src/components/shared/SynthesisWaveSurfer.jsx](/E:/softs/BeautyVoiceTTS/frontend/src/components/shared/SynthesisWaveSurfer.jsx)
-- [backend/api/tts_routes.py](/E:/softs/BeautyVoiceTTS/backend/api/tts_routes.py)
-- [backend/models/project.py](/E:/softs/BeautyVoiceTTS/backend/models/project.py)
+- [frontend/src/components/shared/AudioPlayer.jsx](/E:/softs/VoiceLace/frontend/src/components/shared/AudioPlayer.jsx)
+- [frontend/src/components/shared/SynthesisWaveSurfer.jsx](/E:/softs/VoiceLace/frontend/src/components/shared/SynthesisWaveSurfer.jsx)
+- [backend/api/tts_routes.py](/E:/softs/VoiceLace/backend/api/tts_routes.py)
+- [backend/models/project.py](/E:/softs/VoiceLace/backend/models/project.py)
 
 所以推荐方案是：
 
@@ -137,7 +137,7 @@
 
 ## 五、后端数据模型改造
 
-推荐在 [backend/models/project.py](/E:/softs/BeautyVoiceTTS/backend/models/project.py) 中扩展音频资产结构。
+推荐在 [backend/models/project.py](/E:/softs/VoiceLace/backend/models/project.py) 中扩展音频资产结构。
 
 ## 5.1 SegmentAsset 新增字段
 
@@ -262,7 +262,7 @@ backend/data/output/projects/{project_id}/waveforms/segments/{segment_id}.peaks.
 
 ## 8.1 生成时机
 
-推荐在 [backend/api/tts_routes.py](/E:/softs/BeautyVoiceTTS/backend/api/tts_routes.py) 的合成流程里做两处同步生成：
+推荐在 [backend/api/tts_routes.py](/E:/softs/VoiceLace/backend/api/tts_routes.py) 的合成流程里做两处同步生成：
 
 1. 每段 `segment.wav` 生成完并落盘后，立即生成该段 Peaks
 2. 完整音频 `mix.wav` 生成完并落盘后，立即生成完整音频 Peaks
@@ -395,7 +395,7 @@ GET /api/v1/tts/projects/{project_id}/waveform
 
 ## 10.1 行级播放器
 
-建议把 [frontend/src/components/shared/AudioPlayer.jsx](/E:/softs/BeautyVoiceTTS/frontend/src/components/shared/AudioPlayer.jsx) 改成“两层模式”：
+建议把 [frontend/src/components/shared/AudioPlayer.jsx](/E:/softs/VoiceLace/frontend/src/components/shared/AudioPlayer.jsx) 改成“两层模式”：
 
 1. 播放层：继续使用 `<audio>` 或单独音频控制
 2. 波形层：用 Peaks 数据自己画
@@ -423,7 +423,7 @@ GET /api/v1/tts/projects/{project_id}/waveform
 
 ## 10.2 完整音频波形
 
-对于 [frontend/src/components/shared/SynthesisWaveSurfer.jsx](/E:/softs/BeautyVoiceTTS/frontend/src/components/shared/SynthesisWaveSurfer.jsx)：
+对于 [frontend/src/components/shared/SynthesisWaveSurfer.jsx](/E:/softs/VoiceLace/frontend/src/components/shared/SynthesisWaveSurfer.jsx)：
 
 可选两条路：
 
@@ -634,7 +634,7 @@ waveforms/segments/{segment}.peaks.json
 
 如果要一句话总结：
 
-> 对 BeautyVoiceTTS 当前这套“多段播放器 + 完整音频波形 + WebSocket 进度”的架构来说，后端预生成 Peaks 不是可选优化，而是下一步最值得做的稳定性和性能升级。
+> 对 VoiceLace 当前这套“多段播放器 + 完整音频波形 + WebSocket 进度”的架构来说，后端预生成 Peaks 不是可选优化，而是下一步最值得做的稳定性和性能升级。
 
 建议落地策略：
 
@@ -643,3 +643,4 @@ waveforms/segments/{segment}.peaks.json
 3. 最后升级完整音频波形
 
 这条路线风险最低、收益最大，也最符合你现在项目已经暴露出来的问题结构。
+

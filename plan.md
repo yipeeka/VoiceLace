@@ -1,4 +1,4 @@
-# BeautyVoiceTTS — 多角色有声书 TTS 系统 (前后端分离)
+# VoiceLace — 多角色有声书 TTS 系统 (前后端分离)
 
 从文本到多角色有声书的全本地 AI 系统。LLM 解析 → 剧本审阅 → 声音配置 → TTS 合成。
 
@@ -56,7 +56,7 @@ graph TB
 ## 目录结构
 
 ```
-BeautyVoiceTTS/
+VoiceLace/
 ├── backend/                          # Python FastAPI 后端
 │   ├── main.py                       # FastAPI 入口 & uvicorn 启动
 │   ├── config.py                     # 全局配置 dataclass
@@ -1793,3 +1793,4 @@ npm run build
 2. 继续拆分页面级重组件
 3. 完善导出面板、片段循环试听、区域精修能力
 4. 统一 `plan.md` 顶部目录描述与当前实际代码结构
+
