@@ -7,25 +7,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (!id.includes("node_modules")) {
-            return undefined;
-          }
-          if (id.includes("react") || id.includes("scheduler")) {
-            return "vendor-react";
-          }
-          if (id.includes("@radix-ui")) {
-            return "vendor-radix";
-          }
-          if (id.includes("@dnd-kit")) {
-            return "vendor-dnd";
-          }
-          if (id.includes("wavesurfer.js")) {
-            return "vendor-wavesurfer";
-          }
-          if (id.includes("framer-motion")) {
-            return "vendor-motion";
-          }
-          return "vendor-misc";
+          return id.includes("node_modules") ? "vendor" : undefined;
         },
       },
     },

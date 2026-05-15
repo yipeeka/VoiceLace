@@ -77,4 +77,5 @@
   --sidebar-width-collapsed: 64px;
   --statusbar-height: 36px;
   --content-padding: 24px;
+  --content-padding-mobile: 16px;
 }
