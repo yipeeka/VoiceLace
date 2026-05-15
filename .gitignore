@@ -9,5 +9,11 @@ frontend/dist/
 frontend/node_modules/
 
 models/
+docs/
+
+.tmp/
+.tmp_test_outputs/
+tmp_test_outputs/
+tmp*/
 
 *.log
