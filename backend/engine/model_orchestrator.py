@@ -47,6 +47,15 @@ class OrchestratorConfig:
     llm_model_path: str = settings.default_llm_model_path
     llm_clip_model_path: str = settings.default_llm_clip_model_path
     llm_api_model: str = settings.default_llm_api_model
+    openai_api_key: str = settings.openai_api_key
+    openai_base_url: str = settings.openai_base_url
+    openai_model: str = settings.openai_model
+    openai_compatible_api_key: str = settings.openai_compatible_api_key
+    openai_compatible_base_url: str = settings.openai_compatible_base_url
+    openai_compatible_model: str = settings.openai_compatible_model
+    gemini_api_key: str = settings.gemini_api_key
+    gemini_base_url: str = settings.gemini_base_url
+    gemini_model: str = settings.gemini_model
     llm_n_ctx: int = settings.default_llm_n_ctx
     llm_n_gpu_layers: int = settings.default_llm_n_gpu_layers
     llm_threads: int = settings.default_llm_threads
@@ -191,6 +200,29 @@ class ModelOrchestrator:
         self._config = self._normalize_music_config(config)
         if hasattr(self._llm, "enable_llama_cpp_think_mode"):
             self._llm.enable_llama_cpp_think_mode = config.enable_llama_cpp_think_mode
+
+    @staticmethod
+    def _llm_api_load_options(config: OrchestratorConfig) -> dict[str, str]:
+        backend = str(getattr(config, "llm_backend", "") or "").strip().lower()
+        if backend == "openai":
+            return {
+                "api_key": config.openai_api_key,
+                "api_base_url": config.openai_base_url,
+                "api_model": config.openai_model or config.llm_api_model,
+            }
+        if backend == "gemini":
+            return {
+                "api_key": config.gemini_api_key,
+                "api_base_url": config.gemini_base_url,
+                "api_model": config.gemini_model or config.llm_api_model,
+            }
+        if backend in {"openai_compatible", "openai-compatible", "compatible_openai", "openai_compat"}:
+            return {
+                "api_key": config.openai_compatible_api_key,
+                "api_base_url": config.openai_compatible_base_url,
+                "api_model": config.openai_compatible_model or config.llm_api_model,
+            }
+        return {"api_key": "", "api_base_url": "", "api_model": config.llm_api_model}
 
     def add_listener(self, callback: Listener) -> None:
         self._listeners.append(callback)
@@ -444,6 +476,7 @@ class ModelOrchestrator:
                 await self._tts.unload_model()
                 self.release_cuda_memory()
             need_reload = False
+            api_load_options = self._llm_api_load_options(self._config)
             if getattr(self._llm, "is_loaded", False) and hasattr(self._llm, "needs_reload"):
                 need_reload = self._llm.needs_reload(
                     model_path=self._config.llm_model_path,
@@ -452,6 +485,7 @@ class ModelOrchestrator:
                     n_gpu_layers=self._config.llm_n_gpu_layers,
                     backend=self._config.llm_backend,
                     n_threads=self._config.llm_threads,
+                    **api_load_options,
                 )
             if need_reload:
                 await self._set_state(ModelState.UNLOADING_LLM, "llm")
@@ -466,6 +500,7 @@ class ModelOrchestrator:
                     n_gpu_layers=self._config.llm_n_gpu_layers,
                     backend=self._config.llm_backend,
                     n_threads=self._config.llm_threads,
+                    **api_load_options,
                 )
             await self._set_state(ModelState.LLM_READY, "llm")
 

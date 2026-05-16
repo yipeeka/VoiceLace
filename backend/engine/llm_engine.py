@@ -71,6 +71,10 @@ class LLMEngine:
         self._loaded_n_threads: int = settings.default_llm_threads
         self._loaded_clip_model_path: str = settings.default_llm_clip_model_path
         self._loaded_enable_think_mode: bool = settings.default_enable_llama_cpp_think_mode
+        self._loaded_api_base_url: str = ""
+        self._loaded_api_model: str = ""
+        self._loaded_api_key: str = ""
+        self._loaded_api_key_fingerprint: str = ""
         self.last_parse_stats: dict[str, Any] = {}
         self.think_mode_effective: bool = False
         self.think_mode_support: str = "unknown"
@@ -180,10 +184,19 @@ class LLMEngine:
         backend: str,
         n_threads: int = 0,
         clip_model_path: str = "",
+        api_key: str = "",
+        api_base_url: str = "",
+        api_model: str = "",
     ) -> bool:
         normalized_backend = self._normalize_backend(backend)
         if normalized_backend != self._loaded_backend:
             return True
+        if normalized_backend in {"openai", "openai_compatible", "gemini"}:
+            return (
+                self._loaded_api_base_url != self._normalize_api_base_url(api_base_url)
+                or self._loaded_api_model != (api_model or "").strip()
+                or self._loaded_api_key_fingerprint != self._api_key_fingerprint(api_key)
+            )
         if normalized_backend == "llama_cpp":
             return (
                 (model_path or "") != self.model_path
@@ -203,6 +216,9 @@ class LLMEngine:
         n_gpu_layers: int = -1,
         backend: str = "llama_cpp",
         n_threads: int = 0,
+        api_key: str = "",
+        api_base_url: str = "",
+        api_model: str = "",
     ) -> None:
         normalized_backend = self._normalize_backend(backend)
         requested_clip_path = self._normalize_optional_path(clip_model_path or settings.default_llm_clip_model_path)
@@ -216,6 +232,10 @@ class LLMEngine:
         self.model_path = desired_path
         self.clip_model_path = requested_clip_path
         self.chat_format = settings.llm_chat_format
+        self._loaded_api_base_url = ""
+        self._loaded_api_model = ""
+        self._loaded_api_key = ""
+        self._loaded_api_key_fingerprint = ""
 
         if normalized_backend == "mock":
             self._openai_client = None
@@ -236,16 +256,24 @@ class LLMEngine:
             except ImportError as exc:
                 self._fallback_or_raise(f"未安装 openai SDK: {exc}")
                 return
-            api_key = settings.openai_api_key
-            if not api_key:
-                self._fallback_or_raise("未配置 BV_OPENAI_API_KEY，无法使用 OpenAI API。")
+            resolved_api_key = (api_key or settings.openai_api_key or "").strip()
+            resolved_base_url = self._normalize_api_base_url(api_base_url or settings.openai_base_url)
+            resolved_model = (api_model or settings.openai_model or "").strip()
+            if not resolved_api_key:
+                self._fallback_or_raise("未配置 OpenAI API Key，请在设置中填写。")
                 return
-            base_url = settings.openai_base_url.strip() or None
-            self._openai_client = OpenAI(api_key=api_key, base_url=base_url)
+            if not resolved_model:
+                self._fallback_or_raise("未配置 OpenAI API 模型名，请在设置中填写。")
+                return
+            self._openai_client = OpenAI(api_key=resolved_api_key, base_url=resolved_base_url or None)
             self._llm = None
             self.is_loaded = True
             self.backend_name = "openai"
-            self.model_name = settings.openai_model
+            self.model_name = resolved_model
+            self._loaded_api_base_url = resolved_base_url
+            self._loaded_api_model = resolved_model
+            self._loaded_api_key = resolved_api_key
+            self._loaded_api_key_fingerprint = self._api_key_fingerprint(resolved_api_key)
             self.last_error = ""
             self.think_mode_effective = False
             self.think_mode_support = "not_applicable"
@@ -253,15 +281,59 @@ class LLMEngine:
             self.handler_fallback_reason = ""
             return
 
+        if normalized_backend == "openai_compatible":
+            try:
+                from openai import OpenAI
+            except ImportError as exc:
+                self._fallback_or_raise(f"未安装 openai SDK: {exc}")
+                return
+            resolved_api_key = (api_key or settings.openai_compatible_api_key or "").strip()
+            resolved_base_url = self._normalize_api_base_url(api_base_url or settings.openai_compatible_base_url)
+            resolved_model = (api_model or settings.openai_compatible_model or "").strip()
+            if not resolved_api_key:
+                self._fallback_or_raise("未配置 OpenAI 兼容 API Key，请在设置中填写。")
+                return
+            if not resolved_base_url:
+                self._fallback_or_raise("未配置 OpenAI 兼容 API Base URL，请在设置中填写。")
+                return
+            if not resolved_model:
+                self._fallback_or_raise("未配置 OpenAI 兼容 API 模型名，请在设置中填写。")
+                return
+            self._openai_client = OpenAI(api_key=resolved_api_key, base_url=resolved_base_url)
+            self._llm = None
+            self.is_loaded = True
+            self.backend_name = "openai_compatible"
+            self.model_name = resolved_model
+            self._loaded_api_base_url = resolved_base_url
+            self._loaded_api_model = resolved_model
+            self._loaded_api_key = resolved_api_key
+            self._loaded_api_key_fingerprint = self._api_key_fingerprint(resolved_api_key)
+            self.last_error = ""
+            self.think_mode_effective = False
+            self.think_mode_support = "not_applicable"
+            self.last_load_mode = "openai_compatible"
+            self.handler_fallback_reason = ""
+            return
+
         if normalized_backend == "gemini":
-            if not settings.gemini_api_key:
-                self._fallback_or_raise("未配置 BV_GEMINI_API_KEY，无法使用 Gemini API。")
+            resolved_api_key = (api_key or settings.gemini_api_key or "").strip()
+            resolved_base_url = self._normalize_api_base_url(api_base_url or settings.gemini_base_url)
+            resolved_model = (api_model or settings.gemini_model or "").strip()
+            if not resolved_api_key:
+                self._fallback_or_raise("未配置 Gemini API Key，请在设置中填写。")
+                return
+            if not resolved_model:
+                self._fallback_or_raise("未配置 Gemini API 模型名，请在设置中填写。")
                 return
             self._openai_client = None
             self._llm = None
             self.is_loaded = True
             self.backend_name = "gemini"
-            self.model_name = settings.gemini_model
+            self.model_name = resolved_model
+            self._loaded_api_base_url = resolved_base_url
+            self._loaded_api_model = resolved_model
+            self._loaded_api_key = resolved_api_key
+            self._loaded_api_key_fingerprint = self._api_key_fingerprint(resolved_api_key)
             self.last_error = ""
             self.think_mode_effective = False
             self.think_mode_support = "not_applicable"
@@ -353,6 +425,10 @@ class LLMEngine:
         self.think_mode_support = "unknown"
         self.last_load_mode = ""
         self.handler_fallback_reason = ""
+        self._loaded_api_base_url = ""
+        self._loaded_api_model = ""
+        self._loaded_api_key = ""
+        self._loaded_api_key_fingerprint = ""
         gc.collect()
         try:
             import torch
@@ -381,13 +457,14 @@ class LLMEngine:
         if not content:
             raise RuntimeError("输入文本为空。")
 
-        if self.backend_name == "openai":
+        if self.backend_name in {"openai", "openai_compatible"}:
             result = await run_openai_text(
                 openai_client=self._openai_client,
                 text=content,
                 prompt=prompt,
-                llm_options=opts,
+                llm_options=self._openai_options_for_backend(opts),
                 extraction_prompt="",
+                default_model=self.model_name,
             )
             return (result or "").strip()
 
@@ -395,7 +472,7 @@ class LLMEngine:
             result = await run_gemini_text(
                 text=content,
                 prompt=prompt,
-                llm_options=opts,
+                llm_options=self._gemini_options_for_backend(opts),
                 extraction_prompt="",
             )
             return (result or "").strip()
@@ -632,10 +709,11 @@ class LLMEngine:
                 openai_client=self._openai_client,
                 text=payload_text,
                 prompt=payload_prompt,
-                llm_options=options,
+                llm_options=self._openai_options_for_backend(options),
                 extraction_prompt=extraction_prompt,
                 schema=schema,
                 logger=logger,
+                default_model=self.model_name,
             )
 
         async def _run_gemini_parse_custom(payload_text: str, payload_prompt: str | None, options: dict[str, Any]) -> str:
@@ -749,13 +827,14 @@ class LLMEngine:
                 await on_chunk(content)
 
         try:
-            if self.backend_name == "openai":
+            if self.backend_name in {"openai", "openai_compatible"}:
                 content = await run_openai_text(
                     openai_client=self._openai_client,
                     text=text,
                     prompt=prompt,
-                    llm_options=opts,
+                    llm_options=self._openai_options_for_backend(opts),
                     extraction_prompt=extraction_prompt,
+                    default_model=self.model_name,
                 )
                 if not (content or "").strip():
                     raise RuntimeError("OpenAI Step1 raw output is empty")
@@ -909,11 +988,41 @@ class LLMEngine:
             return "llama_cpp"
         if val in {"openai", "openai_api"}:
             return "openai"
+        if val in {"openai_compatible", "openai-compatible", "compatible_openai", "openai_compat"}:
+            return "openai_compatible"
         if val in {"gemini", "google", "google_gemini"}:
             return "gemini"
         if val in {"mock", "demo"}:
             return "mock"
         return "llama_cpp"
+
+    @staticmethod
+    def _normalize_api_base_url(value: str | None) -> str:
+        return str(value or "").strip().rstrip("/")
+
+    @staticmethod
+    def _api_key_fingerprint(value: str | None) -> str:
+        key = str(value or "").strip()
+        if not key:
+            return ""
+        return f"{len(key)}:{key[-4:]}"
+
+    def _openai_options_for_backend(self, llm_options: dict[str, Any] | None) -> dict[str, Any]:
+        opts = dict(llm_options or {})
+        if self.backend_name in {"openai", "openai_compatible"} and self.model_name:
+            opts["api_model"] = self.model_name
+        return opts
+
+    def _gemini_options_for_backend(self, llm_options: dict[str, Any] | None) -> dict[str, Any]:
+        opts = dict(llm_options or {})
+        if self.backend_name == "gemini":
+            if self.model_name:
+                opts["api_model"] = self.model_name
+            if self._loaded_api_base_url:
+                opts["api_base_url"] = self._loaded_api_base_url
+            if self._loaded_api_key:
+                opts["api_key"] = self._loaded_api_key
+        return opts
 
     async def _decode_json_payload(self, content: str, llm_options: dict[str, Any], provider: str) -> dict[str, Any]:
         return await decode_json_payload(
@@ -943,24 +1052,25 @@ class LLMEngine:
             openai_client=self._openai_client,
             text=text,
             prompt=prompt,
-            llm_options=llm_options,
+            llm_options=self._openai_options_for_backend(llm_options),
             extraction_prompt=legacy_extraction_prompt(),
             schema=structured_output_schema(),
             logger=logger,
+            default_model=self.model_name,
         )
 
     async def _run_gemini_parse(self, text: str, prompt: str | None, llm_options: dict[str, Any]) -> str:
         return await run_gemini_parse(
             text=text,
             prompt=prompt,
-            llm_options=llm_options,
+            llm_options=self._gemini_options_for_backend(llm_options),
             extraction_prompt=legacy_extraction_prompt(),
             gemini_schema=gemini_response_schema(),
             logger=logger,
         )
 
     async def _repair_json_via_gemini(self, broken_json: str, llm_options: dict[str, Any]) -> str:
-        return await repair_json_via_gemini(broken_json=broken_json, llm_options=llm_options)
+        return await repair_json_via_gemini(broken_json=broken_json, llm_options=self._gemini_options_for_backend(llm_options))
 
     async def _repair_json_via_llama(self, broken_json: str, llm_options: dict[str, Any]) -> str:
         if self._llm is None:

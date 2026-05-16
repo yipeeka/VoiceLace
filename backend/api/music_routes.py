@@ -35,7 +35,7 @@ MUSIC_ASSET_SUFFIXES = {".wav", ".mp3", ".flac", ".ogg"}
 MUSIC_TASK_TYPES = {"text2music", "cover", "repaint", "lego", "extract", "complete"}
 UNCATEGORIZED_CATEGORY_ID = "uncategorized"
 MUSIC_ASSET_CATEGORY_INDEX_FILENAME = ".asset_categories.json"
-ALLOWED_ASSIST_SOURCES = {"primary_local", "secondary_local", "openai", "gemini"}
+ALLOWED_ASSIST_SOURCES = {"primary_local", "secondary_local", "openai", "openai_compatible", "gemini"}
 ALLOWED_VOCAL_LANGUAGES = {"unknown", "zh", "en", "ja", "ko"}
 ALLOWED_BPMS = {60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 180}
 ALLOWED_KEYSCALES = {
@@ -371,6 +371,7 @@ def _build_music_assist_config(state, source: str) -> dict[str, Any]:
             },
         }
     if source == "openai":
+        api_model = cfg.openai_model or cfg.llm_api_model
         return {
             "backend": "openai",
             "model_path": cfg.llm_model_path,
@@ -379,6 +380,9 @@ def _build_music_assist_config(state, source: str) -> dict[str, Any]:
             "n_gpu_layers": int(cfg.llm_n_gpu_layers),
             "n_threads": int(cfg.llm_threads),
             "enable_think_mode": False,
+            "api_key": cfg.openai_api_key,
+            "api_base_url": cfg.openai_base_url,
+            "api_model": api_model,
             "options": {
                 "temperature": float(cfg.llm_temperature),
                 "top_p": float(cfg.llm_top_p),
@@ -387,10 +391,35 @@ def _build_music_assist_config(state, source: str) -> dict[str, Any]:
                 "presence_penalty": float(cfg.llm_presence_penalty),
                 "repeat_penalty": float(cfg.llm_repeat_penalty),
                 "max_tokens": int(cfg.llm_max_tokens),
-                "api_model": cfg.llm_api_model,
+                "api_model": api_model,
+            },
+        }
+    if source == "openai_compatible":
+        api_model = cfg.openai_compatible_model or cfg.llm_api_model
+        return {
+            "backend": "openai_compatible",
+            "model_path": cfg.llm_model_path,
+            "clip_model_path": cfg.llm_clip_model_path,
+            "n_ctx": int(cfg.llm_n_ctx),
+            "n_gpu_layers": int(cfg.llm_n_gpu_layers),
+            "n_threads": int(cfg.llm_threads),
+            "enable_think_mode": False,
+            "api_key": cfg.openai_compatible_api_key,
+            "api_base_url": cfg.openai_compatible_base_url,
+            "api_model": api_model,
+            "options": {
+                "temperature": float(cfg.llm_temperature),
+                "top_p": float(cfg.llm_top_p),
+                "top_k": int(cfg.llm_top_k),
+                "min_p": float(cfg.llm_min_p),
+                "presence_penalty": float(cfg.llm_presence_penalty),
+                "repeat_penalty": float(cfg.llm_repeat_penalty),
+                "max_tokens": int(cfg.llm_max_tokens),
+                "api_model": api_model,
             },
         }
     if source == "gemini":
+        api_model = cfg.gemini_model or cfg.llm_api_model
         return {
             "backend": "gemini",
             "model_path": cfg.llm_model_path,
@@ -399,6 +428,9 @@ def _build_music_assist_config(state, source: str) -> dict[str, Any]:
             "n_gpu_layers": int(cfg.llm_n_gpu_layers),
             "n_threads": int(cfg.llm_threads),
             "enable_think_mode": False,
+            "api_key": cfg.gemini_api_key,
+            "api_base_url": cfg.gemini_base_url,
+            "api_model": api_model,
             "options": {
                 "temperature": float(cfg.llm_temperature),
                 "top_p": float(cfg.llm_top_p),
@@ -407,7 +439,9 @@ def _build_music_assist_config(state, source: str) -> dict[str, Any]:
                 "presence_penalty": float(cfg.llm_presence_penalty),
                 "repeat_penalty": float(cfg.llm_repeat_penalty),
                 "max_tokens": int(cfg.llm_max_tokens),
-                "api_model": cfg.llm_api_model,
+                "api_key": cfg.gemini_api_key,
+                "api_base_url": cfg.gemini_base_url,
+                "api_model": api_model,
             },
         }
     raise HTTPException(status_code=400, detail=f"Unsupported music assist source: {source}")
@@ -432,6 +466,9 @@ async def _load_music_assist_engine(state, source: str) -> dict[str, Any]:
             n_gpu_layers=config["n_gpu_layers"],
             backend=config["backend"],
             n_threads=config["n_threads"],
+            api_key=config.get("api_key", ""),
+            api_base_url=config.get("api_base_url", ""),
+            api_model=config.get("api_model", ""),
         )
     except Exception as exc:
         state.music_assist_engine_source = ""

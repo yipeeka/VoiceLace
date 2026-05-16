@@ -9,7 +9,7 @@ from typing import Any, Awaitable, Callable
 
 from fastapi import HTTPException
 
-ALLOWED_TRANSLATION_SOURCES = {"primary_local", "secondary_local", "openai", "gemini"}
+ALLOWED_TRANSLATION_SOURCES = {"primary_local", "secondary_local", "openai", "openai_compatible", "gemini"}
 PROMPT_VERSION = "dubbing-batch-v2"
 TIMELINE_DURATION_BUFFER_SEC = 0.1
 TARGET_DURATION_MIN_SEC = 0.3
@@ -479,6 +479,7 @@ def build_translation_config(state, source: str) -> dict[str, Any]:
             },
         }
     if source == "openai":
+        api_model = cfg.openai_model or cfg.llm_api_model
         return {
             "backend": "openai",
             "model_path": cfg.llm_model_path,
@@ -487,7 +488,9 @@ def build_translation_config(state, source: str) -> dict[str, Any]:
             "n_gpu_layers": int(cfg.llm_n_gpu_layers),
             "n_threads": int(cfg.llm_threads),
             "enable_think_mode": False,
-            "api_model": cfg.llm_api_model,
+            "api_key": cfg.openai_api_key,
+            "api_base_url": cfg.openai_base_url,
+            "api_model": api_model,
             "options": {
                 "temperature": float(cfg.llm_temperature),
                 "top_p": float(cfg.llm_top_p),
@@ -496,10 +499,35 @@ def build_translation_config(state, source: str) -> dict[str, Any]:
                 "presence_penalty": float(cfg.llm_presence_penalty),
                 "repeat_penalty": float(cfg.llm_repeat_penalty),
                 "max_tokens": int(cfg.llm_max_tokens),
-                "api_model": cfg.llm_api_model,
+                "api_model": api_model,
+            },
+        }
+    if source == "openai_compatible":
+        api_model = cfg.openai_compatible_model or cfg.llm_api_model
+        return {
+            "backend": "openai_compatible",
+            "model_path": cfg.llm_model_path,
+            "clip_model_path": cfg.llm_clip_model_path,
+            "n_ctx": int(cfg.llm_n_ctx),
+            "n_gpu_layers": int(cfg.llm_n_gpu_layers),
+            "n_threads": int(cfg.llm_threads),
+            "enable_think_mode": False,
+            "api_key": cfg.openai_compatible_api_key,
+            "api_base_url": cfg.openai_compatible_base_url,
+            "api_model": api_model,
+            "options": {
+                "temperature": float(cfg.llm_temperature),
+                "top_p": float(cfg.llm_top_p),
+                "top_k": int(cfg.llm_top_k),
+                "min_p": float(cfg.llm_min_p),
+                "presence_penalty": float(cfg.llm_presence_penalty),
+                "repeat_penalty": float(cfg.llm_repeat_penalty),
+                "max_tokens": int(cfg.llm_max_tokens),
+                "api_model": api_model,
             },
         }
     if source == "gemini":
+        api_model = cfg.gemini_model or cfg.llm_api_model
         return {
             "backend": "gemini",
             "model_path": cfg.llm_model_path,
@@ -508,7 +536,9 @@ def build_translation_config(state, source: str) -> dict[str, Any]:
             "n_gpu_layers": int(cfg.llm_n_gpu_layers),
             "n_threads": int(cfg.llm_threads),
             "enable_think_mode": False,
-            "api_model": cfg.llm_api_model,
+            "api_key": cfg.gemini_api_key,
+            "api_base_url": cfg.gemini_base_url,
+            "api_model": api_model,
             "options": {
                 "temperature": float(cfg.llm_temperature),
                 "top_p": float(cfg.llm_top_p),
@@ -517,7 +547,9 @@ def build_translation_config(state, source: str) -> dict[str, Any]:
                 "presence_penalty": float(cfg.llm_presence_penalty),
                 "repeat_penalty": float(cfg.llm_repeat_penalty),
                 "max_tokens": int(cfg.llm_max_tokens),
-                "api_model": cfg.llm_api_model,
+                "api_key": cfg.gemini_api_key,
+                "api_base_url": cfg.gemini_base_url,
+                "api_model": api_model,
             },
         }
     raise HTTPException(status_code=400, detail=f"Unsupported translation source: {source}")

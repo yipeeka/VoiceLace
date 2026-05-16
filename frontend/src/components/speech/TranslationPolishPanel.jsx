@@ -44,6 +44,7 @@ export default function TranslationPolishPanel({
             <option value="primary_local">主模型</option>
             <option value="secondary_local">小模型</option>
             <option value="openai">OpenAI API</option>
+            <option value="openai_compatible">OpenAI 兼容 API</option>
             <option value="gemini">Gemini API</option>
           </select>
         </div>

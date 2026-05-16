@@ -1,10 +1,10 @@
 import { create } from "zustand";
-import { api } from "../utils/api";
-import { formatError, getErrorMessage } from "../utils/errors";
-import { useSpeechRecognitionStore } from "./useSpeechRecognitionStore";
-import { useUiStore } from "./useUiStore";
+import { api } from "../utils/api.js";
+import { formatError, getErrorMessage } from "../utils/errors.js";
+import { useSpeechRecognitionStore } from "./useSpeechRecognitionStore.js";
+import { useUiStore } from "./useUiStore.js";
 
-function normalizeOrchestratorConfig(raw) {
+export function normalizeOrchestratorConfig(raw) {
   if (!raw) {
     return null;
   }
@@ -21,6 +21,15 @@ function normalizeOrchestratorConfig(raw) {
     llm_model_path: raw.llm_model_path ?? "",
     llm_clip_model_path: raw.llm_clip_model_path ?? "",
     llm_api_model: raw.llm_api_model ?? "",
+    openai_api_key: raw.openai_api_key ?? "",
+    openai_base_url: raw.openai_base_url ?? "",
+    openai_model: raw.openai_model ?? raw.llm_api_model ?? "",
+    openai_compatible_api_key: raw.openai_compatible_api_key ?? "",
+    openai_compatible_base_url: raw.openai_compatible_base_url ?? "",
+    openai_compatible_model: raw.openai_compatible_model ?? "",
+    gemini_api_key: raw.gemini_api_key ?? "",
+    gemini_base_url: raw.gemini_base_url ?? "",
+    gemini_model: raw.gemini_model ?? raw.llm_api_model ?? "",
     llm_n_ctx: Number(raw.llm_n_ctx ?? 8192),
     llm_n_gpu_layers: Number(raw.llm_n_gpu_layers ?? -1),
     llm_threads: Number(raw.llm_threads ?? 0),
@@ -75,7 +84,7 @@ function normalizeOrchestratorConfig(raw) {
   };
 }
 
-function toOrchestratorPayload(config) {
+export function toOrchestratorPayload(config) {
   return {
     auto_serial: Boolean(config.auto_serial ?? true),
     auto_unload_llm_after_parse: Boolean(config.auto_unload_llm_after_parse ?? true),
@@ -88,6 +97,15 @@ function toOrchestratorPayload(config) {
     llm_clip_model_path: config.llm_clip_model_path ?? "",
     llm_backend: config.llm_backend ?? "llama_cpp",
     llm_api_model: config.llm_api_model ?? "",
+    openai_api_key: config.openai_api_key ?? "",
+    openai_base_url: config.openai_base_url ?? "",
+    openai_model: config.openai_model ?? "",
+    openai_compatible_api_key: config.openai_compatible_api_key ?? "",
+    openai_compatible_base_url: config.openai_compatible_base_url ?? "",
+    openai_compatible_model: config.openai_compatible_model ?? "",
+    gemini_api_key: config.gemini_api_key ?? "",
+    gemini_base_url: config.gemini_base_url ?? "",
+    gemini_model: config.gemini_model ?? "",
     llm_n_ctx: Number(config.llm_n_ctx ?? 8192),
     llm_n_gpu_layers: Number(config.llm_n_gpu_layers ?? -1),
     llm_threads: Number(config.llm_threads ?? 0),

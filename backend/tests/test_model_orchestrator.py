@@ -145,6 +145,105 @@ class ModelOrchestratorTest(unittest.IsolatedAsyncioTestCase):
         _args, kwargs = llm.loaded_args
         self.assertEqual(kwargs.get("clip_model_path"), "E:/models/test.mmproj")
 
+    async def test_ensure_llm_ready_passes_openai_compatible_runtime_config(self) -> None:
+        llm = _FakeLlmEngine()
+        tts = _FakeTtsEngine()
+        orch = ModelOrchestrator(llm, tts)
+        orch.set_config(
+            OrchestratorConfig(
+                llm_backend="openai_compatible",
+                llm_api_model="fallback-model",
+                openai_compatible_api_key="sk-compatible",
+                openai_compatible_base_url="http://localhost:11434/v1",
+                openai_compatible_model="compatible-model",
+            )
+        )
+
+        await orch.ensure_llm_ready()
+
+        self.assertTrue(llm.is_loaded)
+        _args, kwargs = llm.loaded_args
+        self.assertEqual(kwargs.get("backend"), "openai_compatible")
+        self.assertEqual(kwargs.get("api_key"), "sk-compatible")
+        self.assertEqual(kwargs.get("api_base_url"), "http://localhost:11434/v1")
+        self.assertEqual(kwargs.get("api_model"), "compatible-model")
+
+    async def test_ensure_llm_ready_passes_openai_runtime_config(self) -> None:
+        llm = _FakeLlmEngine()
+        tts = _FakeTtsEngine()
+        orch = ModelOrchestrator(llm, tts)
+        orch.set_config(
+            OrchestratorConfig(
+                llm_backend="openai",
+                llm_api_model="fallback-model",
+                openai_api_key="sk-openai",
+                openai_base_url="https://api.example.test/v1",
+                openai_model="gpt-test",
+            )
+        )
+
+        await orch.ensure_llm_ready()
+
+        self.assertTrue(llm.is_loaded)
+        _args, kwargs = llm.loaded_args
+        self.assertEqual(kwargs.get("backend"), "openai")
+        self.assertEqual(kwargs.get("api_key"), "sk-openai")
+        self.assertEqual(kwargs.get("api_base_url"), "https://api.example.test/v1")
+        self.assertEqual(kwargs.get("api_model"), "gpt-test")
+
+    async def test_ensure_llm_ready_passes_gemini_runtime_config(self) -> None:
+        llm = _FakeLlmEngine()
+        tts = _FakeTtsEngine()
+        orch = ModelOrchestrator(llm, tts)
+        orch.set_config(
+            OrchestratorConfig(
+                llm_backend="gemini",
+                llm_api_model="fallback-model",
+                gemini_api_key="gemini-key",
+                gemini_base_url="https://generativelanguage.googleapis.com",
+                gemini_model="gemini-test",
+            )
+        )
+
+        await orch.ensure_llm_ready()
+
+        self.assertTrue(llm.is_loaded)
+        _args, kwargs = llm.loaded_args
+        self.assertEqual(kwargs.get("backend"), "gemini")
+        self.assertEqual(kwargs.get("api_key"), "gemini-key")
+        self.assertEqual(kwargs.get("api_base_url"), "https://generativelanguage.googleapis.com")
+        self.assertEqual(kwargs.get("api_model"), "gemini-test")
+
+    async def test_status_exposes_openai_compatible_config_fields(self) -> None:
+        llm = _FakeLlmEngine()
+        tts = _FakeTtsEngine()
+        orch = ModelOrchestrator(llm, tts)
+        orch.set_config(
+            OrchestratorConfig(
+                openai_api_key="sk-openai",
+                openai_base_url="https://api.example.test/v1",
+                openai_model="gpt-test",
+                openai_compatible_api_key="sk-compatible",
+                openai_compatible_base_url="http://localhost:11434/v1",
+                openai_compatible_model="compatible-model",
+                gemini_api_key="gemini-key",
+                gemini_base_url="https://generativelanguage.googleapis.com",
+                gemini_model="gemini-test",
+            )
+        )
+
+        status = await orch.get_status()
+        config = status["config"]
+        self.assertEqual(config["openai_api_key"], "sk-openai")
+        self.assertEqual(config["openai_base_url"], "https://api.example.test/v1")
+        self.assertEqual(config["openai_model"], "gpt-test")
+        self.assertEqual(config["openai_compatible_api_key"], "sk-compatible")
+        self.assertEqual(config["openai_compatible_base_url"], "http://localhost:11434/v1")
+        self.assertEqual(config["openai_compatible_model"], "compatible-model")
+        self.assertEqual(config["gemini_api_key"], "gemini-key")
+        self.assertEqual(config["gemini_base_url"], "https://generativelanguage.googleapis.com")
+        self.assertEqual(config["gemini_model"], "gemini-test")
+
     async def test_ensure_tts_ready_unloads_music_when_auto_serial_enabled(self) -> None:
         llm = _FakeLlmEngine()
         tts = _FakeTtsEngine()

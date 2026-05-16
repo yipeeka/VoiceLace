@@ -74,6 +74,7 @@ export default function SubtitleDubbingPanel({
             <option value="primary_local">主模型</option>
             <option value="secondary_local">小模型</option>
             <option value="openai">OpenAI API</option>
+            <option value="openai_compatible">OpenAI 兼容 API</option>
             <option value="gemini">Gemini API</option>
           </select>
         </div>
@@ -95,7 +96,7 @@ export default function SubtitleDubbingPanel({
         <Button variant="danger" onClick={onAbortSubtitleTranslate} disabled={!isTranslatingSubtitle}>终止字幕翻译</Button>
       </div>
       <div className="muted">翻译引擎：{translationEngineStatus?.loaded ? "已加载" : "未加载"} · 来源：{translationEngineStatus?.source || "未选择"} · 后端：{translationEngineStatus?.backend || "unknown"}</div>
-      {subtitleMode === "translated" && ["openai", "gemini"].includes(translationSource) ? <div className="muted">API 翻译预览会并发处理；本地模型为保护模型实例保持串行。</div> : null}
+      {subtitleMode === "translated" && ["openai", "openai_compatible", "gemini"].includes(translationSource) ? <div className="muted">API 翻译预览会并发处理；本地模型为保护模型实例保持串行。</div> : null}
       {isTranslatingSubtitle || subtitleTask.stageLabel ? (
         <div className="muted">
           字幕翻译：{subtitleTask.stageLabel || subtitleTask.status || "处理中"}

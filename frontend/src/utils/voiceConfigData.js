@@ -1,4 +1,4 @@
-import { API_ORIGIN } from "./api";
+import { API_ORIGIN } from "./api.js";
 
 export const GENDER_OPTIONS = [
   { value: "", label: "未指定" },
@@ -40,6 +40,7 @@ export const RECOMMEND_SOURCE_OPTIONS = [
   { value: "secondary_local", label: "小模型（默认）" },
   { value: "primary_local", label: "主模型" },
   { value: "openai", label: "OpenAI API" },
+  { value: "openai_compatible", label: "OpenAI 兼容 API" },
   { value: "gemini", label: "Gemini API" },
   { value: "rule", label: "规则推荐（不走 LLM）" },
 ];

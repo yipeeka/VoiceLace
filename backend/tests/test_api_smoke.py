@@ -79,6 +79,15 @@ class ApiSmokeTest(unittest.TestCase):
         self.assertIn("music_model_variant", body.get("config", {}))
         self.assertIn("mcp_enabled", body.get("config", {}))
         self.assertIn("mcp_mount_path", body.get("config", {}))
+        self.assertIn("openai_api_key", body.get("config", {}))
+        self.assertIn("openai_base_url", body.get("config", {}))
+        self.assertIn("openai_model", body.get("config", {}))
+        self.assertIn("openai_compatible_api_key", body.get("config", {}))
+        self.assertIn("openai_compatible_base_url", body.get("config", {}))
+        self.assertIn("openai_compatible_model", body.get("config", {}))
+        self.assertIn("gemini_api_key", body.get("config", {}))
+        self.assertIn("gemini_base_url", body.get("config", {}))
+        self.assertIn("gemini_model", body.get("config", {}))
         self.assertIn("mcp_enabled", body)
         self.assertIn("mcp_mount_path", body)
 
@@ -1245,6 +1254,12 @@ class ApiSmokeTest(unittest.TestCase):
             "llm_model_path": "unused-for-openai",
             "llm_clip_model_path": "E:/models/mmproj/qwen35.mmproj",
             "llm_api_model": "gpt-4.1-mini",
+            "openai_api_key": "sk-openai",
+            "openai_base_url": "https://api.example.test/v1",
+            "openai_model": "gpt-test",
+            "gemini_api_key": "gemini-key",
+            "gemini_base_url": "https://generativelanguage.googleapis.com",
+            "gemini_model": "gemini-test",
             "llm_n_ctx": 4096,
             "llm_n_gpu_layers": -1,
             "llm_threads": 8,
@@ -1267,6 +1282,12 @@ class ApiSmokeTest(unittest.TestCase):
             self.assertFalse(body["enable_llama_cpp_think_mode"])
             self.assertEqual(body["llm_backend"], "openai")
             self.assertEqual(body["llm_api_model"], "gpt-4.1-mini")
+            self.assertEqual(body["openai_api_key"], "sk-openai")
+            self.assertEqual(body["openai_base_url"], "https://api.example.test/v1")
+            self.assertEqual(body["openai_model"], "gpt-test")
+            self.assertEqual(body["gemini_api_key"], "gemini-key")
+            self.assertEqual(body["gemini_base_url"], "https://generativelanguage.googleapis.com")
+            self.assertEqual(body["gemini_model"], "gemini-test")
             self.assertEqual(body["llm_clip_model_path"], "E:/models/mmproj/qwen35.mmproj")
             self.assertEqual(body["llm_threads"], 8)
             self.assertEqual(body["asr_model_path"], "E:/models/faster-whisper-large-v3")
@@ -1274,6 +1295,12 @@ class ApiSmokeTest(unittest.TestCase):
             persisted = json.loads(cfg_path.read_text(encoding="utf-8"))
             self.assertFalse(persisted["enable_llama_cpp_think_mode"])
             self.assertEqual(persisted["llm_backend"], "openai")
+            self.assertEqual(persisted["openai_api_key"], "sk-openai")
+            self.assertEqual(persisted["openai_base_url"], "https://api.example.test/v1")
+            self.assertEqual(persisted["openai_model"], "gpt-test")
+            self.assertEqual(persisted["gemini_api_key"], "gemini-key")
+            self.assertEqual(persisted["gemini_base_url"], "https://generativelanguage.googleapis.com")
+            self.assertEqual(persisted["gemini_model"], "gemini-test")
             self.assertEqual(persisted["llm_clip_model_path"], "E:/models/mmproj/qwen35.mmproj")
             self.assertEqual(persisted["llm_threads"], 8)
         finally:

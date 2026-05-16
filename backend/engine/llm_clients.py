@@ -65,11 +65,12 @@ async def run_openai_parse(
     extraction_prompt: str,
     schema: dict[str, Any],
     logger: Any,
+    default_model: str | None = None,
 ) -> str:
     if openai_client is None:
         raise RuntimeError("OpenAI client is not initialized")
     combined_prompt = f"{(prompt or '').strip()}\n\n{extraction_prompt.strip()}".strip()
-    model = str(llm_options.get("api_model") or settings.openai_model)
+    model = str(llm_options.get("api_model") or default_model or settings.openai_model)
     temperature = float(llm_options.get("temperature", 0.2))
     # OpenAI API path: only pass temperature from tuning params.
     use_schema = bool(llm_options.get("enable_structured_output", True))
@@ -115,11 +116,12 @@ async def run_openai_text(
     prompt: str | None,
     llm_options: dict[str, Any],
     extraction_prompt: str,
+    default_model: str | None = None,
 ) -> str:
     if openai_client is None:
         raise RuntimeError("OpenAI client is not initialized")
     combined_prompt = f"{(prompt or '').strip()}\n\n{extraction_prompt.strip()}".strip()
-    model = str(llm_options.get("api_model") or settings.openai_model)
+    model = str(llm_options.get("api_model") or default_model or settings.openai_model)
     temperature = float(llm_options.get("temperature", 0.2))
 
     def _call() -> Any:
@@ -146,7 +148,8 @@ async def run_gemini_parse(
     logger: Any,
 ) -> str:
     combined_prompt = f"{(prompt or '').strip()}\n\n{extraction_prompt.strip()}".strip()
-    base_url = settings.gemini_base_url
+    base_url = str(llm_options.get("api_base_url") or settings.gemini_base_url)
+    api_key = str(llm_options.get("api_key") or settings.gemini_api_key)
     model = str(llm_options.get("api_model") or settings.gemini_model)
     temperature = float(llm_options.get("temperature", 0.2))
     # Gemini API path: only pass temperature from tuning params.
@@ -155,7 +158,7 @@ async def run_gemini_parse(
     url = _build_gemini_generate_url(
         base_url=base_url,
         model=model,
-        api_key=settings.gemini_api_key,
+        api_key=api_key,
     )
 
     async def _call(include_schema: bool) -> tuple[str, str]:
@@ -242,13 +245,14 @@ async def run_gemini_text(
     extraction_prompt: str,
 ) -> str:
     combined_prompt = f"{(prompt or '').strip()}\n\n{extraction_prompt.strip()}".strip()
-    base_url = settings.gemini_base_url
+    base_url = str(llm_options.get("api_base_url") or settings.gemini_base_url)
+    api_key = str(llm_options.get("api_key") or settings.gemini_api_key)
     model = str(llm_options.get("api_model") or settings.gemini_model)
     temperature = float(llm_options.get("temperature", 0.2))
     url = _build_gemini_generate_url(
         base_url=base_url,
         model=model,
-        api_key=settings.gemini_api_key,
+        api_key=api_key,
     )
 
     payload = {
@@ -315,12 +319,13 @@ async def repair_json_via_gemini(
     broken_json: str,
     llm_options: dict[str, Any],
 ) -> str:
-    base_url = settings.gemini_base_url
+    base_url = str(llm_options.get("api_base_url") or settings.gemini_base_url)
+    api_key = str(llm_options.get("api_key") or settings.gemini_api_key)
     model = str(llm_options.get("api_model") or settings.gemini_model)
     url = _build_gemini_generate_url(
         base_url=base_url,
         model=model,
-        api_key=settings.gemini_api_key,
+        api_key=api_key,
     )
     prompt = (
         "请修复下面这段损坏的 JSON，要求：\n"

@@ -45,24 +45,25 @@ async def run_single_parse_with_stats(
         "finish_reason": "",
     }
     if backend_name != "llama-cpp-python" or llm is None:
-        if backend_name == "openai":
+        if backend_name in {"openai", "openai_compatible"}:
+            provider_name = "openai_compatible" if backend_name == "openai_compatible" else "openai"
             try:
                 content = await run_openai_parse(text, prompt, llm_options or {})
                 if on_chunk is not None and content:
                     await on_chunk(content)
-                payload, decode_meta = await decode_json_payload_with_meta(content, llm_options or {}, "openai")
+                payload, decode_meta = await decode_json_payload_with_meta(content, llm_options or {}, provider_name)
                 stats["decode_strategy"] = decode_meta.get("strategy", "raw")
                 stats["repair_used"] = bool(decode_meta.get("repair_used", False))
                 stats["output_chars"] = len(content or "")
-                script = build_script_from_model_payload(text, payload, "openai")
+                script = build_script_from_model_payload(text, payload, provider_name)
                 stats["duration_ms"] = int((time.perf_counter() - started) * 1000)
                 return script, stats
             except Exception as exc:
-                logger.exception("OpenAI parse failed, falling back to mock parser")
+                logger.exception("%s parse failed, falling back to mock parser", provider_name)
                 set_last_error(str(exc))
                 stats["fallback"] = True
                 stats["error"] = str(exc)
-                stats["decode_strategy"] = "fallback_openai"
+                stats["decode_strategy"] = f"fallback_{provider_name}"
                 script = build_mock_script(text, prompt=prompt, parser_name="demo-llm-fallback")
                 stats["duration_ms"] = int((time.perf_counter() - started) * 1000)
                 return script, stats

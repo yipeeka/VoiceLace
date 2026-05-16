@@ -32,7 +32,7 @@ from backend.state import get_app_state
 
 router = APIRouter()
 _PREVIEW_TTL_SECONDS = 10 * 60
-_ALLOWED_RECOMMEND_SOURCES = {"secondary_local", "primary_local", "openai", "gemini", "rule"}
+_ALLOWED_RECOMMEND_SOURCES = {"secondary_local", "primary_local", "openai", "openai_compatible", "gemini", "rule"}
 
 
 def _cleanup_expired_previews(output_dir: Path) -> None:
@@ -124,6 +124,7 @@ def _build_recommendation_engine_config(state, source: str) -> dict[str, Any]:
             },
         }
     if source_name == "openai":
+        api_model = cfg.openai_model or cfg.llm_api_model
         return {
             "backend": "openai",
             "model_path": cfg.llm_model_path,
@@ -132,6 +133,9 @@ def _build_recommendation_engine_config(state, source: str) -> dict[str, Any]:
             "n_gpu_layers": int(cfg.llm_n_gpu_layers),
             "n_threads": int(cfg.llm_threads),
             "enable_think_mode": False,
+            "api_key": cfg.openai_api_key,
+            "api_base_url": cfg.openai_base_url,
+            "api_model": api_model,
             "options": {
                 "temperature": float(cfg.llm_temperature),
                 "top_p": float(cfg.llm_top_p),
@@ -140,10 +144,35 @@ def _build_recommendation_engine_config(state, source: str) -> dict[str, Any]:
                 "presence_penalty": float(cfg.llm_presence_penalty),
                 "repeat_penalty": float(cfg.llm_repeat_penalty),
                 "max_tokens": int(cfg.llm_max_tokens),
-                "api_model": cfg.llm_api_model,
+                "api_model": api_model,
             },
         }
+    if source_name == "openai_compatible":
+        api_model = cfg.openai_compatible_model or cfg.llm_api_model
+        return {
+            "backend": "openai_compatible",
+            "model_path": cfg.llm_model_path,
+            "clip_model_path": cfg.llm_clip_model_path,
+            "n_ctx": int(cfg.llm_n_ctx),
+            "n_gpu_layers": int(cfg.llm_n_gpu_layers),
+            "n_threads": int(cfg.llm_threads),
+            "enable_think_mode": False,
+            "api_key": cfg.openai_compatible_api_key,
+            "api_base_url": cfg.openai_compatible_base_url,
+            "options": {
+                "temperature": float(cfg.llm_temperature),
+                "top_p": float(cfg.llm_top_p),
+                "top_k": int(cfg.llm_top_k),
+                "min_p": float(cfg.llm_min_p),
+                "presence_penalty": float(cfg.llm_presence_penalty),
+                "repeat_penalty": float(cfg.llm_repeat_penalty),
+                "max_tokens": int(cfg.llm_max_tokens),
+                "api_model": api_model,
+            },
+            "api_model": api_model,
+        }
     if source_name == "gemini":
+        api_model = cfg.gemini_model or cfg.llm_api_model
         return {
             "backend": "gemini",
             "model_path": cfg.llm_model_path,
@@ -152,6 +181,9 @@ def _build_recommendation_engine_config(state, source: str) -> dict[str, Any]:
             "n_gpu_layers": int(cfg.llm_n_gpu_layers),
             "n_threads": int(cfg.llm_threads),
             "enable_think_mode": False,
+            "api_key": cfg.gemini_api_key,
+            "api_base_url": cfg.gemini_base_url,
+            "api_model": api_model,
             "options": {
                 "temperature": float(cfg.llm_temperature),
                 "top_p": float(cfg.llm_top_p),
@@ -160,7 +192,9 @@ def _build_recommendation_engine_config(state, source: str) -> dict[str, Any]:
                 "presence_penalty": float(cfg.llm_presence_penalty),
                 "repeat_penalty": float(cfg.llm_repeat_penalty),
                 "max_tokens": int(cfg.llm_max_tokens),
-                "api_model": cfg.llm_api_model,
+                "api_key": cfg.gemini_api_key,
+                "api_base_url": cfg.gemini_base_url,
+                "api_model": api_model,
             },
         }
     raise HTTPException(status_code=400, detail=f"Unsupported recommendation source: {source_name}")
@@ -183,6 +217,9 @@ async def _ensure_recommendation_engine_ready(state, source: str) -> tuple[Any, 
             n_gpu_layers=config["n_gpu_layers"],
             backend=config["backend"],
             n_threads=config["n_threads"],
+            api_key=config.get("api_key", ""),
+            api_base_url=config.get("api_base_url", ""),
+            api_model=config.get("api_model", ""),
         )
         state.translation_engine_source = source
         state.translation_engine_error = ""

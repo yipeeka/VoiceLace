@@ -502,7 +502,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       formData.append("target_language", translationTargetLanguage);
       formData.append("translation_source", translationSource);
       formData.append("line_policy", subtitleLinePolicy);
-      formData.append("max_concurrency", ["openai", "gemini"].includes(translationSource) ? "4" : "1");
+      formData.append("max_concurrency", ["openai", "openai_compatible", "gemini"].includes(translationSource) ? "4" : "1");
       const response = await fetch(`${API_BASE_URL}/subtitles/translate-preview/task`, {
         method: "POST",
         body: formData,
@@ -1072,7 +1072,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           target_language: translationTargetLanguage,
           min_speed: 0.8,
           max_speed: 1.2,
-          max_concurrency: ["openai", "gemini"].includes(translationSource) ? 4 : 1,
+          max_concurrency: ["openai", "openai_compatible", "gemini"].includes(translationSource) ? 4 : 1,
           segments: normalizedAlignments,
         }),
       });

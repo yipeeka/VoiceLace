@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   BPM_OPTIONS,
+  ASSIST_SOURCE_OPTIONS,
   MUSIC_CATEGORY_UNCATEGORIZED,
   formatFileSize,
   getDefaultInferenceSteps,
@@ -13,6 +14,7 @@ import {
   parseMusicEvent,
   toNumberOrNull,
 } from "../src/utils/musicPageData.js";
+import { RECOMMEND_SOURCE_OPTIONS } from "../src/utils/voiceConfigData.js";
 
 test("toNumberOrNull parses finite values only", () => {
   assert.equal(toNumberOrNull("12.5"), 12.5);
@@ -63,4 +65,9 @@ test("normalizeAssetCategories deduplicates and injects uncategorized", () => {
     { id: MUSIC_CATEGORY_UNCATEGORIZED, name: "未分类", builtin: true },
     { id: "score", name: "配乐", builtin: false },
   ]);
+});
+
+test("API source options include OpenAI-compatible provider", () => {
+  assert.ok(ASSIST_SOURCE_OPTIONS.some((item) => item.value === "openai_compatible"));
+  assert.ok(RECOMMEND_SOURCE_OPTIONS.some((item) => item.value === "openai_compatible"));
 });

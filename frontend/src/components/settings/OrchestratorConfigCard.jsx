@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/Tabs";
 const llmBackendOptions = [
   { value: "llama_cpp", label: "llama.cpp (本地 GGUF)" },
   { value: "openai", label: "OpenAI API" },
+  { value: "openai_compatible", label: "OpenAI 兼容 API" },
   { value: "gemini", label: "Gemini API" },
   { value: "mock", label: "Mock (调试)" },
 ];
@@ -123,6 +124,21 @@ function SettingsGroup({ title, description, children }) {
 }
 
 export default function OrchestratorConfigCard({ form, isSaving, onSetField, onSave, onSetAsDefault, onReset }) {
+  const llmBackend = form?.llm_backend ?? "llama_cpp";
+  const isLocalLlm = llmBackend === "llama_cpp";
+  const isOpenAiLlm = llmBackend === "openai";
+  const isGeminiLlm = llmBackend === "gemini";
+  const isOpenAiCompatibleLlm = llmBackend === "openai_compatible";
+  const mainModelDescription = isLocalLlm
+    ? "配置本地 GGUF 模型路径和 llama-cpp-python 选项。"
+    : isOpenAiLlm
+      ? "配置 OpenAI API Key、Base URL 和模型名。"
+      : isGeminiLlm
+        ? "配置 Gemini API Key、Base URL 和模型名。"
+        : isOpenAiCompatibleLlm
+          ? "配置兼容 OpenAI Chat Completions 的 API 服务。"
+          : "Mock 后端用于调试，不需要模型配置。";
+
   return (
     <GlassCard className="settingsConfigCard">
       <div className="sectionHeader">
@@ -149,7 +165,7 @@ export default function OrchestratorConfigCard({ form, isSaving, onSetField, onS
             </TabsList>
 
             <TabsContent value="llm" className="settingsTabPanel">
-              <SettingsGroup title="主模型" description="选择推理后端，并配置本地模型或 API 模型名。">
+              <SettingsGroup title="主模型" description={mainModelDescription}>
                 <SelectField
                   id="llm-backend"
                   label="LLM 后端"
@@ -157,34 +173,109 @@ export default function OrchestratorConfigCard({ form, isSaving, onSetField, onS
                   onChange={(value) => onSetField("llm_backend", value)}
                   options={llmBackendOptions}
                 />
-                <TextField
-                  id="llm-model-path"
-                  label="LLM 模型路径"
-                  value={form.llm_model_path}
-                  onChange={(value) => onSetField("llm_model_path", value)}
-                  placeholder="例如 D:/models/qwen2.5-7b-q4.gguf…"
-                />
-                <TextField
-                  id="llm-clip-model-path"
-                  label="LLM CLIP 模型路径（Qwen35ChatHandler 可选）"
-                  value={form.llm_clip_model_path}
-                  onChange={(value) => onSetField("llm_clip_model_path", value)}
-                  placeholder="例如 D:/models/mmproj/model.mmproj…"
-                />
-                <TextField
-                  id="llm-api-model"
-                  label="LLM API 模型名（OpenAI/Gemini）"
-                  value={form.llm_api_model}
-                  onChange={(value) => onSetField("llm_api_model", value)}
-                  placeholder="例如 gpt-4.1-mini 或 gemini-2.5-flash…"
-                />
-                <ToggleRow
-                  id="enable-llama-cpp-think-mode"
-                  checked={form.enable_llama_cpp_think_mode ?? true}
-                  onChange={(value) => onSetField("enable_llama_cpp_think_mode", value)}
-                  title="启用 llama-cpp-python Think 模式"
-                  description="切换 Qwen 模型推理是否启用思考模板。"
-                />
+                {isLocalLlm ? (
+                  <>
+                    <TextField
+                      id="llm-model-path"
+                      label="LLM 模型路径"
+                      value={form.llm_model_path}
+                      onChange={(value) => onSetField("llm_model_path", value)}
+                      placeholder="例如 D:/models/qwen2.5-7b-q4.gguf…"
+                    />
+                    <TextField
+                      id="llm-clip-model-path"
+                      label="LLM CLIP 模型路径（Qwen35ChatHandler 可选）"
+                      value={form.llm_clip_model_path}
+                      onChange={(value) => onSetField("llm_clip_model_path", value)}
+                      placeholder="例如 D:/models/mmproj/model.mmproj…"
+                    />
+                    <ToggleRow
+                      id="enable-llama-cpp-think-mode"
+                      checked={form.enable_llama_cpp_think_mode ?? true}
+                      onChange={(value) => onSetField("enable_llama_cpp_think_mode", value)}
+                      title="启用 llama-cpp-python Think 模式"
+                      description="切换 Qwen 模型推理是否启用思考模板。"
+                    />
+                  </>
+                ) : null}
+                {isOpenAiLlm ? (
+                  <>
+                    <TextField
+                      id="openai-api-key"
+                      label="OpenAI API Key"
+                      type="password"
+                      value={form.openai_api_key}
+                      onChange={(value) => onSetField("openai_api_key", value)}
+                      placeholder="填写 OpenAI API Key…"
+                    />
+                    <TextField
+                      id="openai-base-url"
+                      label="OpenAI Base URL"
+                      value={form.openai_base_url}
+                      onChange={(value) => onSetField("openai_base_url", value)}
+                      placeholder="留空使用 OpenAI 默认地址，或填写 https://api.openai.com/v1…"
+                    />
+                    <TextField
+                      id="openai-model"
+                      label="OpenAI 模型名"
+                      value={form.openai_model}
+                      onChange={(value) => onSetField("openai_model", value)}
+                      placeholder="例如 gpt-4.1-mini…"
+                    />
+                  </>
+                ) : null}
+                {isGeminiLlm ? (
+                  <>
+                    <TextField
+                      id="gemini-api-key"
+                      label="Gemini API Key"
+                      type="password"
+                      value={form.gemini_api_key}
+                      onChange={(value) => onSetField("gemini_api_key", value)}
+                      placeholder="填写 Gemini API Key…"
+                    />
+                    <TextField
+                      id="gemini-base-url"
+                      label="Gemini Base URL"
+                      value={form.gemini_base_url}
+                      onChange={(value) => onSetField("gemini_base_url", value)}
+                      placeholder="例如 https://generativelanguage.googleapis.com…"
+                    />
+                    <TextField
+                      id="gemini-model"
+                      label="Gemini 模型名"
+                      value={form.gemini_model}
+                      onChange={(value) => onSetField("gemini_model", value)}
+                      placeholder="例如 gemini-2.5-flash…"
+                    />
+                  </>
+                ) : null}
+                {isOpenAiCompatibleLlm ? (
+                  <>
+                    <TextField
+                      id="openai-compatible-api-key"
+                      label="OpenAI 兼容 API Key"
+                      type="password"
+                      value={form.openai_compatible_api_key}
+                      onChange={(value) => onSetField("openai_compatible_api_key", value)}
+                      placeholder="填写兼容服务的 API Key…"
+                    />
+                    <TextField
+                      id="openai-compatible-base-url"
+                      label="OpenAI 兼容 Base URL"
+                      value={form.openai_compatible_base_url}
+                      onChange={(value) => onSetField("openai_compatible_base_url", value)}
+                      placeholder="例如 http://localhost:11434/v1 或 https://api.example.com/v1…"
+                    />
+                    <TextField
+                      id="openai-compatible-model"
+                      label="OpenAI 兼容模型名"
+                      value={form.openai_compatible_model}
+                      onChange={(value) => onSetField("openai_compatible_model", value)}
+                      placeholder="例如 qwen2.5-32b-instruct…"
+                    />
+                  </>
+                ) : null}
               </SettingsGroup>
 
               <SettingsGroup title="小模型" description="用于翻译润色等辅助任务，可与主模型分开配置。">
