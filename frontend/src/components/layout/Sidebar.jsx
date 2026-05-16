@@ -177,11 +177,11 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
         <div className="sidebarDivider" />
 
         {collapsed ? (
-          <Tooltip content="一键卸载" side="right">
+          <Tooltip content="卸载模型" side="right">
             <button
               className="navItem navItemSubAction navItemDangerAction"
               onClick={() => manualUnloadAll?.()}
-              title="一键卸载"
+              title="卸载模型"
             >
               <Power className="navItemIcon" size={18} />
             </button>
@@ -192,7 +192,7 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
             onClick={() => manualUnloadAll?.()}
           >
             <Power className="navItemIcon" size={16} />
-            <span className="navItemLabel">一键卸载</span>
+            <span className="navItemLabel">卸载模型</span>
           </button>
         )}
 
