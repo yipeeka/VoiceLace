@@ -150,12 +150,19 @@ def write_project_archive(
             json.dumps([preset.model_dump(mode="json") for preset in used_presets], ensure_ascii=False, indent=2),
         )
 
+        written_voice_audio: set[str] = set()
         for preset in used_presets:
-            if not preset.ref_audio_path:
-                continue
-            ref_path = Path(preset.ref_audio_path)
-            if ref_path.exists() and ref_path.is_file():
-                zf.write(ref_path, arcname=f"voices/ref/{ref_path.name}")
+            for audio_path_value in (preset.ref_audio_path, preset.sample_audio_path):
+                if not audio_path_value:
+                    continue
+                audio_path = Path(audio_path_value)
+                if not audio_path.exists() or not audio_path.is_file():
+                    continue
+                archive_name = f"voices/ref/{audio_path.name}"
+                if archive_name in written_voice_audio:
+                    continue
+                zf.write(audio_path, arcname=archive_name)
+                written_voice_audio.add(archive_name)
 
         zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
     return manifest

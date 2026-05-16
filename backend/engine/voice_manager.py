@@ -31,7 +31,10 @@ class VoiceManager:
             return raw_value
 
     def normalize_preset_paths(self, preset: VoicePreset) -> VoicePreset:
-        updates = {"ref_audio_path": self.to_storage_path(preset.ref_audio_path)}
+        updates = {
+            "ref_audio_path": self.to_storage_path(preset.ref_audio_path),
+            "sample_audio_path": self.to_storage_path(preset.sample_audio_path),
+        }
         profiles = preset.backend_profiles
         profile_updates = {}
         if profiles and profiles.omnivoice is not None:

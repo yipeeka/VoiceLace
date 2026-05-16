@@ -4,6 +4,7 @@ import { rectSortingStrategy, SortableContext } from "@dnd-kit/sortable";
 
 import EmptyState from "../shared/EmptyState";
 import GlassCard from "../shared/GlassCard";
+import Button from "../ui/Button";
 import Select from "../ui/Select";
 import SortablePresetCard from "./SortablePresetCard";
 import { QUALITY_FILTER_OPTIONS } from "../../utils/voiceConfigData";
@@ -14,12 +15,14 @@ export default function VoicePresetGridSection({
   displayPresetIds,
   displayPresets,
   favoriteOnly,
+  isFilterActive,
   onCyclePresetVoiceMode,
   onDragEnd,
   onFavoriteOnlyChange,
   onNewPreset,
   onPreviewPreset,
   onQualityFilterChange,
+  onResetFilters,
   onSearchKeywordChange,
   onSelectPreset,
   onSetSelectedPresetId,
@@ -35,56 +38,82 @@ export default function VoicePresetGridSection({
 }) {
   return (
     <GlassCard>
-      <h2 className="cardTitle">声音预设</h2>
-      <p className="cardSubtitle">可拖拽调整预设顺序，新的顺序会自动保存。</p>
-      <div className="editorGrid">
+      <div className="voicePresetLibraryHeader">
+        <div className="voicePresetLibraryHeaderText">
+          <h2 className="cardTitle">声音预设</h2>
+          <p className="cardSubtitle">选择卡片查看设定，拖拽卡片调整顺序。</p>
+        </div>
+        <div className="voicePresetLibraryActions">
+          <span className="voicePresetResultCount" role="status">
+            显示 {displayPresets.length} / {presets.length}
+          </span>
+          <Button variant="primary" size="sm" icon={Plus} onClick={onNewPreset}>
+            新建预设
+          </Button>
+        </div>
+      </div>
+
+      <div className="voicePresetFilterBar">
         <div className="formGroup">
-          <label className="formLabel">搜索</label>
+          <label className="formLabel" htmlFor="voice-preset-search">搜索</label>
           <div style={{ position: "relative" }}>
-            <Search size={14} style={{ position: "absolute", left: 10, top: 10, color: "var(--text-muted)" }} />
+            <Search aria-hidden="true" focusable="false" size={14} style={{ position: "absolute", left: 10, top: 10, color: "var(--text-muted)" }} />
             <input
+              id="voice-preset-search"
+              name="voicePresetSearch"
               className="textInput"
               style={{ paddingLeft: 32 }}
               value={searchKeyword}
               onChange={(e) => onSearchKeywordChange(e.target.value)}
-              placeholder="按名称、标签、描述搜索"
+              autoComplete="off"
+              placeholder="按名称、标签、描述搜索…"
             />
           </div>
         </div>
         <div className="formGroup">
           <label className="formLabel">标签筛选</label>
           <Select
+            aria-label="标签筛选"
             value={tagFilter}
             onValueChange={onTagFilterChange}
             options={[{ value: "all", label: "全部标签" }, ...allTags.map((tag) => ({ value: tag, label: tag }))]}
           />
         </div>
-      </div>
-      <div className="editorGrid">
         <div className="formGroup">
           <label className="formLabel">质量筛选</label>
           <Select
+            aria-label="质量筛选"
             value={qualityFilter}
             onValueChange={onQualityFilterChange}
             options={QUALITY_FILTER_OPTIONS}
           />
         </div>
-        <label className="checkRow" style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 24 }}>
+        <label className="checkRow voicePresetFavoriteFilter">
           <input
             type="checkbox"
+            name="voicePresetFavoriteOnly"
             checked={favoriteOnly}
             onChange={(e) => onFavoriteOnlyChange(e.target.checked)}
           />
           <span>只看收藏</span>
         </label>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={!isFilterActive}
+          onClick={onResetFilters}
+        >
+          清除筛选
+        </Button>
       </div>
       {presets.length ? (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
           <SortableContext items={displayPresetIds} strategy={rectSortingStrategy}>
             <div className="presetGrid">
               {!displayPresets.length ? (
-                <div className="presetCard" style={{ minHeight: 140, justifyContent: "center", alignItems: "center" }}>
-                  <span className="muted">当前筛选无匹配预设</span>
+                <div className="presetCard presetNoMatchCard">
+                  <strong>没有匹配的预设</strong>
+                  <span className="muted">调整搜索词或清除筛选后再试。</span>
                 </div>
               ) : null}
               {displayPresets.map((preset) => (
@@ -107,14 +136,14 @@ export default function VoicePresetGridSection({
                   onCycleMode={() => onCyclePresetVoiceMode(preset)}
                 />
               ))}
-              <div
-                className="presetCard"
-                style={{ borderStyle: "dashed", cursor: "pointer", alignItems: "center", justifyContent: "center", minHeight: 140 }}
+              <button
+                type="button"
+                className="presetCard presetCreateCard"
                 onClick={onNewPreset}
               >
-                <Plus size={24} style={{ color: "var(--text-muted)" }} />
+                <Plus aria-hidden="true" focusable="false" size={24} style={{ color: "var(--text-muted)" }} />
                 <span className="muted">新建预设</span>
-              </div>
+              </button>
             </div>
           </SortableContext>
         </DndContext>

@@ -18,9 +18,10 @@ export default function Select({
   value,
   onValueChange,
   options = [],
-  placeholder = "选择...",
+  placeholder = "选择…",
   disabled = false,
   className,
+  ...triggerProps
 }) {
   // Keep Radix controlled from the first render. Empty string clears the
   // selection and lets Radix show the placeholder.
@@ -33,7 +34,11 @@ export default function Select({
       onValueChange={(v) => onValueChange?.(fromRadix(v))}
       disabled={disabled}
     >
-      <RadixSelect.Trigger className={cn("selectTrigger", className)} title={selectedOption?.title || selectedOption?.label || placeholder}>
+      <RadixSelect.Trigger
+        className={cn("selectTrigger", className)}
+        title={selectedOption?.title || selectedOption?.label || placeholder}
+        {...triggerProps}
+      >
         <RadixSelect.Value placeholder={placeholder} />
         <RadixSelect.Icon>
           <ChevronDown size={13} style={{ color: "var(--text-muted)" }} />

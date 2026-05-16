@@ -1,4 +1,4 @@
-import { Mic, Plus, Sparkles } from "lucide-react";
+import { Download, Save, ChevronDown, ChevronUp, Mic, Plus, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
@@ -51,13 +51,14 @@ export default function VoiceConfigPage() {
     isLoading, isSaving, isTranscribing, error,
     setAssignments, assignVoice, loadPresets,
     createPreset, updatePreset, deletePreset, reorderPresets, saveAssignments, previewVoice,
-    uploadReferenceAudio, transcribeAudio, setPreviewSlotPreset, setPreviewSlotBackend,
+    uploadReferenceAudio, uploadSampleAudio, transcribeAudio, setPreviewSlotPreset, setPreviewSlotBackend,
     checkPresetQuality, fetchPresetRecommendations, clearPresetRecommendations, unloadRecommendationModel,
   } = useVoiceStore();
 
   const [form, setForm] = useState({ ...emptyForm });
   const [activeBackend, setActiveBackend] = useState("omnivoice");
   const [previewBackend, setPreviewBackend] = useState("omnivoice");
+  const [isPresetFormCollapsed, setIsPresetFormCollapsed] = useState(true);
   const [recommendSource, setRecommendSource] = useState("secondary_local");
   const [searchKeyword, setSearchKeyword] = useState("");
   const [favoriteOnly, setFavoriteOnly] = useState(false);
@@ -152,6 +153,7 @@ export default function VoiceConfigPage() {
       const searchable = [
         preset.name,
         preset.description,
+        preset.sample_audio_path,
         preset.suitable_role_description,
         (preset.tags || []).join(" "),
         preset.gender,
@@ -187,6 +189,16 @@ export default function VoiceConfigPage() {
   );
   const slotAState = previewSlots?.a || { presetId: "", audioUrl: null, audioBlob: null, backend: "omnivoice" };
   const slotBState = previewSlots?.b || { presetId: "", audioUrl: null, audioBlob: null, backend: "omnivoice" };
+  const presetFormTitle = isEditMode ? "编辑声音预设" : "新建声音预设";
+  const presetFormName = (form.name || selectedPreset?.name || "").trim();
+  const presetFormBackendLabel = activeBackend === "voxcpm2" ? "VoxCPM2" : "OmniVoice";
+  const presetFormMode = form.backend_profiles?.[activeBackend]?.voice_mode || form.voice_mode || "design";
+  const PresetFormToggleIcon = isPresetFormCollapsed ? ChevronDown : ChevronUp;
+  const previewMatchesSelectedPreset = Boolean(
+    selectedPreset?.id
+      && previewAudioUrl
+      && previewMeta?.preset_id === selectedPreset.id
+  );
 
   function buildFormFromPreset(preset) {
     const omnivoiceProfile = resolveOmniProfile(preset);
@@ -205,6 +217,7 @@ export default function VoiceConfigPage() {
       },
       tags: Array.isArray(preset?.tags) ? preset.tags : [],
       favorite: Boolean(preset?.favorite),
+      sample_audio_path: preset?.sample_audio_path || "",
       suitable_role_description: preset?.suitable_role_description || "",
       quality_reports: preset?.quality_reports || {},
     };
@@ -295,6 +308,7 @@ export default function VoiceConfigPage() {
       description: (sourceForm.description || "").trim(),
       tags: Array.isArray(sourceForm.tags) ? sourceForm.tags : parseTags(sourceForm.tags || ""),
       favorite: Boolean(sourceForm.favorite),
+      sample_audio_path: (sourceForm.sample_audio_path || "").trim(),
       suitable_role_description: (sourceForm.suitable_role_description || "").trim(),
       voice_mode: sourceForm.voice_mode || omnivoiceProfile.voice_mode,
       speed: omnivoiceProfile.speed,
@@ -573,6 +587,86 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
     }
   }
 
+  async function getCurrentPreviewBlob() {
+    if (previewAudioBlob) {
+      return previewAudioBlob;
+    }
+    if (!previewAudioUrl) {
+      throw new Error("还没有试听音频");
+    }
+    const response = await fetch(previewAudioUrl);
+    if (!response.ok) {
+      throw new Error(`读取试听音频失败: HTTP ${response.status}`);
+    }
+    return response.blob();
+  }
+
+  function buildPreviewFilename(suffix = "preview") {
+    const safeName = String(selectedPreset?.name || "voice")
+      .trim()
+      .replace(/[\\/:*?"<>|\s]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      || "voice";
+    const backendName = (previewMeta?.backend || previewBackend || "omnivoice").toLowerCase();
+    return `${safeName}_${backendName}_${suffix}.wav`;
+  }
+
+  async function handleDownloadPreviewAudio() {
+    if (!previewMatchesSelectedPreset) {
+      useUiStore.getState().pushToast({ title: "请先为当前预设生成试听音频", tone: "error" });
+      return;
+    }
+    try {
+      const blob = await getCurrentPreviewBlob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = buildPreviewFilename("preview");
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      useUiStore.getState().pushToast({ title: `下载失败：${error?.message || "未知错误"}`, tone: "error" });
+    }
+  }
+
+  async function handleSavePreviewAsSampleAudio() {
+    if (!selectedPreset || !previewMatchesSelectedPreset) {
+      useUiStore.getState().pushToast({ title: "请先为当前预设生成满意的试听音频", tone: "error" });
+      return;
+    }
+    try {
+      const blob = await getCurrentPreviewBlob();
+      const file = new File([blob], buildPreviewFilename("sample"), {
+        type: blob.type || "audio/wav",
+      });
+      const uploaded = await uploadSampleAudio(file);
+      const sampleAudioPath = uploaded?.file_path || "";
+      if (!sampleAudioPath) {
+        throw new Error("上传后未返回样音路径");
+      }
+      const nextForm = {
+        ...(selectedPresetId === selectedPreset.id ? form : buildFormFromPreset(selectedPreset)),
+        sample_audio_path: sampleAudioPath,
+      };
+      const savedPreset = await updatePreset(selectedPreset.id, buildPresetPayload(nextForm));
+      setSelectedPresetId(savedPreset.id);
+      setForm(buildFormFromPreset(savedPreset));
+      useUiStore.getState().pushToast({ title: "已设为预存试听音频", tone: "success" });
+    } catch (error) {
+      useUiStore.getState().pushToast({ title: `保存样音失败：${error?.message || "未知错误"}`, tone: "error" });
+    }
+  }
+
+  async function handleSampleAudioUpload(file) {
+    const result = await uploadReferenceAudio(file);
+    const filePath = result?.file_path || "";
+    if (filePath) {
+      setField("sample_audio_path", filePath);
+    }
+  }
+
   async function handleTranscribe(backend) {
     const audioPath = form.backend_profiles?.[backend]?.ref_audio_path || "";
     if (!audioPath) return;
@@ -653,18 +747,51 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
       {/* LEFT: Preset management */}
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {/* New preset form */}
-        <GlassCard>
-          <h2 className="cardTitle"><Mic size={16} /> 新建声音预设</h2>
+        <GlassCard className={isPresetFormCollapsed ? "voicePresetFormCard collapsed" : "voicePresetFormCard"}>
+          <div className="voicePresetFormHeader">
+            <div className="voicePresetFormHeaderText">
+              <h2 className="cardTitle"><Mic size={16} /> {presetFormTitle}</h2>
+              <p className="voicePresetFormSummaryLine">
+                {presetFormName || "未命名预设"} · {presetFormBackendLabel} · {String(presetFormMode).toUpperCase()}
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={PresetFormToggleIcon}
+              aria-expanded={!isPresetFormCollapsed}
+              aria-controls="voice-preset-form-body"
+              onClick={() => setIsPresetFormCollapsed((value) => !value)}
+            >
+              {isPresetFormCollapsed ? "展开" : "收起"}
+            </Button>
+          </div>
+
+          {isPresetFormCollapsed ? (
+            <div className="voicePresetCollapsedSummary">
+              <span className="statusBadge default">{isEditMode ? "编辑中" : "新建"}</span>
+              <span className={`statusBadge ${currentBackendQualityReport?.status === "pass" ? "success" : currentBackendQualityReport?.status === "warning" ? "warning" : currentBackendQualityReport?.status === "fail" ? "error" : "default"}`}>
+                {qualityStatusLabel(currentBackendQualityReport?.status || "unknown")}
+              </span>
+              <span>{presetFormName || "还没有填写预设名称"}</span>
+              <span>{isLoading ? "加载中…" : `已有 ${presets.length} 个预设`}</span>
+            </div>
+          ) : (
+            <div id="voice-preset-form-body" className="voicePresetFormBody">
 
           <div className="editorGrid">
             <input
+              name="voicePresetName"
               className="textInput"
               value={form.name}
               onChange={(e) => setField("name", e.target.value)}
+              autoComplete="off"
+              aria-label="预设名称"
               placeholder="预设名称（必填）"
               onKeyDown={(e) => e.key === "Enter" && handleSavePreset()}
             />
             <Select
+              aria-label="当前编辑后端"
               value={activeBackend}
               onValueChange={(v) => setActiveBackend(v)}
               options={BACKEND_OPTIONS}
@@ -692,6 +819,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                     <div className="formGroup">
                       <label className="formLabel">性别</label>
                       <Select
+                        aria-label="OmniVoice 性别"
                         value={form.backend_profiles?.omnivoice?.gender || ""}
                         onValueChange={(v) => setBackendField("omnivoice", "gender", v)}
                         options={GENDER_OPTIONS}
@@ -701,6 +829,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                     <div className="formGroup">
                       <label className="formLabel">年龄</label>
                       <Select
+                        aria-label="OmniVoice 年龄"
                         value={form.backend_profiles?.omnivoice?.age || ""}
                         onValueChange={(v) => setBackendField("omnivoice", "age", v)}
                         options={AGE_OPTIONS}
@@ -712,6 +841,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                     <div className="formGroup">
                       <label className="formLabel">音调</label>
                       <Select
+                        aria-label="OmniVoice 音调"
                         value={form.backend_profiles?.omnivoice?.pitch || ""}
                         onValueChange={(v) => setBackendField("omnivoice", "pitch", v)}
                         options={PITCH_OPTIONS}
@@ -721,6 +851,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                     <div className="formGroup">
                       <label className="formLabel">风格</label>
                       <Select
+                        aria-label="OmniVoice 风格"
                         value={form.backend_profiles?.omnivoice?.style || ""}
                         onValueChange={(v) => setBackendField("omnivoice", "style", v)}
                         options={STYLE_OPTIONS}
@@ -732,19 +863,23 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                     <div className="formGroup">
                       <label className="formLabel">口音（可选）</label>
                       <input
+                        name="omnivoiceAccent"
                         className="textInput"
                         value={form.backend_profiles?.omnivoice?.accent || ""}
                         onChange={(e) => setBackendField("omnivoice", "accent", e.target.value)}
-                        placeholder="例如：美式、英式、川渝口音"
+                        autoComplete="off"
+                        placeholder="例如：美式、英式、川渝口音…"
                       />
                     </div>
                     <div className="formGroup">
                       <label className="formLabel">方言（可选）</label>
                       <input
+                        name="omnivoiceDialect"
                         className="textInput"
                         value={form.backend_profiles?.omnivoice?.dialect || ""}
                         onChange={(e) => setBackendField("omnivoice", "dialect", e.target.value)}
-                        placeholder="例如：吴语、粤语、闽南语"
+                        autoComplete="off"
+                        placeholder="例如：吴语、粤语、闽南语…"
                       />
                     </div>
                   </div>
@@ -752,9 +887,10 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                     <label className="formLabel">自定义描述</label>
                     <textarea
                       className="textArea compactArea"
+                      aria-label="OmniVoice 自定义描述"
                       value={form.backend_profiles?.omnivoice?.custom_instruct || ""}
                       onChange={(e) => setBackendField("omnivoice", "custom_instruct", e.target.value)}
-                      placeholder="例如：说话温柔，略带忧伤的年轻女性，有古典气质"
+                      placeholder="例如：说话温柔，略带忧伤的年轻女性，有古典气质…"
                     />
                   </div>
                 </TabsContent>
@@ -780,9 +916,11 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                     <label className="formLabel">参考音频路径</label>
                     <input
                       className="textInput"
+                      name="omnivoiceReferenceAudioPath"
                       value={form.backend_profiles?.omnivoice?.ref_audio_path || ""}
                       onChange={(e) => setBackendField("omnivoice", "ref_audio_path", e.target.value)}
-                      placeholder="可手工输入本地路径"
+                      autoComplete="off"
+                      placeholder="可手工输入本地路径…"
                     />
                   </div>
                   <ReferenceAudioPlayer audioPath={form.backend_profiles?.omnivoice?.ref_audio_path} />
@@ -790,9 +928,10 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                     <label className="formLabel">参考文本（转写或手动输入）</label>
                     <textarea
                       className="textArea compactArea"
+                      aria-label="OmniVoice 参考文本"
                       value={form.backend_profiles?.omnivoice?.ref_text || ""}
                       onChange={(e) => setBackendField("omnivoice", "ref_text", e.target.value)}
-                      placeholder="参考音频的对应文本内容..."
+                      placeholder="参考音频的对应文本内容…"
                     />
                   </div>
                   <details style={{ border: "1px solid var(--lineSoft)", borderRadius: 10, padding: "8px 10px" }}>
@@ -813,24 +952,30 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                           <label className="formLabel">默认 num_step (1-128)</label>
                           <input
                             className="textInput"
+                            name="omnivoiceCloneNumStep"
+                            aria-label="OmniVoice 默认 num_step"
                             type="number"
                             min={1}
                             max={128}
                             step={1}
                             value={Number(form.backend_profiles?.omnivoice?.clone_num_step ?? 32)}
                             onChange={(e) => setBackendField("omnivoice", "clone_num_step", e.target.value)}
+                            autoComplete="off"
                           />
                         </div>
                         <div className="formGroup">
                           <label className="formLabel">默认 guidance_scale (0-10)</label>
                           <input
                             className="textInput"
+                            name="omnivoiceCloneGuidanceScale"
+                            aria-label="OmniVoice 默认 guidance_scale"
                             type="number"
                             min={0}
                             max={10}
                             step={0.1}
                             value={Number(form.backend_profiles?.omnivoice?.clone_guidance_scale ?? 2)}
                             onChange={(e) => setBackendField("omnivoice", "clone_guidance_scale", e.target.value)}
+                            autoComplete="off"
                           />
                         </div>
                       </div>
@@ -863,9 +1008,10 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                     <label className="formLabel">Design Instruction</label>
                     <textarea
                       className="textArea compactArea"
+                      aria-label="VoxCPM2 Design Instruction"
                       value={form.backend_profiles?.voxcpm2?.design_instruction || ""}
                       onChange={(e) => setBackendField("voxcpm2", "design_instruction", e.target.value)}
-                      placeholder="例如：年轻女性，温柔甜美，轻微播音腔"
+                      placeholder="例如：年轻女性，温柔甜美，轻微播音腔…"
                     />
                   </div>
                   <div className="editorGrid">
@@ -873,24 +1019,30 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                       <label className="formLabel">默认 cfg_value</label>
                       <input
                         className="textInput"
+                        name="voxcpm2DesignCfgValue"
+                        aria-label="VoxCPM2 默认 cfg_value"
                         type="number"
                         min={0.1}
                         max={10}
                         step={0.1}
                         value={Number(form.backend_profiles?.voxcpm2?.cfg_value ?? 2)}
                         onChange={(e) => setBackendField("voxcpm2", "cfg_value", e.target.value)}
+                        autoComplete="off"
                       />
                     </div>
                     <div className="formGroup">
                       <label className="formLabel">默认 inference_timesteps</label>
                       <input
                         className="textInput"
+                        name="voxcpm2DesignInferenceTimesteps"
+                        aria-label="VoxCPM2 默认 inference_timesteps"
                         type="number"
                         min={1}
                         max={100}
                         step={1}
                         value={Number(form.backend_profiles?.voxcpm2?.inference_timesteps ?? 10)}
                         onChange={(e) => setBackendField("voxcpm2", "inference_timesteps", e.target.value)}
+                        autoComplete="off"
                       />
                     </div>
                   </div>
@@ -915,9 +1067,10 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                     <label className="formLabel">Control Instruction</label>
                     <textarea
                       className="textArea compactArea"
+                      aria-label="VoxCPM2 Control Instruction"
                       value={form.backend_profiles?.voxcpm2?.control_instruction || ""}
                       onChange={(e) => setBackendField("voxcpm2", "control_instruction", e.target.value)}
-                      placeholder="例如：更悲伤，语速稍慢，表达克制但带颤音"
+                      placeholder="例如：更悲伤，语速稍慢，表达克制但带颤音…"
                     />
                   </div>
                   {form.backend_profiles?.voxcpm2?.ref_audio_path ? (
@@ -934,9 +1087,12 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                     <label className="formLabel">参考音频路径</label>
                     <input
                       className="textInput"
+                      name="voxcpm2ReferenceAudioPath"
+                      aria-label="VoxCPM2 参考音频路径"
                       value={form.backend_profiles?.voxcpm2?.ref_audio_path || ""}
                       onChange={(e) => setBackendField("voxcpm2", "ref_audio_path", e.target.value)}
-                      placeholder="可手工输入本地路径"
+                      autoComplete="off"
+                      placeholder="可手工输入本地路径…"
                     />
                   </div>
                   <ReferenceAudioPlayer audioPath={form.backend_profiles?.voxcpm2?.ref_audio_path} />
@@ -944,9 +1100,10 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                     <label className="formLabel">Prompt Text（Hi-Fi clone 可选）</label>
                     <textarea
                       className="textArea compactArea"
+                      aria-label="VoxCPM2 Prompt Text"
                       value={form.backend_profiles?.voxcpm2?.ref_text || ""}
                       onChange={(e) => setBackendField("voxcpm2", "ref_text", e.target.value)}
-                      placeholder="参考音频对应文本"
+                      placeholder="参考音频对应文本…"
                     />
                   </div>
                   <label className="checkRow" style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -962,24 +1119,30 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                       <label className="formLabel">默认 cfg_value</label>
                       <input
                         className="textInput"
+                        name="voxcpm2CloneCfgValue"
+                        aria-label="VoxCPM2 克隆默认 cfg_value"
                         type="number"
                         min={0.1}
                         max={10}
                         step={0.1}
                         value={Number(form.backend_profiles?.voxcpm2?.cfg_value ?? 2)}
                         onChange={(e) => setBackendField("voxcpm2", "cfg_value", e.target.value)}
+                        autoComplete="off"
                       />
                     </div>
                     <div className="formGroup">
                       <label className="formLabel">默认 inference_timesteps</label>
                       <input
                         className="textInput"
+                        name="voxcpm2CloneInferenceTimesteps"
+                        aria-label="VoxCPM2 克隆默认 inference_timesteps"
                         type="number"
                         min={1}
                         max={100}
                         step={1}
                         value={Number(form.backend_profiles?.voxcpm2?.inference_timesteps ?? 10)}
                         onChange={(e) => setBackendField("voxcpm2", "inference_timesteps", e.target.value)}
+                        autoComplete="off"
                       />
                     </div>
                   </div>
@@ -1014,10 +1177,33 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
             <label className="formLabel">描述（可选）</label>
             <textarea
               className="textArea compactArea"
+              aria-label="声音预设描述"
               value={form.description}
               onChange={(e) => setField("description", e.target.value)}
-              placeholder="记录这个声音适合的角色气质..."
+              placeholder="记录这个声音适合的角色气质…"
             />
+          </div>
+          <div className="formGroup">
+            <label className="formLabel">预存试听音频（可选）</label>
+            {form.sample_audio_path ? (
+              <div className="voicePresetSamplePreview">
+                <ReferenceAudioPlayer audioPath={form.sample_audio_path} />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setField("sample_audio_path", "")}
+                >
+                  移除样音
+                </Button>
+              </div>
+            ) : (
+              <FileDropZone
+                accept="audio/*"
+                onFile={handleSampleAudioUpload}
+                label="上传预设样音"
+                sublabel="用于卡片快速播放，建议 3–10 秒"
+              />
+            )}
           </div>
           <div className="editorGrid">
             <label className="checkRow" style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 24 }}>
@@ -1032,8 +1218,10 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
               <label className="formLabel">标签（空格/逗号分隔）</label>
               <input
                 className="textInput"
+                name="voicePresetTags"
                 value={Array.isArray(form.tags) ? form.tags.join(", ") : ""}
                 onChange={(e) => setField("tags", parseTags(e.target.value))}
+                autoComplete="off"
                 placeholder="如：温柔, 女声, 旁白"
               />
             </div>
@@ -1042,9 +1230,10 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
             <label className="formLabel">适合角色描述</label>
             <textarea
               className="textArea compactArea"
+              aria-label="适合角色描述"
               value={form.suitable_role_description || ""}
               onChange={(e) => setField("suitable_role_description", e.target.value)}
-              placeholder="例如：适合温柔旁白、青年女性、古风人物"
+              placeholder="例如：适合温柔旁白、青年女性、古风人物…"
             />
           </div>
           <div className="controlRow" style={{ alignItems: "center" }}>
@@ -1107,6 +1296,8 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
           </div>
 
           {error && <div className="errorText">⚠ {error}</div>}
+            </div>
+          )}
         </GlassCard>
 
         <VoicePresetGridSection
@@ -1115,6 +1306,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
           displayPresetIds={displayPresetIds}
           displayPresets={displayPresets}
           favoriteOnly={favoriteOnly}
+          isFilterActive={isFilterActive}
           onCyclePresetVoiceMode={(preset) => {
             handleCyclePresetVoiceMode(preset).catch((error) => {
               useUiStore.getState().pushToast({
@@ -1129,9 +1321,16 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
             setSelectedPresetId(null);
             setForm({ ...emptyForm });
             setActiveBackend("omnivoice");
+            setIsPresetFormCollapsed(false);
           }}
           onPreviewPreset={handlePreviewPreset}
           onQualityFilterChange={setQualityFilter}
+          onResetFilters={() => {
+            setSearchKeyword("");
+            setFavoriteOnly(false);
+            setQualityFilter("all");
+            setTagFilter("all");
+          }}
           onSearchKeywordChange={setSearchKeyword}
           onSelectPreset={(preset) => {
             if (preset.id === selectedPresetId) {
@@ -1141,6 +1340,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
               return;
             }
             setSelectedPresetId(preset.id);
+            setIsPresetFormCollapsed(false);
           }}
           onSetDeleteTarget={setDeleteTarget}
           onSetPreviewSlotPreset={setPreviewSlotPreset}
@@ -1169,12 +1369,29 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
             </Tabs>
             <textarea
               className="textArea compactArea"
+              aria-label="试听文本"
               value={sampleText}
               onChange={(e) => setSampleText(e.target.value)}
             />
             <div className="controlRow">
               <Button variant="primary" onClick={handlePreview} disabled={isSaving}>
                 {isSaving ? "合成中..." : "▶ 试听"}
+              </Button>
+              <Button
+                variant="secondary"
+                icon={Save}
+                onClick={handleSavePreviewAsSampleAudio}
+                disabled={isSaving || !previewMatchesSelectedPreset}
+              >
+                设为预存样音
+              </Button>
+              <Button
+                variant="ghost"
+                icon={Download}
+                onClick={handleDownloadPreviewAudio}
+                disabled={!previewMatchesSelectedPreset}
+              >
+                下载音频
               </Button>
               <Button
                 variant="secondary"
@@ -1193,6 +1410,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
           <p className="cardSubtitle">选择两个预设并使用同一段文本对比试听。</p>
           <textarea
             className="textArea compactArea"
+            aria-label="A/B 试听文本"
             value={sampleText}
             onChange={(e) => setSampleText(e.target.value)}
           />
@@ -1200,12 +1418,14 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
             <div className="listStack">
               <strong>A 槽</strong>
               <Select
+                aria-label="A 槽预设"
                 value={slotAState.presetId || ""}
                 onValueChange={(value) => setPreviewSlotPreset("a", value)}
                 options={presetOptions}
                 placeholder="选择 A 槽预设"
               />
               <Select
+                aria-label="A 槽后端"
                 value={slotAState.backend || "omnivoice"}
                 onValueChange={(value) => setPreviewSlotBackend("a", value)}
                 options={BACKEND_OPTIONS}
@@ -1225,12 +1445,14 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
             <div className="listStack">
               <strong>B 槽</strong>
               <Select
+                aria-label="B 槽预设"
                 value={slotBState.presetId || ""}
                 onValueChange={(value) => setPreviewSlotPreset("b", value)}
                 options={presetOptions}
                 placeholder="选择 B 槽预设"
               />
               <Select
+                aria-label="B 槽后端"
                 value={slotBState.backend || "omnivoice"}
                 onValueChange={(value) => setPreviewSlotBackend("b", value)}
                 options={BACKEND_OPTIONS}
@@ -1266,6 +1488,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
               </Button>
               <div style={{ minWidth: 180 }}>
                 <Select
+                  aria-label="推荐来源"
                   value={recommendSource}
                   onValueChange={(value) => setRecommendSource(value)}
                   options={RECOMMEND_SOURCE_OPTIONS}
@@ -1295,6 +1518,7 @@ function buildSyncedForm(baseForm, targetBackend, referenceText, refAudioPath) {
                   </div>
                   <div style={{ minWidth: 220, flex: 1 }}>
                     <Select
+                      aria-label={`${char.name} 的声音预设`}
                       value={assignments[char.name] || ""}
                       onValueChange={(v) => assignVoice(char.name, v)}
                       options={presetOptions}

@@ -94,6 +94,7 @@ export const emptyForm = {
   custom_instruct: "",
   tags: [],
   favorite: false,
+  sample_audio_path: "",
   suitable_role_description: "",
   quality_reports: {},
   speed: 1.0,

@@ -216,6 +216,7 @@ export const useVoiceStore = create((set) => ({
           previewAudioUrl: url,
           previewAudioBlob: blob,
           previewMeta: {
+            preset_id: preset?.id || "",
             backend: backendName,
             source_mode: sourceMode || "design",
             text: text || "",
@@ -250,6 +251,20 @@ export const useVoiceStore = create((set) => ({
       const message = getErrorMessage(error, "上传失败");
       set({ isSaving: false, error: message });
       useUiStore.getState().pushToast({ title: formatError("上传失败", message), tone: "error" });
+      throw error;
+    }
+  },
+  uploadSampleAudio: async (file) => {
+    set({ isSaving: true, error: "" });
+    try {
+      const result = await api.uploadFile("/voices/upload-ref", file);
+      set({ isSaving: false });
+      useUiStore.getState().pushToast({ title: "预设样音已上传", tone: "success" });
+      return result;
+    } catch (error) {
+      const message = getErrorMessage(error, "样音上传失败");
+      set({ isSaving: false, error: message });
+      useUiStore.getState().pushToast({ title: formatError("样音上传失败", message), tone: "error" });
       throw error;
     }
   },

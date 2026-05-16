@@ -55,10 +55,10 @@ def _normalize_match_text(value: str | None) -> str:
     return (value or "").strip()
 
 
-def _resolve_archive_ref_audio_path(ref_dir: Path, preset: VoicePreset) -> Path | None:
-    if not preset.ref_audio_path:
+def _resolve_archive_voice_audio_path(ref_dir: Path, audio_path: str | None) -> Path | None:
+    if not audio_path:
         return None
-    candidate = ref_dir / Path(preset.ref_audio_path).name
+    candidate = ref_dir / Path(audio_path).name
     if candidate.exists() and candidate.is_file():
         return candidate
     return None
@@ -207,7 +207,7 @@ def import_project_archive_bytes(raw_bytes: bytes, *, settings, voice_manager) -
                     continue
                 processed_presets += 1
 
-                archive_ref = _resolve_archive_ref_audio_path(ref_dir, preset)
+                archive_ref = _resolve_archive_voice_audio_path(ref_dir, preset.ref_audio_path)
                 archive_ref_hash = _compute_file_hash(archive_ref) if archive_ref else None
                 pending_copy_ref = archive_ref
                 ref_audio_path = None
@@ -218,6 +218,16 @@ def import_project_archive_bytes(raw_bytes: bytes, *, settings, voice_manager) -
                         reused_ref_audios += 1
                 elif preset.ref_audio_path:
                     warnings.append(f"Reference audio not found for preset {preset.name}")
+
+                archive_sample = _resolve_archive_voice_audio_path(ref_dir, preset.sample_audio_path)
+                sample_audio_path = None
+                if archive_sample:
+                    target_name = f"import_{uuid4().hex[:8]}_{archive_sample.name}"
+                    target_path = settings.voices_dir / target_name
+                    shutil.copyfile(archive_sample, target_path)
+                    sample_audio_path = str(target_path)
+                elif preset.sample_audio_path:
+                    warnings.append(f"Sample audio not found for preset {preset.name}")
 
                 if archive_ref_hash:
                     resolved_ref_hash = archive_ref_hash
@@ -264,6 +274,7 @@ def import_project_archive_bytes(raw_bytes: bytes, *, settings, voice_manager) -
                             "id": new_id,
                             "name": new_name,
                             "ref_audio_path": ref_audio_path,
+                            "sample_audio_path": sample_audio_path,
                         }
                     )
                     existing_presets.append(created)

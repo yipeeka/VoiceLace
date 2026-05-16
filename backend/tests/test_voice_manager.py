@@ -19,6 +19,7 @@ class VoiceManagerTest(unittest.TestCase):
                 name="clone",
                 voice_mode="clone",
                 ref_audio_path=str(root / "samples" / "legacy.wav"),
+                sample_audio_path=str(root / "samples" / "sample.wav"),
                 backend_profiles=VoiceBackendProfiles(
                     omnivoice=OmniVoicePresetProfile(
                         voice_mode="clone",
@@ -35,6 +36,7 @@ class VoiceManagerTest(unittest.TestCase):
 
             raw = json.loads(manager.presets_file.read_text(encoding="utf-8"))[0]
             self.assertEqual(raw["ref_audio_path"], "samples/legacy.wav")
+            self.assertEqual(raw["sample_audio_path"], "samples/sample.wav")
             self.assertEqual(raw["backend_profiles"]["omnivoice"]["ref_audio_path"], "samples/omni.wav")
             self.assertEqual(raw["backend_profiles"]["voxcpm2"]["ref_audio_path"], "backend/data/voices/vox.wav")
 

@@ -74,6 +74,7 @@ def _normalize_preset(preset: VoicePreset) -> VoicePreset:
             "name": (preset.name or "").strip(),
             "description": (preset.description or "").strip(),
             "suitable_role_description": (preset.suitable_role_description or "").strip(),
+            "sample_audio_path": (preset.sample_audio_path or "").strip(),
             "tags": normalize_tags(preset.tags),
         }
     )
