@@ -39,7 +39,7 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
     <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
       {/* Brand */}
       <div className="sidebarBrand">
-        <div className="sidebarLogo">
+        <div className="sidebarLogo" aria-hidden="true">
           <Sparkles size={16} color="white" />
         </div>
         <AnimatePresence>
@@ -57,11 +57,13 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
           )}
         </AnimatePresence>
         <button
+          type="button"
           className="sidebarCollapseBtn"
           onClick={onToggleCollapse}
+          aria-label={collapsed ? "展开侧边栏" : "折叠侧边栏"}
           title={collapsed ? "展开侧边栏" : "折叠侧边栏"}
         >
-          {collapsed ? <ChevronRight size={13} /> : <ChevronLeft size={13} />}
+          {collapsed ? <ChevronRight aria-hidden="true" focusable="false" size={13} /> : <ChevronLeft aria-hidden="true" focusable="false" size={13} />}
         </button>
       </div>
 
@@ -74,11 +76,14 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
 
           const button = (
             <button
+              type="button"
               key={item.id}
               className={`navItem ${isActive ? "active" : ""} ${isCompleted && !isActive ? "completed" : ""}`}
               onClick={() => onNavigate(item.id)}
+              aria-label={item.label}
+              aria-current={isActive ? "page" : undefined}
             >
-              <Icon className="navItemIcon" size={18} />
+              <Icon className="navItemIcon" aria-hidden="true" focusable="false" size={18} />
               <AnimatePresence>
                 {!collapsed && (
                   <motion.span
@@ -129,41 +134,47 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
                     <>
                       <Tooltip content={canSaveProject ? "保存项目" : "当前页面不可保存"} side="right">
                         <button
+                          type="button"
                           className="navItem navItemSubAction"
                           onClick={() => projectSaveAction?.()}
                           disabled={!canSaveProject}
+                          aria-label="保存项目"
                           title="保存项目"
                         >
-                          <Save className="navItemIcon" size={18} />
+                          <Save className="navItemIcon" aria-hidden="true" focusable="false" size={18} />
                         </button>
                       </Tooltip>
                       <Tooltip content={canSaveProject ? "另存项目" : "当前页面不可保存"} side="right">
                         <button
+                          type="button"
                           className="navItem navItemSubAction"
                           onClick={() => projectSaveAction?.({ forceSaveAs: true })}
                           disabled={!canSaveProject}
+                          aria-label="另存项目"
                           title="另存项目"
                         >
-                          <FolderOpen className="navItemIcon" size={18} />
+                          <FolderOpen className="navItemIcon" aria-hidden="true" focusable="false" size={18} />
                         </button>
                       </Tooltip>
                     </>
                   ) : (
                     <>
                       <button
+                        type="button"
                         className="navItem navItemSubAction"
                         onClick={() => projectSaveAction?.()}
                         disabled={!canSaveProject}
                       >
-                        <Save className="navItemIcon" size={16} />
+                        <Save className="navItemIcon" aria-hidden="true" focusable="false" size={16} />
                         <span className="navItemLabel">保存项目</span>
                       </button>
                       <button
+                        type="button"
                         className="navItem navItemSubAction"
                         onClick={() => projectSaveAction?.({ forceSaveAs: true })}
                         disabled={!canSaveProject}
                       >
-                        <FolderOpen className="navItemIcon" size={16} />
+                        <FolderOpen className="navItemIcon" aria-hidden="true" focusable="false" size={16} />
                         <span className="navItemLabel">另存项目</span>
                       </button>
                     </>
@@ -179,19 +190,22 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
         {collapsed ? (
           <Tooltip content="卸载模型" side="right">
             <button
+              type="button"
               className="navItem navItemSubAction navItemDangerAction"
               onClick={() => manualUnloadAll?.()}
+              aria-label="卸载模型"
               title="卸载模型"
             >
-              <Power className="navItemIcon" size={18} />
+              <Power className="navItemIcon" aria-hidden="true" focusable="false" size={18} />
             </button>
           </Tooltip>
         ) : (
           <button
+            type="button"
             className="navItem navItemSubAction navItemDangerAction"
             onClick={() => manualUnloadAll?.()}
           >
-            <Power className="navItemIcon" size={16} />
+            <Power className="navItemIcon" aria-hidden="true" focusable="false" size={16} />
             <span className="navItemLabel">卸载模型</span>
           </button>
         )}
@@ -200,18 +214,23 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
         {collapsed ? (
           <Tooltip content="设置" side="right">
             <button
+              type="button"
               className={`navItem ${activePage === "settings" ? "active" : ""}`}
               onClick={() => onNavigate("settings")}
+              aria-label="系统设置"
+              aria-current={activePage === "settings" ? "page" : undefined}
             >
-              <Settings className="navItemIcon" size={18} />
+              <Settings className="navItemIcon" aria-hidden="true" focusable="false" size={18} />
             </button>
           </Tooltip>
         ) : (
           <button
+            type="button"
             className={`navItem ${activePage === "settings" ? "active" : ""}`}
             onClick={() => onNavigate("settings")}
+            aria-current={activePage === "settings" ? "page" : undefined}
           >
-            <Settings className="navItemIcon" size={18} />
+            <Settings className="navItemIcon" aria-hidden="true" focusable="false" size={18} />
             <span className="navItemLabel">系统设置</span>
           </button>
         )}

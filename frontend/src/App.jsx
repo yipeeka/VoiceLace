@@ -1,5 +1,5 @@
-import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { useCallback, useEffect, useState } from "react";
 
 import Sidebar from "./components/layout/Sidebar";
 import StatusBar from "./components/layout/StatusBar";
@@ -27,6 +27,18 @@ const PAGE_COMPONENTS = {
   settings: SettingsPage,
 };
 
+const DEFAULT_PAGE = "speech";
+const PAGE_IDS = new Set(Object.keys(PAGE_COMPONENTS));
+const PAGE_KEY_MAP = {
+  "1": "speech",
+  "2": "text",
+  "3": "qc",
+  "4": "script",
+  "5": "voice",
+  "6": "music",
+  "7": "synth",
+};
+
 const PAGE_TRANSITION = {
   initial: { opacity: 0, y: 8 },
   animate: { opacity: 1, y: 0 },
@@ -34,11 +46,49 @@ const PAGE_TRANSITION = {
   transition: { duration: 0.18, ease: "easeOut" },
 };
 
+const REDUCED_PAGE_TRANSITION = {
+  initial: { opacity: 1, y: 0 },
+  animate: { opacity: 1, y: 0 },
+  exit:    { opacity: 1, y: 0 },
+  transition: { duration: 0 },
+};
+
+function readPageFromLocation() {
+  if (typeof window === "undefined") {
+    return DEFAULT_PAGE;
+  }
+  const page = new URLSearchParams(window.location.search).get("page");
+  return PAGE_IDS.has(page) ? page : DEFAULT_PAGE;
+}
+
+function writePageToLocation(page, { replace = false } = {}) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const url = new URL(window.location.href);
+  if (url.searchParams.get("page") === page) {
+    return;
+  }
+  url.searchParams.set("page", page);
+  window.history[replace ? "replaceState" : "pushState"]({ page }, "", url);
+}
+
 export default function App() {
-  const [activePage, setActivePage] = useState("speech");
+  const [activePage, setActivePage] = useState(readPageFromLocation);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const prefersReducedMotion = useReducedMotion();
   const { currentProject, projects, loadProjects, selectProject } = useProjectStore();
   const { script, sourceText } = useScriptStore();
+
+  const navigateToPage = useCallback((page, options) => {
+    const targetPage = PAGE_IDS.has(page) ? page : DEFAULT_PAGE;
+    setActivePage(targetPage);
+    writePageToLocation(targetPage, options);
+  }, []);
+
+  useEffect(() => {
+    writePageToLocation(activePage, { replace: true });
+  }, [activePage]);
 
   useEffect(() => {
     let disposed = false;
@@ -58,26 +108,35 @@ export default function App() {
       await useScriptStore.getState().loadProjectScript(targetId).catch(() => undefined);
     })();
 
-    // Keyboard shortcuts
+    return () => {
+      disposed = true;
+    };
+  }, [loadProjects, selectProject]);
+
+  useEffect(() => {
+    function handlePopState() {
+      setActivePage(readPageFromLocation());
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
     function handleKeyDown(e) {
       if (e.ctrlKey || e.metaKey) {
-        if (e.key === "1") { e.preventDefault(); setActivePage("speech"); }
-        if (e.key === "2") { e.preventDefault(); setActivePage("text"); }
-        if (e.key === "3") { e.preventDefault(); setActivePage("qc"); }
-        if (e.key === "4") { e.preventDefault(); setActivePage("script"); }
-        if (e.key === "5") { e.preventDefault(); setActivePage("voice"); }
-        if (e.key === "6") { e.preventDefault(); setActivePage("music"); }
-        if (e.key === "7") { e.preventDefault(); setActivePage("synth"); }
+        const shortcutPage = PAGE_KEY_MAP[e.key];
+        if (shortcutPage) {
+          e.preventDefault();
+          navigateToPage(shortcutPage);
+        }
         if (e.key === "b") { e.preventDefault(); setSidebarCollapsed((c) => !c); }
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      disposed = true;
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [loadProjects, selectProject]);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [navigateToPage]);
 
   // Derive which pages are "completed" for step indicators
   const completedPages = [];
@@ -93,30 +152,31 @@ export default function App() {
 
   return (
     <TooltipProvider>
+      <a className="skipLink" href="#main-content">跳到主内容</a>
       <div className="appShell">
         <Sidebar
           activePage={activePage}
-          onNavigate={setActivePage}
+          onNavigate={navigateToPage}
           collapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
           completedPages={completedPages}
         />
 
-        <div className="mainArea">
+        <main id="main-content" className="mainArea" tabIndex={-1}>
           <div className="pageContent">
             <AnimatePresence mode="wait">
               <motion.div
                 key={activePage}
-                {...PAGE_TRANSITION}
+                {...(prefersReducedMotion ? REDUCED_PAGE_TRANSITION : PAGE_TRANSITION)}
                 style={{ flex: 1 }}
               >
-                <PageComponent onNavigate={setActivePage} />
+                <PageComponent onNavigate={navigateToPage} />
               </motion.div>
             </AnimatePresence>
           </div>
 
           <StatusBar />
-        </div>
+        </main>
       </div>
 
       <ToastLayer />

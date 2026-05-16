@@ -26,6 +26,10 @@ function buildTimeline(segments, gapDurationMs) {
   return { items, totalMs: Math.max(1, cursorMs - gapDurationMs) };
 }
 
+function segmentLabel(item) {
+  return `跳转到第 ${item.index + 1} 段，${item.speaker}，${(item.durationMs / 1000).toFixed(2)} 秒`;
+}
+
 export default function AudioTimeline({ audioUrl, segments, gapDurationMs = 300, onActiveSegmentChange, focusSegmentId }) {
   const containerRef = useRef(null);
   const wavesurferRef = useRef(null);
@@ -160,6 +164,34 @@ export default function AudioTimeline({ audioUrl, segments, gapDurationMs = 300,
     }
   }
 
+  function handleMiniMapClick(event) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const percent = rect.width > 0 ? x / rect.width : 0;
+    seekByPercent(percent);
+  }
+
+  function handleMiniMapKeyDown(event) {
+    const currentPercent = duration ? currentTime / duration : 0;
+    const step = event.shiftKey ? 0.1 : 0.02;
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      seekByPercent(currentPercent - step);
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      seekByPercent(currentPercent + step);
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      seekByPercent(0);
+    }
+    if (event.key === "End") {
+      event.preventDefault();
+      seekByPercent(1);
+    }
+  }
+
   if (!audioUrl) {
     return <div className="emptyState">完成合成后，这里会显示完整时间线。</div>;
   }
@@ -167,8 +199,14 @@ export default function AudioTimeline({ audioUrl, segments, gapDurationMs = 300,
   return (
     <div className="audioTimelineCard">
       <div className="timelineHeader">
-        <button type="button" className="timelinePlayButton" onClick={togglePlay} disabled={!isReady}>
-          {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+        <button
+          type="button"
+          className="timelinePlayButton"
+          onClick={togglePlay}
+          disabled={!isReady}
+          aria-label={isPlaying ? "暂停完整音频" : "播放完整音频"}
+        >
+          {isPlaying ? <Pause aria-hidden="true" focusable="false" size={18} /> : <Play aria-hidden="true" focusable="false" size={18} />}
         </button>
         <button type="button" className="timelineJumpButton" onClick={() => seekByOffset(-1)} disabled={!items.length || !isReady}>
           上一段
@@ -185,6 +223,7 @@ export default function AudioTimeline({ audioUrl, segments, gapDurationMs = 300,
         <input
           className="timelineZoomSlider"
           type="range"
+          aria-label="时间线缩放"
           min={10}
           max={180}
           step={5}
@@ -195,21 +234,20 @@ export default function AudioTimeline({ audioUrl, segments, gapDurationMs = 300,
       </div>
       <div ref={containerRef} className="timelineWave" />
       {loadError ? <div className="errorText">{loadError}</div> : null}
-      <div
+      <button
+        type="button"
         className="timelineMiniMap"
-        onClick={(event) => {
-          const rect = event.currentTarget.getBoundingClientRect();
-          const x = event.clientX - rect.left;
-          const percent = rect.width > 0 ? x / rect.width : 0;
-          seekByPercent(percent);
-        }}
+        onClick={handleMiniMapClick}
+        onKeyDown={handleMiniMapKeyDown}
+        aria-label="完整音频迷你时间线，点击或用左右方向键跳转"
+        disabled={!isReady}
       >
         <div className="timelineMiniMapProgress" style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%` }} />
         {items.map((item) => {
           const left = `${(item.startMs / totalMs) * 100}%`;
-          return <div key={item.segment_id} className="timelineMiniMapTick" style={{ left }} />;
+          return <div key={item.segment_id} className="timelineMiniMapTick" style={{ left }} aria-hidden="true" />;
         })}
-      </div>
+      </button>
       <div className="timelineRuler">
         {items.map((item) => {
           const width = `${Math.max(2, (item.durationMs / totalMs) * 100)}%`;
@@ -220,7 +258,8 @@ export default function AudioTimeline({ audioUrl, segments, gapDurationMs = 300,
               type="button"
               className={`timelineSegment ${activeIndex >= 0 && items[activeIndex].segment_id === item.segment_id ? "active" : ""}`}
               style={{ left, width }}
-              title={`#${item.index + 1} ${item.speaker} (${(item.durationMs / 1000).toFixed(2)}s)`}
+              title={segmentLabel(item)}
+              aria-label={segmentLabel(item)}
               onClick={() => seekToSegment(item.startMs)}
             />
           );

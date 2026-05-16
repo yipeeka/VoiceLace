@@ -41,7 +41,7 @@ export default function Select({
       >
         <RadixSelect.Value placeholder={placeholder} />
         <RadixSelect.Icon>
-          <ChevronDown size={13} style={{ color: "var(--text-muted)" }} />
+          <ChevronDown aria-hidden="true" focusable="false" size={13} style={{ color: "var(--text-muted)" }} />
         </RadixSelect.Icon>
       </RadixSelect.Trigger>
 
@@ -57,7 +57,7 @@ export default function Select({
                     {opt.meta ? <span className="selectItemMeta">{opt.meta}</span> : null}
                   </div>
                   <RadixSelect.ItemIndicator style={{ marginLeft: "auto" }}>
-                    <Check size={12} />
+                    <Check aria-hidden="true" focusable="false" size={12} />
                   </RadixSelect.ItemIndicator>
                 </RadixSelect.Item>
               );

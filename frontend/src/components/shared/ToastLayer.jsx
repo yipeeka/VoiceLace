@@ -20,16 +20,16 @@ function ToastItem({ toast, onDismiss }) {
       onOpenChange={(open) => { if (!open) onDismiss(toast.id); }}
       duration={toast.duration ?? 4000}
     >
-      <Icon size={16} style={{ color: config.iconColor, flexShrink: 0, marginTop: 1 }} />
+      <Icon aria-hidden="true" focusable="false" size={16} style={{ color: config.iconColor, flexShrink: 0, marginTop: 1 }} />
       <div style={{ flex: 1 }}>
         <Toast.Title className="toastTitle">{toast.title}</Toast.Title>
         {toast.description && (
           <Toast.Description className="toastDescription">{toast.description}</Toast.Description>
         )}
       </div>
-      <Toast.Action asChild altText="close">
-        <button className="toastClose" onClick={() => onDismiss(toast.id)}>
-          <X size={13} />
+      <Toast.Action asChild altText="关闭通知">
+        <button type="button" className="toastClose" onClick={() => onDismiss(toast.id)} aria-label="关闭通知">
+          <X aria-hidden="true" focusable="false" size={13} />
         </button>
       </Toast.Action>
     </Toast.Root>

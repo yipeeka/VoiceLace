@@ -21,13 +21,29 @@ export default function TextWorkspaceCard({
       <h2>文本输入</h2>
       <p className="muted">粘贴小说、章节内容或测试样例，为 LLM 解析剧本做准备。</p>
       <div className="controlRow">
-        <input className="textInput" value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="新项目名称" />
+        <label className="visuallyHidden" htmlFor="text-workspace-project-name">新项目名称</label>
+        <input
+          id="text-workspace-project-name"
+          name="projectName"
+          className="textInput"
+          value={projectName}
+          onChange={(event) => setProjectName(event.target.value)}
+          placeholder="新项目名称"
+          autoComplete="off"
+        />
         <button type="button" className="primaryButton ghostButton" onClick={onCreateProject}>
           新建项目
         </button>
       </div>
       <div className="controlRow">
-        <select className="textInput" value={currentProject?.id || ""} onChange={(event) => onSelectProject(event.target.value)}>
+        <label className="visuallyHidden" htmlFor="text-workspace-project-select">当前项目</label>
+        <select
+          id="text-workspace-project-select"
+          name="currentProject"
+          className="textInput"
+          value={currentProject?.id || ""}
+          onChange={(event) => onSelectProject(event.target.value)}
+        >
           {projects.map((project) => (
             <option key={project.id} value={project.id}>
               {project.name}
@@ -38,7 +54,10 @@ export default function TextWorkspaceCard({
           填充示例
         </button>
       </div>
+      <label className="visuallyHidden" htmlFor="text-workspace-source-text">源文本</label>
       <textarea
+        id="text-workspace-source-text"
+        name="sourceText"
         className="textArea"
         value={sourceText}
         onChange={(event) => setSourceText(event.target.value)}

@@ -40,9 +40,9 @@ export default function DropdownMenu({
             className,
           )}
         >
-          {Icon ? <Icon size={size === "sm" ? 13 : size === "lg" ? 17 : 15} /> : null}
+          {Icon ? <Icon aria-hidden="true" focusable="false" size={size === "sm" ? 13 : size === "lg" ? 17 : 15} /> : null}
           <span className="dropdownMenuLabel">{label}</span>
-          <ChevronDown className="dropdownMenuChevron" size={size === "sm" ? 13 : size === "lg" ? 17 : 15} />
+          <ChevronDown className="dropdownMenuChevron" aria-hidden="true" focusable="false" size={size === "sm" ? 13 : size === "lg" ? 17 : 15} />
         </button>
       </Popover.Trigger>
 
@@ -68,7 +68,7 @@ export default function DropdownMenu({
                   disabled={item?.disabled}
                   onClick={() => handleSelect(item)}
                 >
-                  {ItemIcon ? <ItemIcon size={14} /> : null}
+                  {ItemIcon ? <ItemIcon aria-hidden="true" focusable="false" size={14} /> : null}
                   <span>{item?.label}</span>
                 </button>
               );

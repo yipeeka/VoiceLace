@@ -1,5 +1,5 @@
 import { Upload } from "lucide-react";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { cn } from "../../utils/cn";
 
 export default function FileDropZone({
@@ -9,7 +9,6 @@ export default function FileDropZone({
   sublabel = "或点击选择文件",
   className,
 }) {
-  const inputRef = useRef(null);
   const [isDragging, setIsDragging] = useState(false);
 
   function handleDrop(e) {
@@ -26,19 +25,18 @@ export default function FileDropZone({
   }
 
   return (
-    <div
+    <label
       className={cn("fileDropZone", isDragging && "dragOver", className)}
-      onClick={() => inputRef.current?.click()}
       onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
       onDragLeave={() => setIsDragging(false)}
       onDrop={handleDrop}
     >
-      <input ref={inputRef} type="file" accept={accept} style={{ display: "none" }} onChange={handleChange} />
-      <Upload size={24} className={cn("dropIcon", isDragging && "dragOver")} />
+      <input className="visuallyHidden" type="file" accept={accept} onChange={handleChange} aria-label={label} />
+      <Upload aria-hidden="true" focusable="false" size={24} className={cn("dropIcon", isDragging && "dragOver")} />
       <span style={{ fontSize: 13.5, color: "var(--text-secondary)", fontWeight: 500 }}>
         {label}
       </span>
       <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{sublabel}</span>
-    </div>
+    </label>
   );
 }

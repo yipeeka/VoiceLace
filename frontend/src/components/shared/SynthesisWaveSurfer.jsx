@@ -336,8 +336,10 @@ export default function SynthesisWaveSurfer({
     <div className="synthesisWaveformShell" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
         <button
+          type="button"
           onClick={togglePlay}
           disabled={!isReady}
+          aria-label={isPlaying ? "暂停完整音频" : "播放完整音频"}
           style={{
             width: 38,
             height: 38,
@@ -352,7 +354,7 @@ export default function SynthesisWaveSurfer({
             transition: "background var(--duration-fast) ease",
           }}
         >
-          {isPlaying ? <Pause size={17} /> : <Play size={17} style={{ marginLeft: 1 }} />}
+          {isPlaying ? <Pause aria-hidden="true" focusable="false" size={17} /> : <Play aria-hidden="true" focusable="false" size={17} style={{ marginLeft: 1 }} />}
         </button>
 
         <span
@@ -369,9 +371,10 @@ export default function SynthesisWaveSurfer({
         </span>
 
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginLeft: "auto", width: 260, color: "var(--text-muted)" }}>
-          <ZoomOut size={14} />
+          <ZoomOut aria-hidden="true" focusable="false" size={14} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <Slider
+              ariaLabel="完整波形缩放"
               value={[zoom]}
               onValueChange={([v]) => setZoom(v)}
               min={0}
@@ -381,7 +384,7 @@ export default function SynthesisWaveSurfer({
               hideValue
             />
           </div>
-          <ZoomIn size={14} />
+          <ZoomIn aria-hidden="true" focusable="false" size={14} />
         </div>
       </div>
 

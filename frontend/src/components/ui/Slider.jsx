@@ -1,4 +1,5 @@
 import * as RadixSlider from "@radix-ui/react-slider";
+import { useId } from "react";
 import { cn } from "../../utils/cn";
 
 /**
@@ -15,16 +16,20 @@ export default function Slider({
   unit = "",
   disabled = false,
   hideValue = false,
+  ariaLabel,
   className,
 }) {
+  const generatedId = useId();
   const displayValue = Array.isArray(value) ? value[0] : value;
   const safeValue = Array.isArray(value) ? value : [value ?? min];
+  const labelId = label ? `${generatedId}-label` : undefined;
+  const accessibleLabel = ariaLabel || label;
 
   return (
     <div className={cn("formGroup", className)}>
       {label && (
         <div className="controlRow" style={{ justifyContent: "space-between" }}>
-          <label className="formLabel">{label}</label>
+          <span id={labelId} className="formLabel">{label}</span>
           <span className="sliderValue">
             {displayValue}
             {unit}
@@ -40,11 +45,13 @@ export default function Slider({
           max={max}
           step={step}
           disabled={disabled}
+          aria-label={!labelId ? accessibleLabel : undefined}
+          aria-labelledby={labelId}
         >
           <RadixSlider.Track className="sliderTrack">
             <RadixSlider.Range className="sliderRange" />
           </RadixSlider.Track>
-          <RadixSlider.Thumb className="sliderThumb" />
+          <RadixSlider.Thumb className="sliderThumb" aria-label={accessibleLabel} />
         </RadixSlider.Root>
         {!label && !hideValue && (
           <span className="sliderValue">

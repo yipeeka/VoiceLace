@@ -29,6 +29,8 @@ export function DialogContent({ title, description, children, className }) {
         {children}
         <RadixDialog.Close asChild>
           <button
+            type="button"
+            aria-label="关闭对话框"
             style={{
               position: "absolute",
               top: 16,
@@ -43,7 +45,7 @@ export function DialogContent({ title, description, children, className }) {
               placeItems: "center",
             }}
           >
-            <X size={16} />
+            <X aria-hidden="true" focusable="false" size={16} />
           </button>
         </RadixDialog.Close>
       </RadixDialog.Content>
