@@ -86,9 +86,16 @@ class OrchestratorConfig:
     qwen3_asr_threads: int = settings.default_qwen3_asr_threads
     qwen3_asr_language: str = settings.default_qwen3_asr_language
     qwen3_asr_enable_timestamps: bool = settings.default_qwen3_asr_enable_timestamps
+    firered_asr_model_path: str = ""
+    firered_asr_threads: int = 0
+    firered_asr_language: str = "auto"
+    firered_asr_enable_timestamps: bool = True
+    firered_asr_enable_punctuation: bool = False
+    firered_asr_punc_model_path: str = ""
     pyannote_model_id: str = settings.default_pyannote_model_id
     pyannote_auth_token: str = settings.default_pyannote_auth_token
     pyannote_device: str = settings.default_pyannote_device
+    default_system_prompt: str = ""
 
 
 @dataclass(slots=True)

@@ -26,9 +26,9 @@ export default function Button({
       )}
       {...props}
     >
-      {Icon && <Icon size={size === "sm" ? 13 : size === "lg" ? 17 : 15} />}
+      {Icon && <Icon aria-hidden="true" focusable="false" size={size === "sm" ? 13 : size === "lg" ? 17 : 15} />}
       {children}
-      {IconRight && <IconRight size={size === "sm" ? 13 : size === "lg" ? 17 : 15} />}
+      {IconRight && <IconRight aria-hidden="true" focusable="false" size={size === "sm" ? 13 : size === "lg" ? 17 : 15} />}
     </button>
   );
 }

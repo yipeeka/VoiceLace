@@ -20,6 +20,10 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+html {
+  color-scheme: dark;
+}
+
 body {
   font-family: Inter, "Noto Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
   background-color: var(--bg-base);
@@ -522,6 +526,7 @@ pre, code {
   white-space: nowrap;
   line-height: 1;
   user-select: none;
+  touch-action: manipulation;
 }
 
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -1542,6 +1547,246 @@ select.textInput option {
   display: flex;
   flex-direction: column;
   gap: 3px;
+  min-width: 0;
+}
+
+.sectionHeaderLeft .cardSubtitle {
+  margin-top: 0;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   SETTINGS PAGE
+───────────────────────────────────────────────────────────── */
+.settingsPage {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+.settingsHero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--bg-surface) 86%, var(--accent-primary-dim));
+}
+
+.settingsHeroIcon {
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius-sm);
+  display: grid;
+  place-items: center;
+  color: var(--accent-primary);
+  background: var(--accent-primary-dim);
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 28%, transparent);
+  flex-shrink: 0;
+}
+
+.settingsHero h1 {
+  font-size: 21px;
+  line-height: 1.25;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-wrap: balance;
+}
+
+.settingsHero p {
+  color: var(--text-muted);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.settingsLayout {
+  display: grid;
+  grid-template-columns: minmax(340px, 0.78fr) minmax(520px, 1.22fr);
+  gap: 18px;
+  align-items: start;
+  min-width: 0;
+}
+
+.settingsStatusCard,
+.settingsConfigCard {
+  min-width: 0;
+}
+
+.settingsStatusSectionTitle {
+  margin-top: 10px;
+  margin-bottom: 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.settingsStatusCard .statRow {
+  min-width: 0;
+  gap: 12px;
+}
+
+.settingsStatusCard .statRow span,
+.settingsStatusCard .statRow strong {
+  min-width: 0;
+}
+
+.settingsErrorRow {
+  border: 1px solid color-mix(in srgb, var(--danger) 32%, transparent);
+  background: color-mix(in srgb, var(--danger-dim) 56%, var(--bg-elevated));
+}
+
+.settingsTabs {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settingsTabsList {
+  width: 100%;
+}
+
+.settingsTabPanel {
+  display: grid;
+  gap: 14px;
+}
+
+.settingsConfigGroup {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
+}
+
+.settingsConfigGroupHeader {
+  display: grid;
+  gap: 2px;
+}
+
+.settingsConfigGroupHeader h3 {
+  font-size: 13.5px;
+  line-height: 1.35;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-wrap: balance;
+}
+
+.settingsConfigGroupHeader p {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.settingsConfigFields {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.settingsFieldGrid {
+  align-items: start;
+}
+
+.settingsToggleRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) ease,
+              background var(--duration-fast) ease;
+  touch-action: manipulation;
+}
+
+.settingsToggleRow:hover {
+  border-color: color-mix(in srgb, var(--accent-primary) 24%, var(--border-default));
+  background: color-mix(in srgb, var(--bg-elevated) 82%, var(--accent-primary-dim));
+}
+
+.settingsToggleRow:focus-within {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px rgba(124,231,255,0.1);
+}
+
+.settingsToggleRow input {
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
+  accent-color: var(--accent-primary);
+  flex-shrink: 0;
+}
+
+.settingsToggleCopy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settingsToggleCopy span {
+  color: var(--text-primary);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.settingsToggleCopy small {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.settingsPromptArea {
+  min-height: 136px;
+}
+
+.settingsActionBar {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+  background: linear-gradient(180deg, transparent 0%, var(--bg-surface) 28%);
+}
+
+@media (max-width: 1180px) {
+  .settingsLayout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .settingsHero {
+    align-items: flex-start;
+    padding: 16px;
+  }
+
+  .settingsHero h1 {
+    font-size: 19px;
+  }
+
+  .settingsFieldGrid,
+  .editorGrid.three.settingsFieldGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .settingsActionBar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .settingsActionBar .btn {
+    width: 100%;
+  }
 }
 
 .projectToolbar {

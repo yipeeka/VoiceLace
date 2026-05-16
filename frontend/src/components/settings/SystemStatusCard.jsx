@@ -4,17 +4,13 @@ import GlassCard from "../shared/GlassCard";
 import Button from "../ui/Button";
 
 function SectionTitle({ children }) {
-  return (
-    <div style={{ marginTop: 10, marginBottom: 2, fontSize: 11, color: "var(--text-muted)", letterSpacing: 0.3 }}>
-      {children}
-    </div>
-  );
+  return <div className="settingsStatusSectionTitle">{children}</div>;
 }
 
 function compactPath(path) {
   if (!path) return "";
   if (path.length <= 60) return path;
-  return `${path.slice(0, 24)}...${path.slice(-28)}`;
+  return `${path.slice(0, 24)}…${path.slice(-28)}`;
 }
 
 export default function SystemStatusCard({
@@ -67,9 +63,15 @@ export default function SystemStatusCard({
   const pyannoteAvailable = Boolean(systemStatus?.pyannote_available);
   const pyannoteError = systemStatus?.pyannote_error ?? "";
   const canUnloadASR = asrLoaded || Boolean(asrError);
+  const confirmUnload = (label, handler) => {
+    if (!window.confirm(`确认卸载 ${label} 模型？正在运行的相关任务可能需要重新加载模型。`)) {
+      return;
+    }
+    handler?.();
+  };
 
   return (
-    <GlassCard>
+    <GlassCard className="settingsStatusCard">
       <div className="sectionHeader">
         <h2 className="cardTitle">
           <Cpu size={16} /> 系统状态
@@ -81,14 +83,14 @@ export default function SystemStatusCard({
           disabled={isRefreshing}
           onClick={onRefresh}
         >
-          刷新
+          {isRefreshing ? "刷新中…" : "刷新"}
         </Button>
       </div>
 
       <div className="listStack">
         <SectionTitle>模型运行状态</SectionTitle>
         {settingsError ? (
-          <div className="statRow">
+          <div className="statRow settingsErrorRow" aria-live="polite">
             <span>系统错误</span>
             <strong style={{ color: "var(--danger)", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {settingsError}
@@ -348,7 +350,7 @@ export default function SystemStatusCard({
           size="sm"
           icon={Trash2}
           disabled={llmStatus !== "ready"}
-          onClick={onUnloadLLM}
+          onClick={() => confirmUnload("LLM", onUnloadLLM)}
         >
           卸载 LLM
         </Button>
@@ -357,7 +359,7 @@ export default function SystemStatusCard({
           size="sm"
           icon={Trash2}
           disabled={!canUnloadTTS}
-          onClick={onUnloadTTS}
+          onClick={() => confirmUnload("TTS", onUnloadTTS)}
         >
           卸载 TTS
         </Button>
@@ -366,7 +368,7 @@ export default function SystemStatusCard({
           size="sm"
           icon={Trash2}
           disabled={!canUnloadMusic}
-          onClick={onUnloadMusic}
+          onClick={() => confirmUnload("Music", onUnloadMusic)}
         >
           卸载 Music
         </Button>
@@ -375,7 +377,7 @@ export default function SystemStatusCard({
           size="sm"
           icon={Trash2}
           disabled={!canUnloadASR}
-          onClick={onUnloadASR}
+          onClick={() => confirmUnload("ASR", onUnloadASR)}
         >
           卸载 ASR
         </Button>

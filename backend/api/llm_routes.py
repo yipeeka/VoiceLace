@@ -517,7 +517,7 @@ async def _run_parse_task(task_id: str, payload: LlmParseRequest, state) -> None
 
         script = await state.llm_engine.parse_text_chunked_stream(
             payload.text,
-            payload.system_prompt or DEFAULT_PARSE_PROMPT,
+            payload.system_prompt or cfg.default_system_prompt or DEFAULT_PARSE_PROMPT,
             on_chunk=on_chunk,
             on_chunk_progress=on_chunk_progress,
             on_chunk_start=on_chunk_start,
