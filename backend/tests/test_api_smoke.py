@@ -77,6 +77,10 @@ class ApiSmokeTest(unittest.TestCase):
         self.assertIn("music_turbo_model_dir", body.get("config", {}))
         self.assertIn("music_base_model_dir", body.get("config", {}))
         self.assertIn("music_model_variant", body.get("config", {}))
+        self.assertIn("mcp_enabled", body.get("config", {}))
+        self.assertIn("mcp_mount_path", body.get("config", {}))
+        self.assertIn("mcp_enabled", body)
+        self.assertIn("mcp_mount_path", body)
 
     def test_music_model_validate_endpoint_shape(self) -> None:
         response = self.client.get("/api/v1/music/model/validate")

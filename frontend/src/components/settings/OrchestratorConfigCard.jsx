@@ -406,6 +406,23 @@ export default function OrchestratorConfigCard({ form, isSaving, onSetField, onS
                 />
               </SettingsGroup>
 
+              <SettingsGroup title="MCP 服务" description="为支持 MCP 的 AI 客户端开放本地工具服务，保存后重启后端生效。">
+                <ToggleRow
+                  id="mcp-enabled"
+                  checked={form.mcp_enabled ?? false}
+                  onChange={(value) => onSetField("mcp_enabled", value)}
+                  title="启用 MCP 服务端"
+                  description="开启后可连接本机 MCP Streamable HTTP 服务。"
+                />
+                <TextField
+                  id="mcp-mount-path"
+                  label="MCP 挂载路径"
+                  value={form.mcp_mount_path ?? "/mcp"}
+                  onChange={(value) => onSetField("mcp_mount_path", value)}
+                  placeholder="/mcp"
+                />
+              </SettingsGroup>
+
               <SettingsGroup title="主模型采样参数" description="控制主模型输出长度、上下文和随机性。">
                 <div className="editorGrid three settingsFieldGrid">
                   <NumberField id="llm-temperature" label="temperature" step="0.01" min="0" max="2" value={form.llm_temperature ?? 0.2} onChange={(value) => onSetField("llm_temperature", value)} />

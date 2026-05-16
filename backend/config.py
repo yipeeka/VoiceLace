@@ -117,6 +117,8 @@ class Settings:
     default_debug_stale_report: bool = field(
         default_factory=lambda: os.getenv("BV_DEBUG_STALE_REPORT", "false").lower() == "true"
     )
+    default_mcp_enabled: bool = field(default_factory=lambda: os.getenv("BV_MCP_ENABLED", "false").lower() == "true")
+    default_mcp_mount_path: str = field(default_factory=lambda: os.getenv("BV_MCP_MOUNT_PATH", "/mcp"))
     allow_mock_fallback: bool = field(default_factory=lambda: os.getenv("BV_ALLOW_MOCK_FALLBACK", "true").lower() == "true")
     data_dir: Path = field(init=False)
     runtime_config_path: Path = field(init=False)

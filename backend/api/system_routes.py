@@ -44,9 +44,22 @@ def _is_within(path: Path, root: Path) -> bool:
         return False
 
 
+def normalize_mcp_mount_path(raw: str | None) -> str:
+    value = str(raw or "/mcp").strip() or "/mcp"
+    if not value.startswith("/"):
+        value = f"/{value}"
+    value = value.rstrip("/") or "/mcp"
+    if value == "/":
+        return "/mcp"
+    return value
+
+
 @router.get("/status")
 async def get_status(state=Depends(get_app_state)):
     status = await state.orchestrator.get_status()
+    status["mcp_enabled"] = bool(getattr(state.orchestrator.config, "mcp_enabled", False))
+    status["mcp_mount_path"] = normalize_mcp_mount_path(getattr(state.orchestrator.config, "mcp_mount_path", "/mcp"))
+    status["mcp_url"] = status["mcp_mount_path"] if status["mcp_enabled"] else ""
     status["python_executable"] = sys.executable
     spec = importlib.util.find_spec("llama_cpp")
     status["llama_cpp_available"] = bool(spec)
@@ -103,7 +116,9 @@ async def update_orchestrator_config(payload: OrchestratorConfigPayload, state=D
     old_pyannote_device = getattr(state.asr_engine, "pyannote_device", "")
     old_music_model_dir = getattr(state.music_engine, "model_dir", "")
     old_music_device_mode = getattr(state.music_engine, "device_mode", "")
-    config = OrchestratorConfig(**payload.model_dump())
+    raw_config = payload.model_dump()
+    raw_config["mcp_mount_path"] = normalize_mcp_mount_path(raw_config.get("mcp_mount_path"))
+    config = OrchestratorConfig(**raw_config)
     next_music_model_dir = state.orchestrator.get_active_music_model_dir(config)
     saved = await state.orchestrator.update_config(config)
     save_runtime_config(state.settings.runtime_config_path, config)
@@ -167,6 +182,7 @@ async def reset_orchestrator_config(state=Depends(get_app_state)):
     old_music_model_dir = getattr(state.music_engine, "model_dir", "")
     old_music_device_mode = getattr(state.music_engine, "device_mode", "")
     config = load_runtime_default_config(state.settings.runtime_defaults_config_path) or OrchestratorConfig()
+    config.mcp_mount_path = normalize_mcp_mount_path(config.mcp_mount_path)
     next_music_model_dir = state.orchestrator.get_active_music_model_dir(config)
     saved = await state.orchestrator.update_config(config)
     save_runtime_config(state.settings.runtime_config_path, config)

@@ -40,6 +40,8 @@ class OrchestratorConfig:
     auto_unload_llm_after_parse: bool = settings.default_auto_unload_llm_after_parse
     auto_load_tts_before_synth: bool = settings.default_auto_load_tts_before_synth
     debug_stale_report: bool = settings.default_debug_stale_report
+    mcp_enabled: bool = settings.default_mcp_enabled
+    mcp_mount_path: str = settings.default_mcp_mount_path
     enable_llama_cpp_think_mode: bool = settings.default_enable_llama_cpp_think_mode
     llm_backend: str = settings.default_llm_backend
     llm_model_path: str = settings.default_llm_model_path
@@ -139,6 +141,11 @@ class ModelOrchestrator:
 
     @staticmethod
     def _normalize_music_config(config: OrchestratorConfig) -> OrchestratorConfig:
+        mcp_mount_path = str(getattr(config, "mcp_mount_path", "/mcp") or "/mcp").strip()
+        if not mcp_mount_path.startswith("/"):
+            mcp_mount_path = f"/{mcp_mount_path}"
+        config.mcp_mount_path = (mcp_mount_path.rstrip("/") or "/mcp") if mcp_mount_path != "/" else "/mcp"
+
         variant = str(getattr(config, "music_model_variant", "turbo") or "turbo").strip().lower()
         if variant not in {"turbo", "base"}:
             variant = "turbo"

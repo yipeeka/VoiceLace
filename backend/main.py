@@ -11,9 +11,19 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from backend.api import api_router
 from backend.config import settings
-from backend.state import create_app_state
+from backend.mcp_server import build_mcp_server
+from backend.runtime_config import load_runtime_config
+from backend.state import create_app_state, get_app_state_from_app
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_mount_path(raw: str | None) -> str:
+    value = str(raw or "/mcp").strip() or "/mcp"
+    if not value.startswith("/"):
+        value = f"/{value}"
+    value = value.rstrip("/") or "/mcp"
+    return "/mcp" if value == "/" else value
 
 
 @asynccontextmanager
@@ -21,7 +31,11 @@ async def lifespan(app: FastAPI):
     settings.ensure_directories()
     app.state.app_state = create_app_state()
     try:
-        yield
+        if _mcp_server is not None:
+            async with _mcp_server.session_manager.run():
+                yield
+        else:
+            yield
     finally:
         app.state.app_state = None
 
@@ -36,6 +50,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(api_router, prefix=settings.api_prefix)
+
+_startup_config = load_runtime_config(settings.runtime_config_path)
+_mcp_server = None
+if bool(getattr(_startup_config, "mcp_enabled", False)):
+    _mcp_mount_path = _normalize_mount_path(getattr(_startup_config, "mcp_mount_path", "/mcp"))
+    _mcp_server = build_mcp_server(lambda: get_app_state_from_app(app))
+    app.mount(_mcp_mount_path, _mcp_server.streamable_http_app())
 
 
 def _error_payload(message: str, code: str, details=None, path: str | None = None) -> dict:

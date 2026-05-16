@@ -22,6 +22,8 @@ class RuntimeConfigTest(unittest.TestCase):
                 llm_api_model="gemini-2.5-flash",
                 llm_n_ctx=4096,
                 llm_threads=4,
+                mcp_enabled=True,
+                mcp_mount_path="/voice-mcp",
                 secondary_llm_model_path="E:/models/qwen2.5-1.5b.gguf",
                 secondary_llm_n_ctx=3072,
                 secondary_llm_max_tokens=900,
@@ -47,6 +49,8 @@ class RuntimeConfigTest(unittest.TestCase):
             raw = json.loads(path.read_text(encoding="utf-8"))
             self.assertFalse(raw["enable_llama_cpp_think_mode"])
             self.assertEqual(raw["llm_backend"], "gemini")
+            self.assertTrue(raw["mcp_enabled"])
+            self.assertEqual(raw["mcp_mount_path"], "/voice-mcp")
             self.assertEqual(raw["voxcpm_tts_model_path"], "openbmb/VoxCPM2")
             self.assertTrue(raw["music_enabled"])
             self.assertEqual(raw["music_turbo_model_dir"], "D:/AIModels/ACE-Step/acestep-v15-xl-turbo-diffusers")
@@ -64,6 +68,8 @@ class RuntimeConfigTest(unittest.TestCase):
             loaded = load_runtime_config(path)
             self.assertFalse(loaded.enable_llama_cpp_think_mode)
             self.assertEqual(loaded.llm_backend, "gemini")
+            self.assertTrue(loaded.mcp_enabled)
+            self.assertEqual(loaded.mcp_mount_path, "/voice-mcp")
             self.assertEqual(loaded.asr_device, "cuda:1")
             self.assertEqual(loaded.llm_threads, 4)
             self.assertEqual(loaded.voxcpm_tts_model_path, "openbmb/VoxCPM2")
