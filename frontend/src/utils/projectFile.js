@@ -73,7 +73,7 @@ export async function openProjectFileWithPicker() {
     multiple: false,
     types: [
       {
-        description: "BeautyVoice Project",
+        description: "VoiceLace Project",
         accept: {
           "application/json": [".bvtproject.json", ".json"],
         },
@@ -108,7 +108,7 @@ export async function saveProjectFile({
       suggestedName: `${sanitizeFilename(preferredName)}.bvtproject.json`,
       types: [
         {
-          description: "BeautyVoice Project",
+          description: "VoiceLace Project",
           accept: {
             "application/json": [".bvtproject.json"],
           },

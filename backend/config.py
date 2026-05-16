@@ -15,7 +15,7 @@ if load_dotenv is not None:
 
 @dataclass(slots=True)
 class Settings:
-    app_name: str = "BeautyVoiceTTS API"
+    app_name: str = "VoiceLace API"
     api_prefix: str = "/api/v1"
     cors_origins: list[str] = field(default_factory=lambda: ["http://localhost:5173"])
     cors_origin_regex: str = field(

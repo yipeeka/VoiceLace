@@ -1,4 +1,4 @@
-# BeautyVoiceTTS Final Acceptance Summary
+# VoiceLace Final Acceptance Summary
 
 ## Scope
 
