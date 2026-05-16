@@ -45,6 +45,7 @@ export function SynthesisGenerateCard({
   const requestedBackend = config.tts_backend || "omnivoice";
   const ttsBackend = requestedBackend;
   const showTimelineLock = ttsBackend !== "voxcpm2";
+  const canUseTimelineLock = showTimelineLock && isDubbingSourceProject;
   const omnivoiceConfig = {
     num_step: Number(config?.omnivoice?.num_step ?? config.num_step ?? 32),
     guidance_scale: Number(config?.omnivoice?.guidance_scale ?? config.guidance_scale ?? 2),
@@ -227,15 +228,18 @@ export function SynthesisGenerateCard({
           {showTimelineLock ? (
           <div className="formGroup">
             <label className="formLabel">时间轴锁定合成</label>
-            <label className="controlRow" style={{ cursor: "pointer", padding: "8px 12px", background: "var(--bg-elevated)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-default)" }}>
+            <label className="controlRow" style={{ cursor: canUseTimelineLock ? "pointer" : "not-allowed", padding: "8px 12px", background: "var(--bg-elevated)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-default)", opacity: canUseTimelineLock ? 1 : 0.62 }}>
               <input
                 type="checkbox"
-                checked={Boolean(config.timeline_lock_enabled)}
+                checked={canUseTimelineLock && Boolean(config.timeline_lock_enabled)}
+                disabled={!canUseTimelineLock || isRunning}
                 onChange={(e) => onSetConfig({ timeline_lock_enabled: e.target.checked })}
                 style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
               />
               <span style={{ fontSize: 13.5, color: "var(--text-secondary)" }}>
-                按片段 source_start_ms 放置音频（翻译配音项目建议开启）
+                {isDubbingSourceProject
+                  ? "按片段 source_start_ms 放置音频（翻译配音项目建议开启）"
+                  : "仅配音/字幕时间轴项目可用"}
               </span>
             </label>
           </div>

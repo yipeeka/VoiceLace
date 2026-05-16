@@ -156,7 +156,7 @@ export default function SynthesisPage() {
       if (backend === "voxcpm2") {
         return false;
       }
-      return Boolean(config?.timeline_lock_enabled || currentProject?.script?.metadata?.dubbing_source);
+      return Boolean(currentProject?.script?.metadata?.dubbing_source && config?.timeline_lock_enabled);
     },
     [config?.tts_backend, config?.timeline_lock_enabled, currentProject?.script?.metadata?.dubbing_source],
   );
@@ -818,7 +818,7 @@ export default function SynthesisPage() {
       tts_auto_retry: Boolean(baseConfig.tts_auto_retry ?? true),
       tts_retry_attempts: Number(baseConfig.tts_retry_attempts ?? 2),
       tts_segment_concurrency: Number(baseConfig.tts_segment_concurrency ?? 1),
-      timeline_lock_enabled: Boolean(baseConfig.timeline_lock_enabled ?? false),
+      timeline_lock_enabled: Boolean(isDubbingSourceProject && (baseConfig.timeline_lock_enabled ?? false)),
       bgm_track: {
         ...(baseConfig.bgm_track || {}),
         gain_db: Number(baseConfig.bgm_track?.gain_db || 0),
