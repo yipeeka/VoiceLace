@@ -4,6 +4,206 @@
   gap: 8px;
 }
 
+.musicCollapsibleBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
+}
+
+.musicAdvancedBlock {
+  margin-top: 4px;
+}
+
+.musicInlineHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.musicInlineTitle {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.musicInlineMeta {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.musicPromptArea {
+  min-height: 76px;
+}
+
+.musicCompactGrid {
+  margin-bottom: 4px;
+}
+
+.musicStatusCard {
+  align-self: stretch;
+  width: 100%;
+  gap: 10px;
+  padding: 12px;
+  border-color: var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-surface) 68%, transparent);
+}
+
+.musicStatusCompactHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.musicStatusHeadline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.musicStatusKicker {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.musicStatusSummary {
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.musicStatusActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.musicStatusTinyOk,
+.musicStatusTinyWarn {
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.musicStatusTinyOk {
+  color: var(--success);
+}
+
+.musicStatusTinyWarn {
+  color: var(--text-muted);
+}
+
+.musicStatusGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.musicStatusItem {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.musicStatusItem.primary,
+.musicStatusItem.wide,
+.musicStatusNote,
+.musicStatusError,
+.musicStatusCode,
+.musicStatusGrid > .controlRow,
+.musicStatusGrid > .listStack {
+  grid-column: 1 / -1;
+}
+
+.musicStatusItem span {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.musicStatusItem strong {
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.musicStatusOk {
+  color: var(--success) !important;
+}
+
+.musicStatusWarn {
+  color: var(--warning) !important;
+}
+
+.musicMonoValue {
+  font-family: "JetBrains Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.musicStatusNote {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.musicStatusError {
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.musicStatusCode {
+  max-height: 90px;
+  overflow: auto;
+}
+
+.musicStatusConflict {
+  margin-top: 2px;
+}
+
+.musicPreviewCard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.musicPreviewLayout {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.musicPreviewActions {
+  justify-content: flex-end;
+}
+
 .musicAssetCategoryToolbar {
   display: flex;
   align-items: center;
@@ -90,7 +290,6 @@
 }
 
 .musicAssistPanel {
-  margin-bottom: 14px;
   padding: 12px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-default);
@@ -169,7 +368,31 @@
   .musicAssetRow {
     grid-template-columns: 1fr;
   }
+  .musicPreviewLayout {
+    grid-template-columns: 1fr;
+  }
+  .musicPreviewActions {
+    justify-content: flex-start;
+  }
   .musicAssistComposer {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 620px) {
+  .musicStatusGrid {
+    grid-template-columns: 1fr;
+  }
+  .musicStatusCompactHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .musicStatusActions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+  .musicInlineHeader {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

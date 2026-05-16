@@ -84,6 +84,9 @@ export default function MusicPage({ onNavigate }) {
   const [isProjectSaving, setIsProjectSaving] = useState(false);
   const [isUploadingMusicAsset, setIsUploadingMusicAsset] = useState(false);
   const [isAssetLibraryOpen, setIsAssetLibraryOpen] = useState(true);
+  const [isMusicAssistOpen, setIsMusicAssistOpen] = useState(false);
+  const [isAdvancedMusicOpen, setIsAdvancedMusicOpen] = useState(false);
+  const [isStatusDetailOpen, setIsStatusDetailOpen] = useState(false);
   const [assistSource, setAssistSource] = useState("secondary_local");
   const [assistStatus, setAssistStatus] = useState(null);
   const [assistInput, setAssistInput] = useState("");
@@ -997,7 +1000,7 @@ export default function MusicPage({ onNavigate }) {
 
   return (
     <div className="pageGrid">
-      <div className="pageGrid twoCols">
+      <div className="pageGrid musicGenerationStack">
         <GlassCard>
           <h2 className="cardTitle">
             <Music size={16} /> 音乐生成
@@ -1007,25 +1010,44 @@ export default function MusicPage({ onNavigate }) {
           </p>
 
           {hideTextMusicInputs ? null : (
-            <MusicAssistPanel
-              assistInput={assistInput}
-              assistMessages={assistMessages}
-              assistSource={assistSource}
-              assistStatus={assistStatus}
-              isAssistBusy={isAssistBusy}
-              isAssistChatting={isAssistChatting}
-              isAssistFinalizing={isAssistFinalizing}
-              isAssistLoading={isAssistLoading}
-              isAssistUnloading={isAssistUnloading}
-              isMusicTaskActive={isMusicTaskActive}
-              onAssistFinalize={handleAssistFinalize}
-              onAssistLoad={handleAssistLoad}
-              onAssistSend={handleAssistSend}
-              onAssistUnload={handleAssistUnload}
-              onClearAssistConversation={handleClearAssistConversation}
-              onInputChange={setAssistInput}
-              onSourceChange={setAssistSource}
-            />
+            <div className="musicCollapsibleBlock">
+              <div className="musicInlineHeader">
+                <div>
+                  <div className="musicInlineTitle">音乐助手</div>
+                  <div className="musicInlineMeta">{assistStatus?.loaded ? `已加载 ${assistStatus.source || ""}` : "按需展开"}</div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={isMusicAssistOpen ? ChevronUp : ChevronDown}
+                  aria-expanded={isMusicAssistOpen}
+                  onClick={() => setIsMusicAssistOpen((prev) => !prev)}
+                >
+                  {isMusicAssistOpen ? "收起" : "展开"}
+                </Button>
+              </div>
+              {isMusicAssistOpen ? (
+                <MusicAssistPanel
+                  assistInput={assistInput}
+                  assistMessages={assistMessages}
+                  assistSource={assistSource}
+                  assistStatus={assistStatus}
+                  isAssistBusy={isAssistBusy}
+                  isAssistChatting={isAssistChatting}
+                  isAssistFinalizing={isAssistFinalizing}
+                  isAssistLoading={isAssistLoading}
+                  isAssistUnloading={isAssistUnloading}
+                  isMusicTaskActive={isMusicTaskActive}
+                  onAssistFinalize={handleAssistFinalize}
+                  onAssistLoad={handleAssistLoad}
+                  onAssistSend={handleAssistSend}
+                  onAssistUnload={handleAssistUnload}
+                  onClearAssistConversation={handleClearAssistConversation}
+                  onInputChange={setAssistInput}
+                  onSourceChange={setAssistSource}
+                />
+              ) : null}
+            </div>
           )}
 
           <div className="editorGrid three">
@@ -1183,100 +1205,19 @@ export default function MusicPage({ onNavigate }) {
             </div>
           ) : null}
 
-          <div className="editorGrid three">
-            <div className="formGroup">
-              <label className="formLabel">Guidance Scale</label>
-              <input
-                className="textInput"
-                type="number"
-                min="0"
-                max="30"
-                step="0.1"
-                value={isTurboModel ? "0.0" : form.guidance_scale}
-                onChange={(event) => setForm((prev) => ({ ...prev, guidance_scale: event.target.value }))}
-                disabled={isTurboModel}
-              />
-              {isTurboModel ? (
-                <div className="secondary" style={{ marginTop: 6 }}>Turbo 模型不支持 CFG，已自动关闭</div>
-              ) : null}
-            </div>
-            <div className="formGroup">
-              <label className="formLabel">Shift</label>
-              {isTurboModel ? (
-                <Select
-                  value={TURBO_SHIFT_OPTIONS.some((item) => item.value === form.shift) ? form.shift : "3.0"}
-                  onValueChange={(value) => setForm((prev) => ({ ...prev, shift: value }))}
-                  options={TURBO_SHIFT_OPTIONS}
-                />
-              ) : (
-                <input
-                  className="textInput"
-                  type="number"
-                  min={String(shiftMin)}
-                  max={String(shiftMax)}
-                  step="0.1"
-                  value={form.shift}
-                  onChange={(event) => setForm((prev) => ({ ...prev, shift: event.target.value }))}
-                />
-              )}
-              <div className="secondary" style={{ marginTop: 6 }}>
-                {isTurboModel ? "Turbo：固定使用 1 / 2 / 3 三档" : "Base：建议 1.0 - 5.0"}
-              </div>
-            </div>
-            {taskType === "extract" ? (
-              <div className="formGroup">
-                <label className="formLabel">推理步数</label>
-                <input
-                  className="textInput"
-                  type="number"
-                  min={selectedModelVariant === "base" ? String(BASE_MIN_INFERENCE_STEPS) : "1"}
-                  max="100"
-                  step="1"
-                  value={form.num_inference_steps}
-                  onChange={(event) => setForm((prev) => ({ ...prev, num_inference_steps: event.target.value }))}
-                />
-              </div>
-            ) : (
-              <div className="formGroup">
-                <label className="formLabel">Cover 强度</label>
-                <input
-                  className="textInput"
-                  type="number"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  value={form.audio_cover_strength}
-                  onChange={(event) => setForm((prev) => ({ ...prev, audio_cover_strength: event.target.value }))}
-                  disabled={taskType !== "cover"}
-                />
-              </div>
-            )}
-          </div>
-
           {hideTextMusicInputs ? null : (
             <>
               <div className="formGroup">
                 <label className="formLabel">音乐描述（必填）</label>
                 <textarea
-                  className="textArea"
+                  className="textArea musicPromptArea"
                   value={form.prompt}
                   onChange={(event) => setForm((prev) => ({ ...prev, prompt: event.target.value }))}
-                  placeholder="例如：温暖钢琴与弦乐，电影感，60 秒，适合旁白背景"
-                  style={{ minHeight: 108 }}
+                  placeholder="例如：温暖钢琴与弦乐，电影感，60 秒，适合旁白背景…"
                 />
               </div>
 
-              <div className="formGroup">
-                <label className="formLabel">歌词（可选，留空可自动）</label>
-                <textarea
-                  className="textArea compactArea"
-                  value={form.lyrics}
-                  onChange={(event) => setForm((prev) => ({ ...prev, lyrics: event.target.value }))}
-                  placeholder="纯音乐可填 [Instrumental]"
-                />
-              </div>
-
-              <div className="editorGrid three">
+              <div className="editorGrid three musicCompactGrid">
                 <div className="formGroup">
                   <label className="formLabel">时长（秒）</label>
                   <input
@@ -1310,6 +1251,108 @@ export default function MusicPage({ onNavigate }) {
                   />
                 </div>
               </div>
+            </>
+          )}
+
+          <div className="musicCollapsibleBlock musicAdvancedBlock">
+            <div className="musicInlineHeader">
+              <div>
+                <div className="musicInlineTitle">高级音乐参数</div>
+                <div className="musicInlineMeta">Seed、BPM、歌词、CFG 与轨道细节</div>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={isAdvancedMusicOpen ? ChevronUp : ChevronDown}
+                aria-expanded={isAdvancedMusicOpen}
+                onClick={() => setIsAdvancedMusicOpen((prev) => !prev)}
+              >
+                {isAdvancedMusicOpen ? "收起" : "展开"}
+              </Button>
+            </div>
+            {isAdvancedMusicOpen ? (
+              <>
+                <div className="editorGrid three">
+                  <div className="formGroup">
+                    <label className="formLabel">Guidance Scale</label>
+                    <input
+                      className="textInput"
+                      type="number"
+                      min="0"
+                      max="30"
+                      step="0.1"
+                      value={isTurboModel ? "0.0" : form.guidance_scale}
+                      onChange={(event) => setForm((prev) => ({ ...prev, guidance_scale: event.target.value }))}
+                      disabled={isTurboModel}
+                    />
+                    {isTurboModel ? (
+                      <div className="secondary" style={{ marginTop: 6 }}>Turbo 模型不支持 CFG，已自动关闭</div>
+                    ) : null}
+                  </div>
+                  <div className="formGroup">
+                    <label className="formLabel">Shift</label>
+                    {isTurboModel ? (
+                      <Select
+                        value={TURBO_SHIFT_OPTIONS.some((item) => item.value === form.shift) ? form.shift : "3.0"}
+                        onValueChange={(value) => setForm((prev) => ({ ...prev, shift: value }))}
+                        options={TURBO_SHIFT_OPTIONS}
+                      />
+                    ) : (
+                      <input
+                        className="textInput"
+                        type="number"
+                        min={String(shiftMin)}
+                        max={String(shiftMax)}
+                        step="0.1"
+                        value={form.shift}
+                        onChange={(event) => setForm((prev) => ({ ...prev, shift: event.target.value }))}
+                      />
+                    )}
+                    <div className="secondary" style={{ marginTop: 6 }}>
+                      {isTurboModel ? "Turbo：固定使用 1 / 2 / 3 三档" : "Base：建议 1.0 - 5.0"}
+                    </div>
+                  </div>
+                  {taskType === "extract" ? (
+                    <div className="formGroup">
+                      <label className="formLabel">推理步数</label>
+                      <input
+                        className="textInput"
+                        type="number"
+                        min={selectedModelVariant === "base" ? String(BASE_MIN_INFERENCE_STEPS) : "1"}
+                        max="100"
+                        step="1"
+                        value={form.num_inference_steps}
+                        onChange={(event) => setForm((prev) => ({ ...prev, num_inference_steps: event.target.value }))}
+                      />
+                    </div>
+                  ) : (
+                    <div className="formGroup">
+                      <label className="formLabel">Cover 强度</label>
+                      <input
+                        className="textInput"
+                        type="number"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={form.audio_cover_strength}
+                        onChange={(event) => setForm((prev) => ({ ...prev, audio_cover_strength: event.target.value }))}
+                        disabled={taskType !== "cover"}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {hideTextMusicInputs ? null : (
+                  <>
+                    <div className="formGroup">
+                      <label className="formLabel">歌词（可选，留空可自动）</label>
+                      <textarea
+                        className="textArea compactArea"
+                        value={form.lyrics}
+                        onChange={(event) => setForm((prev) => ({ ...prev, lyrics: event.target.value }))}
+                        placeholder="纯音乐可填 [Instrumental]…"
+                      />
+                    </div>
 
               <div className="editorGrid three">
                 <div className="formGroup">
@@ -1349,8 +1392,11 @@ export default function MusicPage({ onNavigate }) {
                   options={TIMESIGNATURE_OPTIONS}
                 />
               </div>
-            </>
-          )}
+                  </>
+                )}
+              </>
+            ) : null}
+          </div>
 
           {hideTextMusicInputs ? (
             <div className="controlRow">
@@ -1385,147 +1431,169 @@ export default function MusicPage({ onNavigate }) {
           )}
         </GlassCard>
 
-        <GlassCard>
-          <div className="sectionHeader">
-            <h2 className="cardTitle">运行状态</h2>
-            <Button variant="ghost" size="sm" icon={RefreshCw} onClick={refreshValidation} disabled={isValidating}>
-              校验模型目录
-            </Button>
-          </div>
-
-          <div className="listStack">
-            <div className="statRow">
-              <span>任务状态</span>
+        <GlassCard className="musicStatusCard">
+          <div className="musicStatusCompactHeader">
+            <div className="musicStatusHeadline">
+              <span className="musicStatusKicker">运行状态</span>
               <StatusBadge label={statusMeta.label} tone={statusMeta.tone} />
+              <span className="musicStatusSummary">
+                {taskStage || (taskId ? `任务 ${taskId}` : currentProject?.name ? currentProject.name : "等待生成")}
+              </span>
             </div>
-            <div className="statRow">
-              <span>Music 启用</span>
-              <strong style={{ color: musicEnabled ? "var(--success)" : "var(--warning)" }}>
-                {musicEnabled ? "yes" : "no"}
-              </strong>
+            <div className="musicStatusActions">
+              <span className={validation?.valid ? "musicStatusTinyOk" : "musicStatusTinyWarn"}>
+                模型{validation?.valid ? "通过" : "待校验"}
+              </span>
+              <Button variant="ghost" size="sm" icon={RefreshCw} onClick={refreshValidation} disabled={isValidating}>
+                校验
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={isStatusDetailOpen ? ChevronUp : ChevronDown}
+                aria-expanded={isStatusDetailOpen}
+                aria-controls="music-status-details"
+                onClick={() => setIsStatusDetailOpen((prev) => !prev)}
+              >
+                详情
+              </Button>
             </div>
-            <div className="statRow">
-              <span>任务 ID</span>
-              <strong style={{ fontFamily: "monospace", fontSize: 11.5 }}>
-                {taskId || "-"}
-              </strong>
-            </div>
-            <div className="statRow">
-              <span>阶段</span>
-              <strong>{taskStage || "-"}</strong>
-            </div>
-            <div className="statRow">
-              <span>当前项目</span>
-              <strong>{currentProject?.name || "未选择"}</strong>
-            </div>
-            <div className="statRow">
-              <span>模型目录</span>
-              <strong title={validation?.model_dir || ""} style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {validation?.model_dir || "未配置"}
-              </strong>
-            </div>
-            <div className="statRow">
-              <span>模型校验</span>
-              <strong style={{ color: validation?.valid ? "var(--success)" : "var(--warning)" }}>
-                {validation?.valid ? "通过" : "未通过"}
-              </strong>
-            </div>
-            <div className="statRow">
-              <span>模型类型</span>
-              <strong>{validation ? (validation.is_turbo ? "Turbo" : "Base / SFT") : "-"}</strong>
-            </div>
-            <div className="statRow">
-              <span>支持任务</span>
-              <strong style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {Array.isArray(validation?.supported_task_types) && validation.supported_task_types.length
-                  ? validation.supported_task_types.join(", ")
-                  : "-"}
-              </strong>
-            </div>
-            {validation?.message ? (
-              <div className={validation?.valid ? "secondary" : "errorText"}>{validation.message}</div>
-            ) : null}
-            {Array.isArray(validation?.missing) && validation.missing.length ? (
-              <div className="codeBlock">{validation.missing.join("\n")}</div>
-            ) : null}
-            {taskError ? (
-              <div className="errorText">{taskError}</div>
-            ) : null}
-            {showConflictHint && taskId ? (
-              <div className="controlRow">
-                <Button variant="ghost" size="sm" onClick={focusStatusCard}>
-                  定位当前任务
-                </Button>
-              </div>
-            ) : null}
-            {taskStatus === "canceled" && taskCancelMessage ? (
-              <div className="listStack" style={{ marginTop: 8, gap: 6 }}>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon={cancelDetailOpen ? ChevronUp : ChevronDown}
-                  onClick={() => setCancelDetailOpen((prev) => !prev)}
-                >
-                  取消详情
-                </Button>
-                {cancelDetailOpen ? (
-                  <div className="statusBadge warning" style={{ display: "block", textAlign: "left" }}>
-                    {taskCancelMessage}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
           </div>
 
-          {previewAudioUrl ? (
-            <div className="listStack">
-              <div className="formLabel">试听</div>
-              <AudioPlayer
-                audioUrl={previewAudioUrl}
-                compact
-                autoPlaySignal={previewAutoPlaySignal}
-                pauseSignal={previewPauseSignal}
-                onPlayStateChange={setIsPreviewPlaying}
-              />
-              {currentResultAssetName ? (
-                <div className="controlRow">
+          {taskError ? (
+            <div className="musicStatusError">{taskError}</div>
+          ) : null}
+          {validation?.message && !validation?.valid ? (
+            <div className="musicStatusError">{validation.message}</div>
+          ) : null}
+          {showConflictHint && taskId ? (
+            <div className="controlRow musicStatusConflict">
+              <Button variant="ghost" size="sm" onClick={focusStatusCard}>
+                定位当前任务
+              </Button>
+            </div>
+          ) : null}
+
+          {isStatusDetailOpen ? (
+            <div id="music-status-details" className="musicStatusGrid">
+              <div className="musicStatusItem">
+                <span>Music 启用</span>
+                <strong className={musicEnabled ? "musicStatusOk" : "musicStatusWarn"}>{musicEnabled ? "yes" : "no"}</strong>
+              </div>
+              <div className="musicStatusItem">
+                <span>模型校验</span>
+                <strong className={validation?.valid ? "musicStatusOk" : "musicStatusWarn"}>{validation?.valid ? "通过" : "未通过"}</strong>
+              </div>
+              <div className="musicStatusItem">
+                <span>模型类型</span>
+                <strong>{validation ? (validation.is_turbo ? "Turbo" : "Base / SFT") : "-"}</strong>
+              </div>
+              <div className="musicStatusItem">
+                <span>当前项目</span>
+                <strong title={currentProject?.name || ""}>{currentProject?.name || "未选择"}</strong>
+              </div>
+              <div className="musicStatusItem wide">
+                <span>任务 ID</span>
+                <strong className="musicMonoValue" translate="no">{taskId || "-"}</strong>
+              </div>
+              <div className="musicStatusItem wide">
+                <span>阶段</span>
+                <strong>{taskStage || "-"}</strong>
+              </div>
+              <div className="musicStatusItem wide">
+                <span>模型目录</span>
+                <strong title={validation?.model_dir || ""} translate="no">{validation?.model_dir || "未配置"}</strong>
+              </div>
+              <div className="musicStatusItem wide">
+                <span>支持任务</span>
+                <strong>
+                  {Array.isArray(validation?.supported_task_types) && validation.supported_task_types.length
+                    ? validation.supported_task_types.join(", ")
+                    : "-"}
+                </strong>
+              </div>
+              {validation?.message && validation?.valid ? (
+                <div className="musicStatusNote">{validation.message}</div>
+              ) : null}
+              {Array.isArray(validation?.missing) && validation.missing.length ? (
+                <div className="codeBlock musicStatusCode">{validation.missing.join("\n")}</div>
+              ) : null}
+              {taskStatus === "canceled" && taskCancelMessage ? (
+                <div className="listStack" style={{ marginTop: 8, gap: 6 }}>
                   <Button
                     variant="ghost"
-                    icon={Download}
-                    onClick={() => downloadAudioUrl(buildAssetAudioUrl(currentResultAssetName), currentResultAssetName)}
+                    size="sm"
+                    icon={cancelDetailOpen ? ChevronUp : ChevronDown}
+                    onClick={() => setCancelDetailOpen((prev) => !prev)}
                   >
-                    下载当前结果
+                    取消详情
                   </Button>
-                  <Button
-                    variant="secondary"
-                    icon={Save}
-                    disabled={attachingKey === `${currentResultAssetName}:bgm`}
-                    onClick={() => handleAttach(currentResultAssetName, "bgm")}
-                  >
-                    绑定为 BGM
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    icon={Save}
-                    disabled={attachingKey === `${currentResultAssetName}:ambience`}
-                    onClick={() => handleAttach(currentResultAssetName, "ambience")}
-                  >
-                    绑定为环境音
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => onNavigate?.("synth")}
-                  >
-                    前往合成页
-                  </Button>
+                  {cancelDetailOpen ? (
+                    <div className="statusBadge warning" style={{ display: "block", textAlign: "left" }}>
+                      {taskCancelMessage}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>
-          ) : (
-            <div className="emptyState">暂无可试听的音乐资产</div>
-          )}
+          ) : null}
         </GlassCard>
       </div>
+
+      <GlassCard className="musicPreviewCard">
+        <div className="sectionHeader">
+          <div className="sectionHeaderLeft">
+            <h2 className="cardTitle">试听</h2>
+            <div className="secondary">{previewAssetName || "暂无选中资产"}</div>
+          </div>
+          {currentResultAssetName ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={Download}
+              onClick={() => downloadAudioUrl(buildAssetAudioUrl(currentResultAssetName), currentResultAssetName)}
+            >
+              下载当前结果
+            </Button>
+          ) : null}
+        </div>
+        {previewAudioUrl ? (
+          <div className="musicPreviewLayout">
+            <AudioPlayer
+              audioUrl={previewAudioUrl}
+              compact
+              autoPlaySignal={previewAutoPlaySignal}
+              pauseSignal={previewPauseSignal}
+              onPlayStateChange={setIsPreviewPlaying}
+            />
+            {currentResultAssetName ? (
+              <div className="controlRow musicPreviewActions">
+                <Button
+                  variant="secondary"
+                  icon={Save}
+                  disabled={attachingKey === `${currentResultAssetName}:bgm`}
+                  onClick={() => handleAttach(currentResultAssetName, "bgm")}
+                >
+                  绑定为 BGM
+                </Button>
+                <Button
+                  variant="secondary"
+                  icon={Save}
+                  disabled={attachingKey === `${currentResultAssetName}:ambience`}
+                  onClick={() => handleAttach(currentResultAssetName, "ambience")}
+                >
+                  绑定为环境音
+                </Button>
+                <Button variant="ghost" onClick={() => onNavigate?.("synth")}>
+                  前往合成页
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="emptyState">暂无可试听的音乐资产</div>
+        )}
+      </GlassCard>
 
         <GlassCard>
           <div ref={statusCardRef} />
@@ -1536,15 +1604,26 @@ export default function MusicPage({ onNavigate }) {
               {isLoadingAssets ? "刷新中..." : `显示 ${filteredAssets.length} / 共 ${assets.length} 条`}
             </div>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={isAssetLibraryOpen ? ChevronUp : ChevronDown}
-            aria-expanded={isAssetLibraryOpen}
-            onClick={() => setIsAssetLibraryOpen((prev) => !prev)}
-          >
-            {isAssetLibraryOpen ? "收起" : "展开"}
-          </Button>
+          <div className="controlRow" style={{ justifyContent: "flex-end" }}>
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={Music}
+              disabled={isUploadingMusicAsset}
+              onClick={() => uploadInputRef.current?.click()}
+            >
+              {isUploadingMusicAsset ? "上传中..." : "上传音频到资产库"}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={isAssetLibraryOpen ? ChevronUp : ChevronDown}
+              aria-expanded={isAssetLibraryOpen}
+              onClick={() => setIsAssetLibraryOpen((prev) => !prev)}
+            >
+              {isAssetLibraryOpen ? "收起" : "展开"}
+            </Button>
+          </div>
         </div>
         {isAssetLibraryOpen ? (
           <>
