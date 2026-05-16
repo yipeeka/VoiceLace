@@ -1,15 +1,26 @@
 /* Speech recognition page */
 .speechPageLayout {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 20px;
   align-items: start;
+  min-width: 0;
 }
 
 .speechPageColumn {
   display: flex;
   flex-direction: column;
   gap: 20px;
+  min-width: 0;
+}
+
+.speechPageLayout .glassCard,
+.speechPageLayout .projectToolbar {
+  min-width: 0;
+}
+
+.speechPageLayout .projectToolbar {
+  grid-template-columns: minmax(220px, 1fr) minmax(280px, 1.18fr) minmax(82px, 0.24fr);
 }
 
 @media (max-width: 1080px) {

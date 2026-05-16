@@ -32,6 +32,7 @@ test("normalizeSelectOptionValue matches case-insensitively", () => {
 });
 
 test("normalizeNearestNumericOptionValue chooses nearest numeric option", () => {
+  assert.equal(normalizeNearestNumericOptionValue("72", BPM_OPTIONS, ""), "70");
   assert.equal(normalizeNearestNumericOptionValue("118", BPM_OPTIONS, ""), "120");
   assert.equal(normalizeNearestNumericOptionValue("bad", BPM_OPTIONS, "100"), "100");
 });

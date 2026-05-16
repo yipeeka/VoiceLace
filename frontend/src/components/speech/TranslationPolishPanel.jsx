@@ -41,8 +41,8 @@ export default function TranslationPolishPanel({
         <div className="formGroup">
           <label className="formLabel">来源</label>
           <select className="textInput" value={translationSource} onChange={(event) => setTranslationSource(event.target.value)} disabled={controlsDisabled}>
-            <option value="primary_local">模型1（主模型）</option>
-            <option value="secondary_local">模型2（小模型）</option>
+            <option value="primary_local">主模型</option>
+            <option value="secondary_local">小模型</option>
             <option value="openai">OpenAI API</option>
             <option value="gemini">Gemini API</option>
           </select>

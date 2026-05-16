@@ -106,8 +106,8 @@ export const TIMESIGNATURE_OPTIONS = [
 ];
 
 export const ASSIST_SOURCE_OPTIONS = [
-  { value: "secondary_local", label: "小模型（本地）" },
-  { value: "primary_local", label: "主模型（本地）" },
+  { value: "secondary_local", label: "小模型" },
+  { value: "primary_local", label: "主模型" },
   { value: "openai", label: "OpenAI API" },
   { value: "gemini", label: "Gemini API" },
 ];

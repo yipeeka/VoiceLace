@@ -187,17 +187,17 @@ export default function OrchestratorConfigCard({ form, isSaving, onSetField, onS
                 />
               </SettingsGroup>
 
-              <SettingsGroup title="第二模型" description="用于翻译润色等辅助任务，可与主模型分开配置。">
+              <SettingsGroup title="小模型" description="用于翻译润色等辅助任务，可与主模型分开配置。">
                 <TextField
                   id="secondary-llm-model-path"
-                  label="第二 LLM 模型路径（翻译润色）"
+                  label="小模型 LLM 模型路径（翻译润色）"
                   value={form.secondary_llm_model_path}
                   onChange={(value) => onSetField("secondary_llm_model_path", value)}
                   placeholder="例如 D:/models/qwen2.5-1.5b-q4.gguf…"
                 />
                 <TextField
                   id="secondary-llm-clip-model-path"
-                  label="第二 LLM CLIP 模型路径（可选）"
+                  label="小模型 LLM CLIP 模型路径（可选）"
                   value={form.secondary_llm_clip_model_path}
                   onChange={(value) => onSetField("secondary_llm_clip_model_path", value)}
                   placeholder="例如 D:/models/mmproj/secondary.mmproj…"
@@ -206,8 +206,8 @@ export default function OrchestratorConfigCard({ form, isSaving, onSetField, onS
                   id="secondary-enable-think-mode"
                   checked={form.secondary_enable_llama_cpp_think_mode ?? false}
                   onChange={(value) => onSetField("secondary_enable_llama_cpp_think_mode", value)}
-                  title="第二模型启用 Think 模式"
-                  description="仅影响翻译润色使用的第二模型。"
+                  title="小模型启用 Think 模式"
+                  description="仅影响翻译润色使用的小模型。"
                 />
               </SettingsGroup>
 
@@ -427,21 +427,21 @@ export default function OrchestratorConfigCard({ form, isSaving, onSetField, onS
                 />
               </SettingsGroup>
 
-              <SettingsGroup title="第二模型采样参数" description="单独控制翻译润色模型的生成行为。">
+              <SettingsGroup title="小模型采样参数" description="单独控制翻译润色小模型的生成行为。">
                 <div className="editorGrid three settingsFieldGrid">
-                  <NumberField id="secondary-llm-temperature" label="第二模型 temperature" step="0.01" min="0" max="2" value={form.secondary_llm_temperature ?? 0.2} onChange={(value) => onSetField("secondary_llm_temperature", value)} />
-                  <NumberField id="secondary-llm-top-p" label="第二模型 top_p" step="0.01" min="0" max="1" value={form.secondary_llm_top_p ?? 0.9} onChange={(value) => onSetField("secondary_llm_top_p", value)} />
-                  <NumberField id="secondary-llm-top-k" label="第二模型 top_k" min="0" value={form.secondary_llm_top_k ?? 40} onChange={(value) => onSetField("secondary_llm_top_k", value)} />
-                  <NumberField id="secondary-llm-min-p" label="第二模型 min_p" step="0.01" min="0" max="1" value={form.secondary_llm_min_p ?? 0} onChange={(value) => onSetField("secondary_llm_min_p", value)} />
-                  <NumberField id="secondary-llm-presence-penalty" label="第二模型 presence_penalty" step="0.01" min="-2" max="2" value={form.secondary_llm_presence_penalty ?? 0} onChange={(value) => onSetField("secondary_llm_presence_penalty", value)} />
-                  <NumberField id="secondary-llm-repeat-penalty" label="第二模型 repeat_penalty" step="0.01" min="0" max="3" value={form.secondary_llm_repeat_penalty ?? 1} onChange={(value) => onSetField("secondary_llm_repeat_penalty", value)} />
-                  <NumberField id="secondary-llm-n-ctx" label="第二模型 ctx-size (n_ctx)" min="256" value={form.secondary_llm_n_ctx ?? 4096} onChange={(value) => onSetField("secondary_llm_n_ctx", value)} />
-                  <NumberField id="secondary-llm-n-gpu-layers" label="第二模型 n-layer (GPU)" value={form.secondary_llm_n_gpu_layers ?? -1} onChange={(value) => onSetField("secondary_llm_n_gpu_layers", value)} />
-                  <NumberField id="secondary-llm-threads" label="第二模型 thread" min="0" value={form.secondary_llm_threads ?? 0} onChange={(value) => onSetField("secondary_llm_threads", value)} />
+                  <NumberField id="secondary-llm-temperature" label="小模型 temperature" step="0.01" min="0" max="2" value={form.secondary_llm_temperature ?? 0.2} onChange={(value) => onSetField("secondary_llm_temperature", value)} />
+                  <NumberField id="secondary-llm-top-p" label="小模型 top_p" step="0.01" min="0" max="1" value={form.secondary_llm_top_p ?? 0.9} onChange={(value) => onSetField("secondary_llm_top_p", value)} />
+                  <NumberField id="secondary-llm-top-k" label="小模型 top_k" min="0" value={form.secondary_llm_top_k ?? 40} onChange={(value) => onSetField("secondary_llm_top_k", value)} />
+                  <NumberField id="secondary-llm-min-p" label="小模型 min_p" step="0.01" min="0" max="1" value={form.secondary_llm_min_p ?? 0} onChange={(value) => onSetField("secondary_llm_min_p", value)} />
+                  <NumberField id="secondary-llm-presence-penalty" label="小模型 presence_penalty" step="0.01" min="-2" max="2" value={form.secondary_llm_presence_penalty ?? 0} onChange={(value) => onSetField("secondary_llm_presence_penalty", value)} />
+                  <NumberField id="secondary-llm-repeat-penalty" label="小模型 repeat_penalty" step="0.01" min="0" max="3" value={form.secondary_llm_repeat_penalty ?? 1} onChange={(value) => onSetField("secondary_llm_repeat_penalty", value)} />
+                  <NumberField id="secondary-llm-n-ctx" label="小模型 ctx-size (n_ctx)" min="256" value={form.secondary_llm_n_ctx ?? 4096} onChange={(value) => onSetField("secondary_llm_n_ctx", value)} />
+                  <NumberField id="secondary-llm-n-gpu-layers" label="小模型 n-layer (GPU)" value={form.secondary_llm_n_gpu_layers ?? -1} onChange={(value) => onSetField("secondary_llm_n_gpu_layers", value)} />
+                  <NumberField id="secondary-llm-threads" label="小模型 thread" min="0" value={form.secondary_llm_threads ?? 0} onChange={(value) => onSetField("secondary_llm_threads", value)} />
                 </div>
                 <NumberField
                   id="secondary-llm-max-tokens"
-                  label="第二模型 max out token"
+                  label="小模型 max out token"
                   min="64"
                   value={form.secondary_llm_max_tokens ?? 1024}
                   onChange={(value) => onSetField("secondary_llm_max_tokens", value)}
