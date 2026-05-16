@@ -1,5 +1,5 @@
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import Sidebar from "./components/layout/Sidebar";
 import StatusBar from "./components/layout/StatusBar";
@@ -15,6 +15,12 @@ import VoiceConfigPage from "./pages/VoiceConfigPage";
 import MusicPage from "./pages/MusicPage";
 import { useProjectStore } from "./stores/useProjectStore";
 import { useScriptStore } from "./stores/useScriptStore";
+import { useSettingsStore } from "./stores/useSettingsStore";
+import {
+  isAutoSerialEnabled,
+  sendPageUnloadBeacon,
+  unloadModelForPage,
+} from "./utils/modelLifecycle.js";
 
 const PAGE_COMPONENTS = {
   speech:   SpeechRecognitionPage,
@@ -76,14 +82,45 @@ function writePageToLocation(page, { replace = false } = {}) {
 export default function App() {
   const [activePage, setActivePage] = useState(readPageFromLocation);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const activePageRef = useRef(activePage);
+  const navigationTokenRef = useRef(0);
   const prefersReducedMotion = useReducedMotion();
   const { currentProject, projects, loadProjects, selectProject } = useProjectStore();
   const { script, sourceText } = useScriptStore();
 
+  useEffect(() => {
+    activePageRef.current = activePage;
+  }, [activePage]);
+
   const navigateToPage = useCallback((page, options) => {
     const targetPage = PAGE_IDS.has(page) ? page : DEFAULT_PAGE;
-    setActivePage(targetPage);
-    writePageToLocation(targetPage, options);
+    const sourcePage = activePageRef.current;
+    if (targetPage === sourcePage) {
+      writePageToLocation(targetPage, options);
+      return;
+    }
+
+    const token = ++navigationTokenRef.current;
+    (async () => {
+      const settings = useSettingsStore.getState();
+      let autoSerial = isAutoSerialEnabled(settings.systemStatus, settings.orchestratorConfig);
+      if (autoSerial === null) {
+        const loadedConfig = await settings.loadOrchestratorConfig().catch(() => null);
+        autoSerial = Boolean(loadedConfig?.auto_serial);
+      }
+
+      if (autoSerial) {
+        await unloadModelForPage(sourcePage).catch(() => undefined);
+        await useSettingsStore.getState().refreshSystemStatus().catch(() => undefined);
+      }
+
+      if (token !== navigationTokenRef.current) {
+        return;
+      }
+      activePageRef.current = targetPage;
+      setActivePage(targetPage);
+      writePageToLocation(targetPage, options);
+    })();
   }, []);
 
   useEffect(() => {
@@ -115,11 +152,23 @@ export default function App() {
 
   useEffect(() => {
     function handlePopState() {
-      setActivePage(readPageFromLocation());
+      navigateToPage(readPageFromLocation(), { replace: true });
     }
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
+  }, [navigateToPage]);
+
+  useEffect(() => {
+    function handlePageHide() {
+      const settings = useSettingsStore.getState();
+      if (isAutoSerialEnabled(settings.systemStatus, settings.orchestratorConfig)) {
+        sendPageUnloadBeacon(activePageRef.current);
+      }
+    }
+
+    window.addEventListener("pagehide", handlePageHide);
+    return () => window.removeEventListener("pagehide", handlePageHide);
   }, []);
 
   useEffect(() => {

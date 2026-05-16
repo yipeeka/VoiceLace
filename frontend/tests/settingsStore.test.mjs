@@ -5,6 +5,10 @@ import {
   normalizeOrchestratorConfig,
   toOrchestratorPayload,
 } from "../src/stores/useSettingsStore.js";
+import {
+  getPageUnloadEndpoint,
+  isAutoSerialEnabled,
+} from "../src/utils/modelLifecycle.js";
 
 test("settings store preserves OpenAI-compatible config fields", () => {
   const normalized = normalizeOrchestratorConfig({
@@ -41,4 +45,19 @@ test("settings store preserves OpenAI-compatible config fields", () => {
   assert.equal(payload.gemini_api_key, "gemini-key");
   assert.equal(payload.gemini_base_url, "https://generativelanguage.googleapis.com");
   assert.equal(payload.gemini_model, "gemini-test");
+});
+
+test("model lifecycle maps workflow pages to unload endpoints", () => {
+  assert.equal(getPageUnloadEndpoint("speech"), "/system/unload-asr");
+  assert.equal(getPageUnloadEndpoint("text"), "/system/unload-llm");
+  assert.equal(getPageUnloadEndpoint("synth"), "/system/unload-tts");
+  assert.equal(getPageUnloadEndpoint("music"), "/system/unload-music");
+  assert.equal(getPageUnloadEndpoint("settings"), "");
+});
+
+test("model lifecycle reads auto serial from config or system status", () => {
+  assert.equal(isAutoSerialEnabled(null, { auto_serial: true }), true);
+  assert.equal(isAutoSerialEnabled({ config: { auto_serial: false } }, null), false);
+  assert.equal(isAutoSerialEnabled({ auto_serial: true }, null), true);
+  assert.equal(isAutoSerialEnabled(null, null), null);
 });

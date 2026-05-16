@@ -472,7 +472,7 @@ export default function OrchestratorConfigCard({ form, isSaving, onSetField, onS
                   checked={form.auto_serial}
                   onChange={(value) => onSetField("auto_serial", value)}
                   title="自动串行模式"
-                  description="解析完成后自动卸载 LLM，再加载 TTS。"
+                  description="切换步骤或切换模型前，先卸载当前页面加载的模型。"
                 />
                 <ToggleRow
                   id="auto-unload-llm-after-parse"

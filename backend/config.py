@@ -112,7 +112,7 @@ class Settings:
     )
     default_auto_serial: bool = field(default_factory=lambda: os.getenv("BV_AUTO_SERIAL", "true").lower() == "true")
     default_auto_unload_llm_after_parse: bool = field(
-        default_factory=lambda: os.getenv("BV_AUTO_UNLOAD_LLM_AFTER_PARSE", "true").lower() == "true"
+        default_factory=lambda: os.getenv("BV_AUTO_UNLOAD_LLM_AFTER_PARSE", "false").lower() == "true"
     )
     default_auto_load_tts_before_synth: bool = field(
         default_factory=lambda: os.getenv("BV_AUTO_LOAD_TTS_BEFORE_SYNTH", "true").lower() == "true"
