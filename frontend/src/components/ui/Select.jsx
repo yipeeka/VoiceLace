@@ -22,8 +22,9 @@ export default function Select({
   disabled = false,
   className,
 }) {
-  // Only show a value in Radix when it isn't the "none" sentinel
-  const radixValue = value === "" || value == null ? undefined : value;
+  // Keep Radix controlled from the first render. Empty string clears the
+  // selection and lets Radix show the placeholder.
+  const radixValue = value == null || value === "" ? "" : value;
   const selectedOption = options.find((option) => option.value === value);
 
   return (

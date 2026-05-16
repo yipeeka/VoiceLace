@@ -330,19 +330,29 @@ export default function AudioPlayer({
     const barWidth = compact ? 2 : 2.5;
     const barGap = compact ? 1 : 1.5;
     const step = barWidth + barGap;
-    const visibleBars = Math.max(1, Math.floor(cssWidth / step));
-    const stride = Math.max(1, Math.floor(bars.length / visibleBars));
+    const visibleBars = Math.max(1, Math.ceil(cssWidth / step));
     let x = 0;
 
-    for (let i = 0; i < bars.length && x < cssWidth; i += stride) {
-      const item = bars[i];
+    for (let i = 0; i < visibleBars && x < cssWidth; i += 1) {
+      const sourceStart = Math.floor((i * bars.length) / visibleBars);
+      const sourceEnd = Math.max(sourceStart + 1, Math.floor(((i + 1) * bars.length) / visibleBars));
+      let min = 1;
+      let max = -1;
+      for (let j = sourceStart; j < Math.min(sourceEnd, bars.length); j += 1) {
+        min = Math.min(min, bars[j].min);
+        max = Math.max(max, bars[j].max);
+      }
+      const item = {
+        min: Number.isFinite(min) && min <= 1 ? min : 0,
+        max: Number.isFinite(max) && max >= -1 ? max : 0,
+      };
       const minY = mid + item.min * mid * 0.92;
       const maxY = mid + item.max * mid * 0.92;
       const top = Math.min(minY, maxY);
       const bottom = Math.max(minY, maxY);
       const h = Math.max(1, bottom - top);
       ctx.fillStyle = x <= progressX ? "rgba(92, 211, 255, 0.95)" : "rgba(161, 161, 170, 0.55)";
-      ctx.fillRect(x, top, barWidth, h);
+      ctx.fillRect(x, top, Math.min(barWidth, cssWidth - x), h);
       x += step;
     }
   }, [resolvedPeaks, currentTime, duration, height, compact]);
