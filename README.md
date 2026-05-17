@@ -441,3 +441,25 @@ Runtime data is stored in `backend/data`: projects in `backend/data/projects`, v
 cd frontend
 npm run dev
 ```
+
+---
+
+## License / 许可
+
+VoiceLace source code is licensed under the [Apache License 2.0](LICENSE).
+VoiceLace 源代码采用 [Apache License 2.0](LICENSE) 许可。
+
+Third-party models and tools, including ACE-Step / ACE-Step 1.5, VoxCPM /
+VoxCPM2, OmniVoice, Whisper, Qwen3-ASR, CrispASR, Pyannote, llama-cpp-python,
+and FFmpeg, remain under their own licenses and model-card terms. See
+[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) and [NOTICE](NOTICE).
+第三方模型和工具，包括 ACE-Step / ACE-Step 1.5、VoxCPM / VoxCPM2、OmniVoice、
+Whisper、Qwen3-ASR、CrispASR、Pyannote、llama-cpp-python 和 FFmpeg，仍遵循
+各自的许可证、模型卡和使用条款。详见 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)
+和 [NOTICE](NOTICE)。
+
+Voice cloning, speech synthesis, music generation, and media export must be
+used with proper rights, consent, attribution, and disclosure. See
+[RESPONSIBLE_USE.md](RESPONSIBLE_USE.md).
+声音克隆、语音合成、音乐生成和媒体导出需要确保权利、授权、署名和必要披露。详见
+[RESPONSIBLE_USE.md](RESPONSIBLE_USE.md)。

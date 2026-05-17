@@ -1,0 +1,21 @@
+VoiceLace
+Copyright 2026 VoiceLace contributors
+
+VoiceLace source code is licensed under the Apache License, Version 2.0.
+
+This project can be configured to use third-party model code, model
+weights, datasets, checkpoints, Python packages, JavaScript packages, and
+external tools. Those materials are not relicensed by VoiceLace. They
+remain subject to their own licenses, model cards, acceptable-use policies,
+and attribution requirements.
+
+VoiceLace does not include or grant rights to any third-party model weights
+unless those weights are explicitly distributed with this project. Users are
+responsible for obtaining, installing, and using third-party models only in
+ways permitted by the applicable license and law.
+
+VoiceLace may be used for speech recognition, speech synthesis, voice
+cloning, music generation, and audiobook production. These capabilities can
+be misused. Users are responsible for securing consent, respecting privacy
+and publicity rights, honoring copyright and neighboring rights, and
+disclosing synthetic or cloned media where required.
