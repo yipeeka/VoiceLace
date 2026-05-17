@@ -1,11 +1,33 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">VoiceLace logo mark</title>
+  <desc id="desc">An interlaced voice waveform forming a V inside a dark rounded square.</desc>
   <defs>
-    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0%" stop-color="#ffb347" />
-      <stop offset="100%" stop-color="#ff5f6d" />
+    <linearGradient id="vl-mark-a" x1="25" y1="28" x2="104" y2="101" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7CE7FF"/>
+      <stop offset="0.52" stop-color="#A78BFA"/>
+      <stop offset="1" stop-color="#FF7A90"/>
     </linearGradient>
+    <linearGradient id="vl-mark-b" x1="100" y1="26" x2="25" y2="102" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFE28A"/>
+      <stop offset="0.48" stop-color="#7CE7FF"/>
+      <stop offset="1" stop-color="#7CFFCB"/>
+    </linearGradient>
+    <filter id="vl-soft-glow" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.37  0 0 0 0 0.87  0 0 0 0 1  0 0 0 0.42 0"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
   </defs>
-  <rect width="128" height="128" rx="28" fill="#10131f" />
-  <path d="M38 87V41h18c18 0 28 8 28 22 0 15-12 24-30 24H50v20z" fill="url(#g)" />
-  <circle cx="87" cy="43" r="11" fill="#7ce7ff" />
+  <rect width="128" height="128" rx="28" fill="#0B1020"/>
+  <path d="M24 73C31 58 40 46 51 38C58 33 63 31 64 31C65 31 70 33 77 38C88 46 97 58 104 73" fill="none" stroke="#1A2440" stroke-width="18" stroke-linecap="round"/>
+  <path d="M24 73C35 94 49 104 64 104C79 104 93 94 104 73" fill="none" stroke="#111A31" stroke-width="18" stroke-linecap="round"/>
+  <path d="M24 73C31 58 40 46 51 38C58 33 63 31 64 31C65 31 70 33 77 38C88 46 97 58 104 73" fill="none" stroke="url(#vl-mark-a)" stroke-width="10" stroke-linecap="round" filter="url(#vl-soft-glow)"/>
+  <path d="M24 73C35 94 49 104 64 104C79 104 93 94 104 73" fill="none" stroke="url(#vl-mark-b)" stroke-width="10" stroke-linecap="round"/>
+  <path d="M37 65H45M51 57V81M64 51V89M77 57V81M83 65H91" fill="none" stroke="#F6FBFF" stroke-width="5" stroke-linecap="round" opacity="0.92"/>
+  <circle cx="64" cy="31" r="5" fill="#F6FBFF"/>
+  <circle cx="24" cy="73" r="4" fill="#7CE7FF"/>
+  <circle cx="104" cy="73" r="4" fill="#FFB86B"/>
 </svg>

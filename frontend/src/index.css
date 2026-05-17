@@ -143,10 +143,19 @@ pre, code {
   width: 32px;
   height: 32px;
   border-radius: var(--radius-sm);
-  background: var(--accent-gradient);
+  background: #0b1020;
   display: grid;
   place-items: center;
   flex-shrink: 0;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(124, 231, 255, 0.2),
+              0 10px 24px rgba(124, 231, 255, 0.12);
+}
+
+.sidebarLogo img {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .sidebarBrandText {

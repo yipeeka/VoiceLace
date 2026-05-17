@@ -1,4 +1,9 @@
 # VoiceLace
+
+<p align="center">
+  <img src="frontend/public/voicelace-logo.svg" alt="VoiceLace logo" width="420">
+</p>
+
 ### 本地多角色有声书工作台 / Local multi-role audiobook studio
 
 语音识别、字幕导入、文本解析、剧本编辑、角色配音、音乐生成、局部重生成与工程导入导出，全都在你的电脑上完成。  

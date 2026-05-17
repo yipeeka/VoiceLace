@@ -11,7 +11,6 @@ import {
   Save,
   Settings,
   SlidersHorizontal,
-  Sparkles,
   Users,
   Volume2,
 } from "lucide-react";
@@ -40,7 +39,7 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
       {/* Brand */}
       <div className="sidebarBrand">
         <div className="sidebarLogo" aria-hidden="true">
-          <Sparkles size={16} color="white" />
+          <img src="/favicon.svg" alt="" />
         </div>
         <AnimatePresence>
           {!collapsed && (

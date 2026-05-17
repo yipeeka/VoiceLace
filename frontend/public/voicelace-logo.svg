@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 160" role="img" aria-labelledby="title desc">
+  <title id="title">VoiceLace logo</title>
+  <desc id="desc">VoiceLace wordmark with an interlaced waveform logo mark.</desc>
+  <defs>
+    <linearGradient id="vl-lockup-a" x1="24" y1="36" x2="120" y2="124" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7CE7FF"/>
+      <stop offset="0.52" stop-color="#A78BFA"/>
+      <stop offset="1" stop-color="#FF7A90"/>
+    </linearGradient>
+    <linearGradient id="vl-lockup-b" x1="124" y1="32" x2="28" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFE28A"/>
+      <stop offset="0.48" stop-color="#7CE7FF"/>
+      <stop offset="1" stop-color="#7CFFCB"/>
+    </linearGradient>
+    <linearGradient id="vl-word" x1="168" y1="46" x2="466" y2="96" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F8FBFF"/>
+      <stop offset="0.62" stop-color="#D7E3FF"/>
+      <stop offset="1" stop-color="#AFC3FF"/>
+    </linearGradient>
+    <filter id="vl-lockup-glow" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.37  0 0 0 0 0.87  0 0 0 0 1  0 0 0 0.38 0"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect x="12" y="16" width="128" height="128" rx="30" fill="#0B1020"/>
+  <path d="M34 88C43 69 54 55 67 45C75 39 81 37 82 37C83 37 89 39 97 45C110 55 121 69 130 88" fill="none" stroke="#1A2440" stroke-width="20" stroke-linecap="round"/>
+  <path d="M34 88C47 112 63 124 82 124C101 124 117 112 130 88" fill="none" stroke="#111A31" stroke-width="20" stroke-linecap="round"/>
+  <path d="M34 88C43 69 54 55 67 45C75 39 81 37 82 37C83 37 89 39 97 45C110 55 121 69 130 88" fill="none" stroke="url(#vl-lockup-a)" stroke-width="11" stroke-linecap="round" filter="url(#vl-lockup-glow)"/>
+  <path d="M34 88C47 112 63 124 82 124C101 124 117 112 130 88" fill="none" stroke="url(#vl-lockup-b)" stroke-width="11" stroke-linecap="round"/>
+  <path d="M49 80H58M65 70V98M82 63V105M99 70V98M106 80H115" fill="none" stroke="#F6FBFF" stroke-width="5.5" stroke-linecap="round" opacity="0.92"/>
+  <circle cx="82" cy="37" r="5.5" fill="#F6FBFF"/>
+  <circle cx="34" cy="88" r="4.5" fill="#7CE7FF"/>
+  <circle cx="130" cy="88" r="4.5" fill="#FFB86B"/>
+  <text x="168" y="79" fill="url(#vl-word)" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="44" font-weight="760" letter-spacing="0">VoiceLace</text>
+  <text x="171" y="112" fill="#8EA0C3" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="600" letter-spacing="1.8">LOCAL MULTI-ROLE AUDIOBOOK STUDIO</text>
+  <path d="M470 71C485 55 508 55 523 71C535 84 554 84 566 71" fill="none" stroke="#7CE7FF" stroke-width="4" stroke-linecap="round" opacity="0.85"/>
+  <path d="M470 94C485 78 508 78 523 94C535 107 554 107 566 94" fill="none" stroke="#FFB86B" stroke-width="4" stroke-linecap="round" opacity="0.8"/>
+</svg>
