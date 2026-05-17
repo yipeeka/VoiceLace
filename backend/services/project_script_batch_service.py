@@ -54,6 +54,8 @@ def _persist_script_change(
 ) -> dict:
     for segment_id in changed_segment_ids | removed_segment_ids:
         project.audio_assets.segments.pop(segment_id, None)
+    if changed_segment_ids or removed_segment_ids:
+        project.audio_assets.full_rebuild_required = True
 
     project.script = sync_script_metadata(project.script)
     _refresh_project_status(project)

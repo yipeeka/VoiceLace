@@ -526,6 +526,29 @@ export const useSynthesisStore = create((set) => ({
           : "续跑完成",
     });
   },
+  startRebuildFullAudio: async ({ projectId, config }) => {
+    return await runSynthesisFlow({
+      set,
+      projectId,
+      config,
+      taskKind: "rebuild_full_audio",
+      endpoint: `/tts/projects/${projectId}/rebuild-full-audio`,
+      statusEndpoint: "/tts/synthesize",
+      payload: {},
+      resetSegmentResults: false,
+      mergeSegmentResults: true,
+      resetAudioUrls: true,
+      queueMessage: "重组音频任务已创建，等待执行",
+      segmentVerb: "重组",
+      exhaustedMessage: "重组音频连接已关闭（重连失败）",
+      timeoutMessage: "重组音频任务等待超时",
+      syncErrorMessage: "重组音频状态同步失败",
+      cancelRequestedMessage: "正在取消重组音频任务...",
+      canceledMessage: "重组音频任务已取消",
+      failureMessage: "重组音频失败",
+      completeToastTitle: (result) => `完整音频已重组，共 ${result.progress?.total || 0} 段`,
+    });
+  },
   fetchQueueSnapshot: async () => {
     const payload = await api.get("/tts/queue");
     set({ queueSnapshot: payload || { running: null, queued: [], queued_count: 0 } });
@@ -534,7 +557,8 @@ export const useSynthesisStore = create((set) => ({
   cancelSynthesis: async () => {
     const taskId = useSynthesisStore.getState().taskId;
     const taskKind = useSynthesisStore.getState().taskKind || "synthesis";
-    const taskLabel = taskKind === "postprocess" ? "后期处理任务" : "合成任务";
+    const taskLabel =
+      taskKind === "postprocess" ? "后期处理任务" : taskKind === "rebuild_full_audio" ? "重组音频任务" : "合成任务";
     if (!taskId) {
       return { status: "idle" };
     }

@@ -25,6 +25,10 @@ export default function SynthesisTimelineCard({
   recommendedRegenerateIds,
   isRunning,
   handleRegenerateSelected,
+  canRebuildFullAudio,
+  fullAudioRebuildRequired,
+  fullAudioRebuildHint,
+  handleRebuildFullAudio,
   staleItemBySegmentId,
   getSegmentStaleLabel,
   segmentTimings,
@@ -150,6 +154,22 @@ export default function SynthesisTimelineCard({
           >
             需更新段落重新生成
           </Button>
+        </div>
+      ) : null}
+      {segments.length ? (
+        <div className="controlRow" style={{ marginBottom: 10 }}>
+          <span className={`statusBadge ${fullAudioRebuildRequired ? "warning" : "success"}`}>
+            {fullAudioRebuildRequired ? "完整音频待重组" : "完整音频已同步"}
+          </span>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={!canRebuildFullAudio}
+            onClick={handleRebuildFullAudio}
+          >
+            重组音频
+          </Button>
+          <span className="muted">{fullAudioRebuildHint}</span>
         </div>
       ) : null}
       {segments.length && shouldShowSegmentTimeline ? (

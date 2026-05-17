@@ -37,6 +37,7 @@ from backend.services import (
     resolve_subtitle_path,
     resolve_subtitle_response_path,
     run_postprocess_task,
+    run_rebuild_full_audio_task,
     run_synthesis_task,
     segment_cache_key,
     should_log_stale_report,
@@ -56,6 +57,10 @@ async def _run_synthesis_task(task_id: str, payload: SynthesizeRequest, state) -
 
 async def _run_postprocess_task(task_id: str, payload: PostprocessRequest, state) -> None:
     await run_postprocess_task(task_id=task_id, payload=payload, state=state, logger=logger)
+
+
+async def _run_rebuild_full_audio_task(task_id: str, project_id: str, state) -> None:
+    await run_rebuild_full_audio_task(task_id=task_id, project_id=project_id, state=state, logger=logger)
 
 
 def _now_iso() -> str:
@@ -98,6 +103,9 @@ async def _dispatch_tts_task(task_id: str, state) -> None:
     payload = task.get("payload")
     if task.get("kind") == "postprocess":
         await _run_postprocess_task(task_id, payload, state)
+        return
+    if task.get("kind") == "rebuild_full_audio":
+        await _run_rebuild_full_audio_task(task_id, task["project_id"], state)
         return
     await _run_synthesis_task(task_id, payload, state)
 
@@ -205,6 +213,23 @@ async def start_postprocess(project_id: str, payload: PostprocessRequest | None 
         task=task,
         task_id=task_id,
         message={"type": "task_status", "status": "queued", "kind": "postprocess", "queue_position": queue_position},
+    )
+    return {"task_id": task_id, "queue_position": queue_position}
+
+
+@router.post("/projects/{project_id}/rebuild-full-audio")
+async def start_rebuild_full_audio(project_id: str, state=Depends(get_app_state)):
+    load_project(state.settings.projects_dir, project_id)
+    task_id = str(uuid4())
+    task = create_tts_task_record(task_id=task_id, project_id=project_id, kind="rebuild_full_audio")
+    task["payload"] = {"project_id": project_id}
+    state.tts_tasks[task_id] = task
+    queue_position = await _enqueue_tts_task(state=state, task_id=task_id)
+    await emit_task_event(
+        state=state,
+        task=task,
+        task_id=task_id,
+        message={"type": "task_status", "status": "queued", "kind": "rebuild_full_audio", "queue_position": queue_position},
     )
     return {"task_id": task_id, "queue_position": queue_position}
 

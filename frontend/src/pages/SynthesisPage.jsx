@@ -60,7 +60,7 @@ export default function SynthesisPage() {
     segmentResults, fullAudioUrl, rawAudioUrl, processedAudioUrl,
     chapterExports, audioVariant, isRunning, error,
     subtitleSrtUrl, subtitleLrcUrl,
-    startSynthesis, startPartialSynthesis, startPostprocess, startRetryFailed, startResumeSynthesis, fetchQueueSnapshot,
+    startSynthesis, startPartialSynthesis, startPostprocess, startRetryFailed, startResumeSynthesis, startRebuildFullAudio, fetchQueueSnapshot,
     cancelSynthesis, reset, setAudioVariant,
   } = useSynthesisStore();
   const archiveInputRef = useRef(null);
@@ -454,6 +454,27 @@ export default function SynthesisPage() {
     });
     return summary;
   }, [segments]);
+  const allCurrentSegmentsHaveReadyAudio = useMemo(
+    () => segments.length > 0 && segments.every((segment) => segment.workflow_status === "done" && Boolean(segment.audio_url)),
+    [segments]
+  );
+  const fullAudioRebuildRequired = Boolean(currentProject?.audio_assets?.full_rebuild_required);
+  const canRebuildFullAudio = Boolean(
+    currentProject?.id &&
+    fullAudioRebuildRequired &&
+    !hasUnsavedChanges &&
+    !isRunning &&
+    !isScriptSaving &&
+    allCurrentSegmentsHaveReadyAudio
+  );
+  const fullAudioRebuildHint = useMemo(() => {
+    if (!fullAudioRebuildRequired) return "当前完整音频已同步";
+    if (hasUnsavedChanges) return "请先保存剧本";
+    if (!allCurrentSegmentsHaveReadyAudio) return "请先补齐或重新生成缺失片段音频";
+    if (isScriptSaving) return "剧本保存中";
+    if (isRunning) return "当前有任务正在运行";
+    return "可用现有分段音频重组完整音频";
+  }, [allCurrentSegmentsHaveReadyAudio, fullAudioRebuildRequired, hasUnsavedChanges, isRunning, isScriptSaving]);
   const visibleSegmentIds = useMemo(
     () => visibleSegments.map((segment) => segment.segment_id),
     [visibleSegments]
@@ -914,6 +935,22 @@ export default function SynthesisPage() {
     await regenerateSelectedSegments(targetIds);
   }
 
+  async function handleRebuildFullAudio() {
+    if (guardUnsavedChanges("重组音频")) {
+      return;
+    }
+    if (!canRebuildFullAudio) {
+      pushToast({ title: fullAudioRebuildHint, tone: "warning" });
+      return;
+    }
+    await startRebuildFullAudio({
+      projectId: currentProject.id,
+      config: buildRuntimeConfig(config),
+    });
+    await refreshCurrentProject(currentProject.id);
+    setAudioVariant("raw");
+  }
+
   function handleTimelineDragEnd(event) {
     const { active, over } = event;
     if (!canReorderTimeline || !over || active.id === over.id) {
@@ -1112,6 +1149,10 @@ export default function SynthesisPage() {
           recommendedRegenerateIds={visibleRecommendedRegenerateIds}
           isRunning={isRunning}
           handleRegenerateSelected={handleRegenerateSelected}
+          canRebuildFullAudio={canRebuildFullAudio}
+          fullAudioRebuildRequired={fullAudioRebuildRequired}
+          fullAudioRebuildHint={fullAudioRebuildHint}
+          handleRebuildFullAudio={handleRebuildFullAudio}
           staleItemBySegmentId={staleItemBySegmentId}
           getSegmentStaleLabel={getSegmentStaleLabel}
           segmentTimings={segmentTimings}

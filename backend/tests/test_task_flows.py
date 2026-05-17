@@ -212,11 +212,12 @@ class TaskFlowTest(unittest.TestCase):
                 wav_file.setnchannels(1)
                 wav_file.setsampwidth(2)
                 wav_file.setframerate(22050)
-                wav_file.writeframes(b"\x00\x00" * 2205)
+                wav_file.writeframes(b"\x01\x00" * 2205)
             return output_path
 
         with (
             patch.object(self.app_state.orchestrator, "ensure_tts_ready", new=AsyncMock(return_value=None)),
+            patch.object(self.app_state.tts_engine, "backend_name", "omnivoice"),
             patch.object(self.app_state.tts_engine, "synthesize_to_file", new=AsyncMock(side_effect=fake_synthesize)),
         ):
             started = self.client.post(
@@ -311,11 +312,12 @@ class TaskFlowTest(unittest.TestCase):
                 wav_file.setnchannels(1)
                 wav_file.setsampwidth(2)
                 wav_file.setframerate(22050)
-                wav_file.writeframes(b"\x00\x00" * 2205)
+                wav_file.writeframes(b"\x01\x00" * 2205)
             return output_path
 
         with (
             patch.object(self.app_state.orchestrator, "ensure_tts_ready", new=AsyncMock(return_value=None)),
+            patch.object(self.app_state.tts_engine, "backend_name", "omnivoice"),
             patch.object(self.app_state.tts_engine, "synthesize_to_file", new=AsyncMock(side_effect=fake_synthesize)),
         ):
             started = self.client.post(
@@ -331,6 +333,75 @@ class TaskFlowTest(unittest.TestCase):
             self.assertEqual(body["progress"]["total"], 1)
             self.assertIn("seg-a", body["segments"])
             self.assertNotIn("seg-b", body["segments"])
+
+    def test_rebuild_full_audio_after_deleted_segment_uses_remaining_assets(self) -> None:
+        project_id = self._create_project("tts-rebuild-full")
+        self._update_script(
+            project_id,
+            {
+                "title": "tts-rebuild",
+                "source_text": "tts-rebuild",
+                "segments": [
+                    {"id": "seg-a", "index": 0, "type": "narration", "speaker": "narrator", "text": "A"},
+                    {"id": "seg-b", "index": 1, "type": "dialogue", "speaker": "B", "text": "B"},
+                ],
+                "characters": [],
+                "metadata": {},
+            },
+        )
+
+        async def fake_synthesize(text, output_path: Path, preset=None, config=None, tts_overrides=None):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with wave.open(str(output_path), "wb") as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(22050)
+                wav_file.writeframes(b"\x01\x00" * 2205)
+            return output_path
+
+        with (
+            patch.object(self.app_state.orchestrator, "ensure_tts_ready", new=AsyncMock(return_value=None)),
+            patch.object(self.app_state.tts_engine, "backend_name", "omnivoice"),
+            patch.object(self.app_state.tts_engine, "synthesize_to_file", new=AsyncMock(side_effect=fake_synthesize)),
+        ):
+            started = self.client.post("/api/v1/tts/synthesize", json={"project_id": project_id})
+            self.assertEqual(started.status_code, 200)
+            status_code, body = self._wait_for_tts(started.json()["task_id"])
+            self.assertEqual(status_code, 200)
+            self.assertEqual(body["status"], "done")
+
+        updated = self.client.put(
+            f"/api/v1/projects/{project_id}/script",
+            json={
+                "title": "tts-rebuild",
+                "source_text": "tts-rebuild",
+                "segments": [
+                    {"id": "seg-a", "index": 0, "type": "narration", "speaker": "narrator", "text": "A"},
+                ],
+                "characters": [],
+                "metadata": {},
+            },
+        )
+        self.assertEqual(updated.status_code, 200)
+        project_resp = self.client.get(f"/api/v1/projects/{project_id}")
+        self.assertEqual(project_resp.status_code, 200)
+        self.assertTrue(project_resp.json()["audio_assets"]["full_rebuild_required"])
+
+        started_rebuild = self.client.post(f"/api/v1/tts/projects/{project_id}/rebuild-full-audio", json={})
+        self.assertEqual(started_rebuild.status_code, 200)
+        status_code, rebuild_body = self._wait_for_tts(started_rebuild.json()["task_id"])
+        self.assertEqual(status_code, 200)
+        self.assertEqual(rebuild_body["status"], "done")
+        self.assertEqual(rebuild_body["progress"]["total"], 1)
+        self.assertIn("seg-a", rebuild_body["segments"])
+        self.assertNotIn("seg-b", rebuild_body["segments"])
+
+        rebuilt_project_resp = self.client.get(f"/api/v1/projects/{project_id}")
+        self.assertEqual(rebuilt_project_resp.status_code, 200)
+        rebuilt_project = rebuilt_project_resp.json()
+        self.assertFalse(rebuilt_project["audio_assets"]["full_rebuild_required"])
+        self.assertIn("seg-a", rebuilt_project["audio_assets"]["segments"])
+        self.assertNotIn("seg-b", rebuilt_project["audio_assets"]["segments"])
 
     def test_tts_overrides_are_forwarded_to_engine(self) -> None:
         project_id = self._create_project("tts-overrides-pass")

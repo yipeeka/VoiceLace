@@ -86,6 +86,7 @@ from .tts_postprocess_service import bind_postprocess_asset_to_project, run_post
 from .tts_scan_service import build_synthesis_scan_plan
 from .tts_segment_service import process_synthesis_segment
 from .tts_pipeline_service import run_synthesis_task
+from .tts_rebuild_service import run_rebuild_full_audio_task
 from .tts_stale_service import build_stale_report, from_output_relpath, resolve_segment_asset_path, resolve_segment_peaks_path
 from .tts_task_service import hash_payload, public_task, segment_cache_key
 
@@ -174,6 +175,7 @@ __all__ = [
     "build_synthesis_scan_plan",
     "process_synthesis_segment",
     "run_synthesis_task",
+    "run_rebuild_full_audio_task",
     "run_postprocess_task",
     "bind_postprocess_asset_to_project",
     "hash_payload",

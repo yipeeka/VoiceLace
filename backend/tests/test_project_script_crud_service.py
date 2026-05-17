@@ -45,6 +45,7 @@ class ProjectScriptCrudServiceTest(unittest.TestCase):
             self.assertEqual(len(updated.segments), 1)
             reloaded = load_project(projects_dir, saved.id)
             self.assertEqual(reloaded.audio_assets.segments, {})
+            self.assertTrue(reloaded.audio_assets.full_rebuild_required)
 
     def test_update_segment_and_reorder_and_delete(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -71,6 +72,7 @@ class ProjectScriptCrudServiceTest(unittest.TestCase):
             )
             after_update = load_project(projects_dir, saved.id)
             self.assertNotIn("s1", after_update.audio_assets.segments)
+            self.assertTrue(after_update.audio_assets.full_rebuild_required)
 
             add_segment(saved.id, Segment(id="s3", index=5, speaker="c", text="t3"), projects_dir=projects_dir)
             reordered = reorder_script(

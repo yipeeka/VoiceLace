@@ -184,6 +184,7 @@ def update_project_audio_assets_after_synthesis(
 ) -> None:
     if rebuild_full:
         project.audio_assets.latest_task_id = task_id
+        project.audio_assets.full_rebuild_required = False
         project.audio_assets.full_wav_relpath = to_output_relpath(output_dir=output_dir, path=wav_export_path)
         project.audio_assets.full_mp3_relpath = (
             to_output_relpath(output_dir=output_dir, path=mp3_export_path) if mp3_export_path.exists() else None
