@@ -115,12 +115,12 @@ Equivalent command / 等价命令：
 
 Default URLs / 默认地址：
 - Frontend / 前端：`http://127.0.0.1:5173`
-- Backend / 后端：`http://127.0.0.1:8000`
+- Backend / 后端：`http://127.0.0.1:8050`
 
 Run separately / 分开启动：
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 8050 --reload
 ```
 
 ```powershell
@@ -185,6 +185,10 @@ summary / 总结：
 See [`.env.example`](./.env.example). / 参考 [`.env.example`](./.env.example)。
 
 ```env
+BV_BACKEND_HOST=127.0.0.1
+BV_BACKEND_PORT=8050
+VITE_API_BASE_URL=http://127.0.0.1:8050/api/v1
+
 BV_LLM_BACKEND=llama_cpp
 BV_LLM_MODEL_PATH=D:\path\to\model.gguf
 BV_LLM_API_MODEL=gpt-4.1-mini
@@ -264,7 +268,7 @@ BV_MCP_ENABLED=false
 BV_MCP_MOUNT_PATH=/mcp
 ```
 
-After enabling and restarting the backend, connect MCP clients to `http://127.0.0.1:8000/mcp`. The server exposes project inspection plus transcription, parsing, synthesis, music, postprocess, export, task polling, and cancellation tools. Destructive maintenance operations are not exposed. / 开启并重启后端后，MCP 客户端连接 `http://127.0.0.1:8000/mcp`。服务端会暴露项目查看、转写、解析、合成、音乐、后处理、导出、任务查询和取消工具；不会暴露破坏性维护操作。
+After enabling and restarting the backend, connect MCP clients to `http://127.0.0.1:8050/mcp`. The server exposes project inspection plus transcription, parsing, synthesis, music, postprocess, export, task polling, and cancellation tools. Destructive maintenance operations are not exposed. / 开启并重启后端后，MCP 客户端连接 `http://127.0.0.1:8050/mcp`。服务端会暴露项目查看、转写、解析、合成、音乐、后处理、导出、任务查询和取消工具；不会暴露破坏性维护操作。
 
 ### Data directory / 数据位置
 
@@ -339,7 +343,7 @@ Runtime data lives under `backend/data`. / 运行时数据默认位于 `backend/
 Check system status / 先检查系统状态：
 
 ```powershell
-curl "http://127.0.0.1:8000/api/v1/system/status"
+curl "http://127.0.0.1:8050/api/v1/system/status"
 ```
 
 Verify / 重点确认：
@@ -430,7 +434,7 @@ Runtime data is stored in `backend/data`: projects in `backend/data/projects`, v
 ```
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 8050 --reload
 ```
 
 ```powershell

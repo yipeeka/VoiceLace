@@ -1,4 +1,5 @@
-const BASE_URL = "http://localhost:8000/api/v1";
+const configuredBaseUrl = import.meta.env?.VITE_API_BASE_URL;
+const BASE_URL = (configuredBaseUrl?.trim() || "http://127.0.0.1:8050/api/v1").replace(/\/$/, "");
 const parsedBase = new URL(BASE_URL);
 
 class ApiError extends Error {
