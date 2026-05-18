@@ -340,7 +340,12 @@ export default function MusicPage({ onNavigate }) {
     if (!categoryId || categoryId === MUSIC_CATEGORY_UNCATEGORIZED) {
       return;
     }
-    const confirmed = window.confirm("删除分类后，分类下资产将回到未分类，是否继续？");
+    const confirmed = await useUiStore.getState().requestConfirm({
+      title: "删除分类",
+      description: "删除分类后，分类下资产将回到未分类，是否继续？",
+      confirmLabel: "删除",
+      danger: true,
+    });
     if (!confirmed) return;
     setCategoryBusyId(`${categoryId}:delete`);
     try {
@@ -859,7 +864,12 @@ export default function MusicPage({ onNavigate }) {
     if (!assetName) {
       return;
     }
-    const confirmed = window.confirm(`确认删除音乐资产 ${assetName} 吗？`);
+    const confirmed = await useUiStore.getState().requestConfirm({
+      title: "删除音乐资产",
+      description: `确认删除音乐资产「${assetName}」吗？`,
+      confirmLabel: "删除",
+      danger: true,
+    });
     if (!confirmed) {
       return;
     }

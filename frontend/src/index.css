@@ -981,7 +981,8 @@ select.textInput option {
   max-height: 85vh;
   overflow-y: auto;
   z-index: 201;
-  animation: scaleIn var(--duration-normal) var(--ease-out) both;
+  animation: dialogScaleIn var(--duration-normal) var(--ease-out) both;
+  transform-origin: center;
 }
 
 .dialogTitle {

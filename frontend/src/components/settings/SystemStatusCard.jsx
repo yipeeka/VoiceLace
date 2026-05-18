@@ -2,6 +2,7 @@ import { Cpu, RefreshCw, Trash2 } from "lucide-react";
 
 import GlassCard from "../shared/GlassCard";
 import Button from "../ui/Button";
+import { useUiStore } from "../../stores/useUiStore";
 
 function SectionTitle({ children }) {
   return <div className="settingsStatusSectionTitle">{children}</div>;
@@ -63,8 +64,14 @@ export default function SystemStatusCard({
   const pyannoteAvailable = Boolean(systemStatus?.pyannote_available);
   const pyannoteError = systemStatus?.pyannote_error ?? "";
   const canUnloadASR = asrLoaded || Boolean(asrError);
-  const confirmUnload = (label, handler) => {
-    if (!window.confirm(`确认卸载 ${label} 模型？正在运行的相关任务可能需要重新加载模型。`)) {
+  const confirmUnload = async (label, handler) => {
+    const confirmed = await useUiStore.getState().requestConfirm({
+      title: `卸载 ${label} 模型`,
+      description: "正在运行的相关任务可能需要重新加载模型。",
+      confirmLabel: "卸载",
+      danger: true,
+    });
+    if (!confirmed) {
       return;
     }
     handler?.();

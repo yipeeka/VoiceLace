@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import Sidebar from "./components/layout/Sidebar";
 import StatusBar from "./components/layout/StatusBar";
+import GlobalConfirmDialog from "./components/shared/GlobalConfirmDialog";
 import ToastLayer from "./components/shared/ToastLayer";
 import { TooltipProvider } from "./components/ui/Tooltip";
 import ScriptEditorPage from "./pages/ScriptEditorPage";
@@ -229,6 +230,7 @@ export default function App() {
       </div>
 
       <ToastLayer />
+      <GlobalConfirmDialog />
     </TooltipProvider>
   );
 }

@@ -54,13 +54,22 @@ export function DialogContent({ title, description, children, className }) {
 }
 
 /** Confirm dialog with OK / Cancel */
-export function ConfirmDialog({ open, onOpenChange, title, description, onConfirm, danger = false }) {
+export function ConfirmDialog({
+  open,
+  onOpenChange,
+  title,
+  description,
+  onConfirm,
+  danger = false,
+  confirmLabel = "确认",
+  cancelLabel = "取消",
+}) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent title={title} description={description}>
         <div className="controlRow" style={{ justifyContent: "flex-end", marginTop: 8 }}>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            取消
+            {cancelLabel}
           </Button>
           <Button
             variant={danger ? "danger" : "primary"}
@@ -69,7 +78,7 @@ export function ConfirmDialog({ open, onOpenChange, title, description, onConfir
               onOpenChange(false);
             }}
           >
-            确认
+            {confirmLabel}
           </Button>
         </div>
       </DialogContent>

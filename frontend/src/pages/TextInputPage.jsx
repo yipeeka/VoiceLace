@@ -189,7 +189,12 @@ export default function TextInputPage({ onNavigate }) {
     if (!currentProject?.id) {
       return;
     }
-    const ok = window.confirm(`确认删除项目「${currentProject.name}」？该操作不可撤销。`);
+    const ok = await useUiStore.getState().requestConfirm({
+      title: "删除项目",
+      description: `确认删除项目「${currentProject.name}」？该操作不可撤销。`,
+      confirmLabel: "删除",
+      danger: true,
+    });
     if (!ok) {
       return;
     }
@@ -225,9 +230,12 @@ export default function TextInputPage({ onNavigate }) {
     if (!siblingProjects.length) {
       return;
     }
-    const ok = window.confirm(
-      `检测到 ${siblingProjects.length} 个与「${currentProject.name}」同名的副本。\n确认删除这些同名副本并保留当前项目？`
-    );
+    const ok = await useUiStore.getState().requestConfirm({
+      title: "删除同名副本",
+      description: `检测到 ${siblingProjects.length} 个与「${currentProject.name}」同名的副本。确认删除这些同名副本并保留当前项目？`,
+      confirmLabel: "删除副本",
+      danger: true,
+    });
     if (!ok) {
       return;
     }
@@ -258,9 +266,12 @@ export default function TextInputPage({ onNavigate }) {
   }
 
   async function handleCleanupDuplicateProjects() {
-    const ok = window.confirm(
-      "执行“清理重复项目”将合并 project-file 阴影副本并去重重复 project-file 项目。是否继续？"
-    );
+    const ok = await useUiStore.getState().requestConfirm({
+      title: "清理重复项目",
+      description: "执行“清理重复项目”将合并 project-file 阴影副本并去重重复 project-file 项目。是否继续？",
+      confirmLabel: "开始清理",
+      danger: true,
+    });
     if (!ok) {
       return;
     }
@@ -412,7 +423,12 @@ export default function TextInputPage({ onNavigate }) {
 
   async function handleRollbackSnapshot(snapshotId) {
     if (!currentProject?.id || !snapshotId) return;
-    const ok = window.confirm("回滚会覆盖当前项目内容，是否继续？");
+    const ok = await useUiStore.getState().requestConfirm({
+      title: "回滚历史版本",
+      description: "回滚会覆盖当前项目内容，是否继续？",
+      confirmLabel: "回滚",
+      danger: true,
+    });
     if (!ok) return;
     try {
       await restoreProjectSnapshot(currentProject.id, snapshotId);

@@ -1,4 +1,5 @@
 import { parseCsvList, parseOverridesJson } from "../utils/segmentDraft";
+import { useUiStore } from "../stores/useUiStore";
 
 export function useSynthesisActions({
   currentProject,
@@ -71,7 +72,12 @@ export function useSynthesisActions({
     if (!ids.length || isRunning) {
       return;
     }
-    const ok = window.confirm(`确认重新生成已选 ${ids.length} 段？这会重建整本音频与字幕。`);
+    const ok = await useUiStore.getState().requestConfirm({
+      title: "重新生成选中段落",
+      description: `确认重新生成已选 ${ids.length} 段？这会重建整本音频与字幕。`,
+      confirmLabel: "重新生成",
+      danger: true,
+    });
     if (!ok) {
       return;
     }

@@ -1499,7 +1499,12 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     if (!currentProject?.id) {
       return;
     }
-    const ok = window.confirm(`确认删除项目「${currentProject.name}」？该操作不可撤销。`);
+    const ok = await useUiStore.getState().requestConfirm({
+      title: "删除项目",
+      description: `确认删除项目「${currentProject.name}」？该操作不可撤销。`,
+      confirmLabel: "删除",
+      danger: true,
+    });
     if (!ok) return;
     try {
       await deleteProject(currentProject.id, { silent: true });
@@ -1522,9 +1527,12 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     if (!siblingProjects.length) {
       return;
     }
-    const ok = window.confirm(
-      `检测到 ${siblingProjects.length} 个与「${currentProject.name}」同名的副本。\n确认删除这些同名副本并保留当前项目？`
-    );
+    const ok = await useUiStore.getState().requestConfirm({
+      title: "删除同名副本",
+      description: `检测到 ${siblingProjects.length} 个与「${currentProject.name}」同名的副本。确认删除这些同名副本并保留当前项目？`,
+      confirmLabel: "删除副本",
+      danger: true,
+    });
     if (!ok) {
       return;
     }
