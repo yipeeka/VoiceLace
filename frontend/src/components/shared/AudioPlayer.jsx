@@ -123,6 +123,7 @@ export default function AudioPlayer({
   peaksUrl = null,
   height = 60,
   compact = false,
+  showTime = true,
   autoPlaySignal = 0,
   pauseSignal = 0,
   onPlayStateChange = null,
@@ -373,10 +374,27 @@ export default function AudioPlayer({
     setIsPlaying(false);
   };
 
+  const seekToRatio = (ratio) => {
+    const audio = audioRef.current;
+    if (!audio || !duration) return;
+    audio.currentTime = Math.max(0, Math.min(duration, duration * ratio));
+    setCurrentTime(audio.currentTime || 0);
+    onTimeUpdateProp?.(audio.currentTime || 0);
+  };
+
+  const seekBySeconds = (deltaSeconds) => {
+    const audio = audioRef.current;
+    if (!audio || !duration) return;
+    audio.currentTime = Math.max(0, Math.min(duration, (audio.currentTime || 0) + deltaSeconds));
+    setCurrentTime(audio.currentTime || 0);
+    onTimeUpdateProp?.(audio.currentTime || 0);
+  };
+
   if (!audioUrl) return null;
 
   return (
     <div
+      className={`audioPlayer${compact ? " compact" : ""}${showTime ? "" : " noTime"}`}
       style={{
         display: "flex",
         alignItems: "center",
@@ -389,8 +407,10 @@ export default function AudioPlayer({
       }}
     >
       <button
+        type="button"
         onClick={togglePlay}
         disabled={!isReady}
+        aria-label={isPlaying ? "暂停音频" : "播放音频"}
         style={{
           width: compact ? 32 : 38,
           height: compact ? 32 : 38,
@@ -406,15 +426,23 @@ export default function AudioPlayer({
         }}
       >
         {isPlaying ? (
-          <Pause size={compact ? 14 : 17} />
+          <Pause aria-hidden="true" focusable="false" size={compact ? 14 : 17} />
         ) : (
-          <Play size={compact ? 14 : 17} style={{ marginLeft: 1 }} />
+          <Play aria-hidden="true" focusable="false" size={compact ? 14 : 17} style={{ marginLeft: 1 }} />
         )}
       </button>
 
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div className="audioPlayerWaveform" style={{ flex: 1, minWidth: 0 }}>
         <canvas
           ref={canvasRef}
+          role="slider"
+          tabIndex={isReady ? 0 : -1}
+          aria-label="音频波形进度"
+          aria-disabled={!isReady}
+          aria-valuemin={0}
+          aria-valuemax={Math.max(0, Math.round(duration))}
+          aria-valuenow={Math.max(0, Math.round(currentTime))}
+          aria-valuetext={`${formatTime(currentTime)} / ${formatTime(duration)}`}
           style={{
             width: "100%",
             height,
@@ -422,29 +450,44 @@ export default function AudioPlayer({
             cursor: isReady ? "pointer" : "default",
           }}
           onClick={(event) => {
-            const audio = audioRef.current;
-            if (!audio || !duration) return;
+            if (!duration) return;
             const rect = event.currentTarget.getBoundingClientRect();
             const ratio = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
-            audio.currentTime = Math.max(0, Math.min(duration, duration * ratio));
-            setCurrentTime(audio.currentTime || 0);
-            onTimeUpdateProp?.(audio.currentTime || 0);
+            seekToRatio(ratio);
+          }}
+          onKeyDown={(event) => {
+            if (!duration || !isReady) return;
+            if (event.key === "ArrowLeft") {
+              event.preventDefault();
+              seekBySeconds(-5);
+            } else if (event.key === "ArrowRight") {
+              event.preventDefault();
+              seekBySeconds(5);
+            } else if (event.key === "Home") {
+              event.preventDefault();
+              seekToRatio(0);
+            } else if (event.key === "End") {
+              event.preventDefault();
+              seekToRatio(1);
+            }
           }}
         />
       </div>
 
-      <span
-        style={{
-          color: "var(--text-muted)",
-          fontSize: compact ? 11 : 12,
-          fontVariantNumeric: "tabular-nums",
-          fontFamily: "'JetBrains Mono', monospace",
-          flexShrink: 0,
-          whiteSpace: "nowrap",
-        }}
-      >
-        {formatTime(currentTime)} / {formatTime(duration)}
-      </span>
+      {showTime ? (
+        <span
+          style={{
+            color: "var(--text-muted)",
+            fontSize: compact ? 11 : 12,
+            fontVariantNumeric: "tabular-nums",
+            fontFamily: "'JetBrains Mono', monospace",
+            flexShrink: 0,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {formatTime(currentTime)} / {formatTime(duration)}
+        </span>
+      ) : null}
 
       {!compact && (
         <Volume2 size={14} style={{ color: "var(--text-muted)", flexShrink: 0 }} />

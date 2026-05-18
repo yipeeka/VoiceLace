@@ -158,6 +158,7 @@ export default function ExportWizardDialog({
               type="button"
               key={preset.id}
               className={`statRow statRowButton ${selectedPreset === preset.id ? "active" : ""}`}
+              aria-pressed={selectedPreset === preset.id}
               onClick={() => setSelectedPreset(preset.id)}
             >
               <span>{preset.title}</span>
@@ -197,18 +198,23 @@ export default function ExportWizardDialog({
             关闭
           </Button>
           <a
-            href={downloadUrl}
+            className={`btn btn-primary ${!projectId ? "disabled" : ""}`}
+            href={projectId ? downloadUrl : undefined}
             target="_blank"
             rel="noreferrer"
-            style={{ textDecoration: "none" }}
+            aria-disabled={!projectId}
+            onClick={(event) => {
+              if (!projectId) {
+                event.preventDefault();
+              }
+            }}
           >
-            <Button
-              variant="primary"
-              icon={selectedPreset === "backup" ? Archive : Download}
-              disabled={!projectId}
-            >
-              下载导出包
-            </Button>
+            {selectedPreset === "backup" ? (
+              <Archive aria-hidden="true" focusable="false" size={15} />
+            ) : (
+              <Download aria-hidden="true" focusable="false" size={15} />
+            )}
+            下载导出包
           </a>
         </div>
       </DialogContent>

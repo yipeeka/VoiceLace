@@ -45,7 +45,25 @@ function formatTimeMs(ms) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+const STATUS_FILTERS = new Set(["all", "stale", "done", "missing", "failed"]);
+const SYNTHESIS_PANELS = new Set(["synthesis", "postprocess"]);
+
+function readSynthesisQueryState() {
+  if (typeof window === "undefined") {
+    return { speaker: "all", status: "all", panel: "synthesis" };
+  }
+  const params = new URLSearchParams(window.location.search);
+  const status = params.get("status") || "all";
+  const panel = params.get("panel") || "synthesis";
+  return {
+    speaker: params.get("speaker") || "all",
+    status: STATUS_FILTERS.has(status) ? status : "all",
+    panel: SYNTHESIS_PANELS.has(panel) ? panel : "synthesis",
+  };
+}
+
 export default function SynthesisPage() {
+  const queryState = useMemo(() => readSynthesisQueryState(), []);
   const {
     currentProject,
     refreshCurrentProject,
@@ -73,14 +91,14 @@ export default function SynthesisPage() {
   const [draftScript, setDraftScript] = useState(() => normalizeDraftScript(currentProject?.script));
   const [newSegment, setNewSegment] = useState(() => createSegmentDraft(0));
   const [insertAfterSegmentId, setInsertAfterSegmentId] = useState(null);
-  const [activeSpeakerFilter, setActiveSpeakerFilter] = useState("all");
-  const [activeStatusFilter, setActiveStatusFilter] = useState("all");
+  const [activeSpeakerFilter, setActiveSpeakerFilter] = useState(queryState.speaker);
+  const [activeStatusFilter, setActiveStatusFilter] = useState(queryState.status);
   const [recentlyUpdatedSegmentId, setRecentlyUpdatedSegmentId] = useState(null);
   const [resolvedSegmentDurations, setResolvedSegmentDurations] = useState({});
   const [fullAudioCurrentTime, setFullAudioCurrentTime] = useState(0);
   const [diffPreviewOpen, setDiffPreviewOpen] = useState(false);
   const [isUploadingPostAsset, setIsUploadingPostAsset] = useState(false);
-  const [expandedSynthesisPanel, setExpandedSynthesisPanel] = useState("synthesis");
+  const [expandedSynthesisPanel, setExpandedSynthesisPanel] = useState(queryState.panel);
   const [systemRuntimeStatus, setSystemRuntimeStatus] = useState(null);
   const [exportWizardOpen, setExportWizardOpen] = useState(false);
   const updatedRowTimerRef = useRef(null);
@@ -201,6 +219,24 @@ export default function SynthesisPage() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const url = new URL(window.location.href);
+    const setOrDelete = (key, value, defaultValue) => {
+      if (!value || value === defaultValue) {
+        url.searchParams.delete(key);
+      } else {
+        url.searchParams.set(key, value);
+      }
+    };
+    setOrDelete("speaker", activeSpeakerFilter, "all");
+    setOrDelete("status", activeStatusFilter, "all");
+    setOrDelete("panel", expandedSynthesisPanel, "synthesis");
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [activeSpeakerFilter, activeStatusFilter, expandedSynthesisPanel]);
 
   useEffect(() => {
     let canceled = false;
@@ -1122,7 +1158,7 @@ export default function SynthesisPage() {
                 disabled={!currentProject?.id || isScriptSaving || !hasUnsavedChanges}
                 onClick={handleSaveScript}
               >
-                {isScriptSaving ? "保存中..." : hasUnsavedChanges ? "保存剧本" : "已保存"}
+                {isScriptSaving ? "保存中…" : hasUnsavedChanges ? "保存剧本" : "已保存"}
               </Button>
               <Button variant="secondary" onClick={() => setDiffPreviewOpen(true)} disabled={!hasUnsavedChanges}>
                 查看差异

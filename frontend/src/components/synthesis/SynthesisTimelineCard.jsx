@@ -79,15 +79,17 @@ export default function SynthesisTimelineCard({
 
   return (
     <GlassCard>
-      <h2 className="cardTitle">分段时间线</h2>
-      {totalVisibleSegments ? (
-        <div className="controlRow" style={{ marginBottom: 10 }}>
+      <h2 className="cardTitle">
+        分段时间线
+        {totalVisibleSegments ? (
           <span className="muted">
             当前显示 {totalVisibleSegments} 段{activeSpeakerFilter !== "all" ? "（已按角色筛选）" : ""}
           </span>
-          {activeSpeakerFilter !== "all" ? (
-            <span className="muted">筛选状态下暂不支持拖拽排序</span>
-          ) : null}
+        ) : null}
+      </h2>
+      {totalVisibleSegments && activeSpeakerFilter !== "all" ? (
+        <div className="controlRow" style={{ marginBottom: 10 }}>
+          <span className="muted">筛选状态下暂不支持拖拽排序</span>
         </div>
       ) : null}
       <div className="controlRow" style={{ marginBottom: 10, gap: 8, flexWrap: "wrap" }}>
@@ -172,6 +174,14 @@ export default function SynthesisTimelineCard({
           <span className="muted">{fullAudioRebuildHint}</span>
         </div>
       ) : null}
+      {isAutoPlay ? (
+        <div className="controlRow" style={{ marginBottom: 10 }}>
+          <span className="muted">连续播放进行中</span>
+          <Button variant="danger" size="sm" onClick={stop}>
+            停止连续播放
+          </Button>
+        </div>
+      ) : null}
       {segments.length && shouldShowSegmentTimeline ? (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onTimelineDragEnd}>
           <SortableContext items={segments.map((seg) => seg.segment_id)} strategy={verticalListSortingStrategy}>
@@ -227,14 +237,6 @@ export default function SynthesisTimelineCard({
       ) : (
         <EmptyState title="缺失音频文件" description="当前项目尚未生成任何分段音频，请先执行合成后再查看分段时间线。" />
       )}
-      {isAutoPlay ? (
-        <div className="controlRow" style={{ marginTop: 12 }}>
-          <span className="muted">连续播放进行中</span>
-          <Button variant="danger" size="sm" onClick={stop}>
-            停止连续播放
-          </Button>
-        </div>
-      ) : null}
     </GlassCard>
   );
 }

@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronUp, Pause, Play, SlidersHorizontal, Square, Trash2, Upload, Wand2 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 
 import GlassCard from "../shared/GlassCard";
 import Button from "../ui/Button";
@@ -16,9 +16,10 @@ function CollapsibleHeader({ expanded, onToggle, title, subtitle, icon: Icon }) 
           className="btn btn-ghost btn-sm"
           style={{ justifyContent: "flex-start", paddingLeft: 0, paddingRight: 0 }}
           onClick={onToggle}
+          aria-expanded={expanded}
         >
-          {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          <Icon size={16} />
+          {expanded ? <ChevronUp aria-hidden="true" focusable="false" size={14} /> : <ChevronDown aria-hidden="true" focusable="false" size={14} />}
+          <Icon aria-hidden="true" focusable="false" size={16} />
           {title}
         </button>
         <p className="cardSubtitle">{subtitle}</p>
@@ -41,6 +42,7 @@ export function SynthesisGenerateCard({
   onCancel,
   isDubbingSourceProject = false,
 }) {
+  const speedInputId = useId();
   const [speedDraft, setSpeedDraft] = useState("1.0");
   const requestedBackend = config.tts_backend || "omnivoice";
   const ttsBackend = requestedBackend;
@@ -192,11 +194,15 @@ export function SynthesisGenerateCard({
 
           {ttsBackend !== "voxcpm2" ? (
             <div className="formGroup">
-              <label className="formLabel">片段 speed（批量写入 tts_overrides）</label>
+              <label className="formLabel" htmlFor={speedInputId}>片段 speed（批量写入 tts_overrides）</label>
               <div className="controlRow" style={{ alignItems: "center" }}>
                 <input
+                  id={speedInputId}
+                  name="segment-speed"
                   className="textInput"
                   type="number"
+                  inputMode="decimal"
+                  autoComplete="off"
                   min="0.5"
                   max="2"
                   step="0.05"
@@ -305,7 +311,7 @@ export function SynthesisGenerateCard({
               disabled={!currentProject?.id || isRunning || !currentProject?.script?.segments?.length}
               onClick={onStart}
             >
-              {isRunning ? "合成中..." : "▶ 开始合成"}
+              {isRunning ? "合成中…" : "▶ 开始合成"}
             </Button>
             {isRunning ? <Button variant="danger" icon={Square} onClick={onCancel}>停止</Button> : null}
             <span className="muted" style={{ marginLeft: "auto" }}>
@@ -518,12 +524,15 @@ export function SynthesisPostprocessCard({
               {chapterMarkers.map((item) => (
                 <div key={item.id} className="editorGrid" style={{ alignItems: "end" }}>
                   <div className="formGroup">
-                    <label className="formLabel">章节名</label>
+                    <label className="formLabel" htmlFor={`chapter-title-${item.id}`}>章节名</label>
                     <input
+                      id={`chapter-title-${item.id}`}
+                      name={`chapter-title-${item.id}`}
                       className="input"
                       value={item.title || ""}
                       onChange={(e) => updateChapterMarker(item.id, { title: e.target.value })}
-                      placeholder="章节标题"
+                      autoComplete="off"
+                      placeholder="章节标题…"
                     />
                   </div>
                   <div className="formGroup">
@@ -554,7 +563,7 @@ export function SynthesisPostprocessCard({
                   onClick={() => bgmInputRef.current?.click()}
                   disabled={isUploadingPostAsset}
                 >
-                  {isUploadingPostAsset ? "上传中..." : "上传 BGM"}
+                  {isUploadingPostAsset ? "上传中…" : "上传 BGM"}
                 </Button>
                 <Button
                   variant="ghost"
@@ -579,6 +588,8 @@ export function SynthesisPostprocessCard({
               <input
                 ref={bgmInputRef}
                 type="file"
+                name="bgm-upload"
+                aria-label="上传背景音乐"
                 accept="audio/*"
                 style={{ display: "none" }}
                 onChange={(event) => {
@@ -644,7 +655,7 @@ export function SynthesisPostprocessCard({
                   onClick={() => ambienceInputRef.current?.click()}
                   disabled={isUploadingPostAsset}
                 >
-                  {isUploadingPostAsset ? "上传中..." : "上传环境音"}
+                  {isUploadingPostAsset ? "上传中…" : "上传环境音"}
                 </Button>
                 <Button
                   variant="ghost"
@@ -669,6 +680,8 @@ export function SynthesisPostprocessCard({
               <input
                 ref={ambienceInputRef}
                 type="file"
+                name="ambience-upload"
+                aria-label="上传环境音"
                 accept="audio/*"
                 style={{ display: "none" }}
                 onChange={(event) => {

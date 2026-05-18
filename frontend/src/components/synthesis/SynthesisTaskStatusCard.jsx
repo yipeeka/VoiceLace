@@ -60,7 +60,7 @@ export default function SynthesisTaskStatusCard({
           {staleSummary.missing} 段
         </div>
       ) : null}
-      <div className="taskStatusGrid">
+      <div className="taskStatusGrid" aria-live="polite">
         <div className="statRow taskStatusCell">
           <span>状态</span>
           <strong>{modelStatus || status}</strong>
@@ -243,6 +243,8 @@ export default function SynthesisTaskStatusCard({
         <input
           ref={archiveInputRef}
           type="file"
+          name="project-archive"
+          aria-label="导入工程 ZIP"
           accept=".zip,application/zip"
           style={{ display: "none" }}
           onChange={onImportArchive}

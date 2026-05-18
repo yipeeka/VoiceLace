@@ -132,12 +132,8 @@ export function usePlaybackQueue(segments) {
     const audio = audioRef.current;
     if (audio) {
       audio.pause();
-      audio.currentTime = 0;
-      audio.src = "";
     }
-    currentIdxRef.current = -1;
     setIsAutoPlay(false);
-    setCurrentIdx(-1);
   }
 
   async function playFrom(segmentId, audioUrlHint = "") {

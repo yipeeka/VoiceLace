@@ -568,7 +568,13 @@ pre, code {
   touch-action: manipulation;
 }
 
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn:disabled,
+.btn.disabled,
+.btn[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
 
 .btn-primary {
   background: var(--accent-primary);
@@ -1289,6 +1295,7 @@ select.textInput option {
    SYNTHESIS TIMELINE
 ───────────────────────────────────────────────────────────── */
 .synthesisTimeline {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1302,9 +1309,10 @@ select.textInput option {
 
 .synthSegmentRow {
   display: flex;
+  position: relative;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   padding: 7px 10px;
   background: var(--bg-elevated);
   border: 1px solid var(--border-default);
@@ -1322,14 +1330,85 @@ select.textInput option {
   animation: synthRowFlash 1.8s ease-out;
 }
 
+.synthSegmentRow.actionsOpen,
+.synthSegmentRow:has(.synthSegmentActionIcons.open) {
+  z-index: 20;
+}
+
+.synthSegmentIndex {
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  flex: 0 0 24px;
+}
+
 .synthSegmentMeta {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.synthSegmentSpeakerStack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.synthSegmentSpeakerRow {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-width: 128px;
+  flex-wrap: wrap;
+}
+
+.synthSegmentStateBadges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+
+.synthSegmentTimeBadge {
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 2px 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
 }
 
 .synthProgressBar { flex: 1; }
+
+.synthSegmentTextCell {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.synthSegmentText {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.synthSegmentError {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.synthSegmentAudioCell {
+  width: 120px;
+  flex: 0 0 120px;
+}
 
 .synthStatus {
   font-size: 16px;
@@ -1338,15 +1417,80 @@ select.textInput option {
   text-align: center;
 }
 
+.synthSegmentActions {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 32px;
+}
+
+.synthSegmentActionsTrigger {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-sm);
+}
+
 .synthSegmentActionIcons {
   display: inline-flex;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
   align-items: center;
   gap: 4px;
-  flex-shrink: 0;
+  padding: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-fast) ease,
+              border-color var(--duration-fast) ease;
+}
+
+.synthSegmentActions:hover .synthSegmentActionIcons,
+.synthSegmentActions:focus-within .synthSegmentActionIcons,
+.synthSegmentActionIcons.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.synthSegmentActionIcons:hover,
+.synthSegmentActionIcons:focus-within {
+  border-color: var(--border-strong);
 }
 
 .synthSegmentActionIcons .btn {
   min-width: 32px;
+}
+
+@container (max-width: 620px) {
+  .synthSegmentAudioCell {
+    width: 50px;
+    flex-basis: 50px;
+  }
+
+  .synthSegmentAudioCell .audioPlayer.noTime {
+    justify-content: center;
+    gap: 0 !important;
+    padding: 8px !important;
+  }
+
+  .synthSegmentAudioCell .audioPlayerWaveform {
+    display: none !important;
+  }
+}
+
+@container (max-width: 460px) {
+  .synthSegmentRow {
+    flex-wrap: wrap;
+  }
+
+  .synthSegmentTextCell {
+    flex-basis: 100%;
+  }
 }
 
 /* Full-audio waveform horizontal scrollbar (wavesurfer shadow part) */
