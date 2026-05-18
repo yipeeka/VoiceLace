@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 from backend.models import LlmParseRequest
 from backend.persistence import load_project, read_project_events
+from backend.services.audio_vocal_separation_service import VocalSeparationResult
 from backend.services.asr_project_service import create_project_from_audio
 
 
@@ -198,6 +199,74 @@ class AsrProjectServiceTest(unittest.TestCase):
 
             project_files = list(projects_dir.glob("*.json"))
             self.assertEqual(project_files, [])
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_vocal_separation_runs_once_before_chunking(self) -> None:
+        root = TEST_OUTPUT_ROOT / f"asr-project-vocal-{uuid.uuid4().hex[:8]}"
+        shutil.rmtree(root, ignore_errors=True)
+        try:
+            projects_dir = root / "projects"
+            output_dir = root / "output"
+            projects_dir.mkdir(parents=True, exist_ok=True)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            state = SimpleNamespace(
+                settings=SimpleNamespace(projects_dir=projects_dir, output_dir=output_dir),
+                asr_engine=_FakeAsrEngine(),
+            )
+            audio = output_dir / "sample.wav"
+            audio.write_bytes(b"RIFFdemo")
+            separated = output_dir / "vocals.wav"
+            separated.write_bytes(b"RIFFvocals")
+
+            from backend.services import asr_project_service as service
+
+            calls: list[Path] = []
+
+            async def fake_prepare(audio_path: Path, **kwargs):
+                calls.append(audio_path)
+                return VocalSeparationResult(
+                    audio_path=separated,
+                    enabled=True,
+                    used=True,
+                    model="htdemucs",
+                    repo_dir="D:/models/demucs",
+                    warnings=[],
+                )
+
+            original_prepare = service.prepare_vocal_audio_for_asr
+            original_probe = service._probe_audio_duration_ms
+            original_extract = service._extract_chunk
+            probed: list[Path] = []
+            service.prepare_vocal_audio_for_asr = fake_prepare  # type: ignore[assignment]
+            service._probe_audio_duration_ms = lambda path: probed.append(Path(path)) or 0  # type: ignore[assignment]
+            service._extract_chunk = lambda _in, _out, _s, _e: None  # type: ignore[assignment]
+            try:
+                payload = asyncio.run(
+                    create_project_from_audio(
+                        state=state,
+                        audio_path=audio,
+                        audio_name="sample.wav",
+                        project_name="",
+                        speaker_labels=False,
+                        vocal_separation=True,
+                        vocal_separation_model="htdemucs",
+                        vocal_separation_repo_dir="D:/models/demucs",
+                        vocal_separation_device="cpu",
+                        parse_mode="verified_five_step_pipeline",
+                        auto_parse=False,
+                        speaker_map=None,
+                        enqueue_parse_task=None,
+                    )
+                )
+            finally:
+                service.prepare_vocal_audio_for_asr = original_prepare  # type: ignore[assignment]
+                service._probe_audio_duration_ms = original_probe  # type: ignore[assignment]
+                service._extract_chunk = original_extract  # type: ignore[assignment]
+
+            self.assertEqual(calls, [audio])
+            self.assertEqual(probed, [separated])
+            self.assertTrue(payload["vocal_separation"]["used"])
         finally:
             shutil.rmtree(root, ignore_errors=True)
 

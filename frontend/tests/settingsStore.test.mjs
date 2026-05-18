@@ -47,6 +47,26 @@ test("settings store preserves OpenAI-compatible config fields", () => {
   assert.equal(payload.gemini_model, "gemini-test");
 });
 
+test("settings store preserves ASR vocal separation config fields", () => {
+  const normalized = normalizeOrchestratorConfig({
+    asr_vocal_separation_enabled: true,
+    asr_vocal_separation_model: "htdemucs_ft",
+    asr_vocal_separation_repo_dir: "E:/models/demucs",
+    asr_vocal_separation_device: "cuda:1",
+  });
+
+  assert.equal(normalized.asr_vocal_separation_enabled, true);
+  assert.equal(normalized.asr_vocal_separation_model, "htdemucs_ft");
+  assert.equal(normalized.asr_vocal_separation_repo_dir, "E:/models/demucs");
+  assert.equal(normalized.asr_vocal_separation_device, "cuda:1");
+
+  const payload = toOrchestratorPayload(normalized);
+  assert.equal(payload.asr_vocal_separation_enabled, true);
+  assert.equal(payload.asr_vocal_separation_model, "htdemucs_ft");
+  assert.equal(payload.asr_vocal_separation_repo_dir, "E:/models/demucs");
+  assert.equal(payload.asr_vocal_separation_device, "cuda:1");
+});
+
 test("model lifecycle maps workflow pages to unload endpoints", () => {
   assert.equal(getPageUnloadEndpoint("speech"), "/system/unload-asr");
   assert.equal(getPageUnloadEndpoint("text"), "/system/unload-llm");

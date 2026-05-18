@@ -14,6 +14,7 @@ from backend.models import (
     LoadTtsRequest,
     OrchestratorConfigPayload,
 )
+from backend.services.audio_vocal_separation_service import build_vocal_separation_status
 from backend.runtime_config import (
     load_runtime_default_config,
     save_runtime_config,
@@ -76,6 +77,21 @@ async def get_status(state=Depends(get_app_state)):
     status["qwen3_asr_threads"] = int(getattr(state.asr_engine, "qwen3_threads", 0) or 0)
     status["qwen3_asr_language"] = getattr(state.asr_engine, "qwen3_language", "auto")
     status["qwen3_asr_enable_timestamps"] = bool(getattr(state.asr_engine, "qwen3_enable_timestamps", False))
+    config = state.orchestrator.config
+    vocal_status = build_vocal_separation_status(
+        enabled=bool(getattr(config, "asr_vocal_separation_enabled", False)),
+        model=str(getattr(config, "asr_vocal_separation_model", "htdemucs") or "htdemucs"),
+        repo_dir=str(getattr(config, "asr_vocal_separation_repo_dir", "") or ""),
+        device=str(getattr(config, "asr_vocal_separation_device", "") or ""),
+        last_error=str(getattr(state, "asr_vocal_separation_error", "") or ""),
+    )
+    status["asr_vocal_separation"] = vocal_status
+    status["asr_vocal_separation_enabled"] = vocal_status["enabled"]
+    status["asr_vocal_separation_model"] = vocal_status["model"]
+    status["asr_vocal_separation_repo_dir"] = vocal_status["repo_dir"]
+    status["asr_vocal_separation_repo_dir_exists"] = vocal_status["repo_dir_exists"]
+    status["asr_vocal_separation_available"] = vocal_status["available"]
+    status["asr_vocal_separation_error"] = vocal_status["last_error"]
     crispasr_exe = Path(str(status["qwen3_asr_crispasr_exe"] or "")).expanduser() if status["qwen3_asr_crispasr_exe"] else None
     qwen3_model = Path(str(status["qwen3_asr_model_path"] or "")).expanduser() if status["qwen3_asr_model_path"] else None
     qwen3_aligner = (
@@ -134,6 +150,7 @@ async def update_orchestrator_config(payload: OrchestratorConfigPayload, state=D
     state.asr_engine.pyannote_model_id = config.pyannote_model_id
     state.asr_engine.pyannote_auth_token = config.pyannote_auth_token
     state.asr_engine.pyannote_device = config.pyannote_device
+    state.asr_vocal_separation_error = ""
     if state.asr_engine.is_loaded and (
         old_asr_backend != config.asr_backend
         or old_model_path != config.asr_model_path
@@ -198,6 +215,7 @@ async def reset_orchestrator_config(state=Depends(get_app_state)):
     state.asr_engine.pyannote_model_id = config.pyannote_model_id
     state.asr_engine.pyannote_auth_token = config.pyannote_auth_token
     state.asr_engine.pyannote_device = config.pyannote_device
+    state.asr_vocal_separation_error = ""
     if state.asr_engine.is_loaded and (
         old_asr_backend != config.asr_backend
         or old_model_path != config.asr_model_path

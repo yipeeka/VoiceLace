@@ -24,11 +24,16 @@ export default function AsrRecognitionCard({
   onStopRecording,
   onUnloadAsr,
   onUpload,
+  onVocalSeparationChange,
+  onVocalSeparationModelChange,
   pendingAudio,
   projectTask,
   showTimestampToggle,
   speakerLabelHint,
   speakerLabels,
+  vocalSeparationEnabled,
+  vocalSeparationHint,
+  vocalSeparationModel,
   warnings,
 }) {
   const isBusy = isTranscribing || isRecording || isCreatingProject;
@@ -74,6 +79,33 @@ export default function AsrRecognitionCard({
           <div className="muted speechAsrHint">
             Qwen3-ASR 当前为纯识别模式（不提供时间轴/说话人标签）
           </div>
+        ) : null}
+      </div>
+
+      <div className="editorGrid three speechAsrGrid">
+        <label className="controlRow inlineCheckRow">
+          <input
+            type="checkbox"
+            checked={Boolean(vocalSeparationEnabled)}
+            onChange={(event) => onVocalSeparationChange(event.target.checked)}
+            disabled={isBusy}
+          />
+          <span>识别前提取人声</span>
+        </label>
+        <div className="formGroup">
+          <label className="formLabel">Demucs 模型</label>
+          <select
+            className="textInput"
+            value={vocalSeparationModel || "htdemucs"}
+            onChange={(event) => onVocalSeparationModelChange(event.target.value)}
+            disabled={isBusy || !vocalSeparationEnabled}
+          >
+            <option value="htdemucs">htdemucs</option>
+            <option value="htdemucs_ft">htdemucs_ft（高质量）</option>
+          </select>
+        </div>
+        {vocalSeparationHint ? (
+          <div className="muted speechAsrHint">{vocalSeparationHint}</div>
         ) : null}
       </div>
 

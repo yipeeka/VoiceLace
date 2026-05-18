@@ -84,6 +84,10 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const setAsrLanguage = useSpeechRecognitionStore((state) => state.setAsrLanguage);
   const asrEnableTimestamps = useSpeechRecognitionStore((state) => state.asrEnableTimestamps);
   const setAsrEnableTimestamps = useSpeechRecognitionStore((state) => state.setAsrEnableTimestamps);
+  const vocalSeparationEnabled = useSpeechRecognitionStore((state) => state.vocalSeparationEnabled);
+  const setVocalSeparationEnabled = useSpeechRecognitionStore((state) => state.setVocalSeparationEnabled);
+  const vocalSeparationModel = useSpeechRecognitionStore((state) => state.vocalSeparationModel);
+  const setVocalSeparationModel = useSpeechRecognitionStore((state) => state.setVocalSeparationModel);
   const translationResult = useSpeechRecognitionStore((state) => state.translationResult);
   const setTranslationResult = useSpeechRecognitionStore((state) => state.setTranslationResult);
   const translationError = useSpeechRecognitionStore((state) => state.translationError);
@@ -254,6 +258,12 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   }, [asrBackendConfigured, qwen3Ready]);
   const showTimestampToggle = asrBackendConfigured === "qwen3_crispasr";
   const effectiveAsrEnableTimestamps = !isQwen3Backend && Boolean(asrEnableTimestamps);
+  const vocalSeparationStatus = systemStatus?.asr_vocal_separation || {};
+  const vocalSeparationRepoConfigured = Boolean(vocalSeparationStatus?.repo_dir);
+  const vocalSeparationAvailable = Boolean(vocalSeparationStatus?.available);
+  const vocalSeparationHint = vocalSeparationEnabled && !vocalSeparationAvailable
+    ? (vocalSeparationRepoConfigured ? "Demucs 模型目录不可用，识别时会回退原音频。" : "请在系统设置配置 Demucs 本地模型目录。")
+    : "";
   const speakerLabelHint = useMemo(() => {
     if (!speakerLabels) return "";
     if (asrBackendConfigured === "qwen3_crispasr") {
@@ -770,6 +780,8 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       formData.append("language", asrLanguage || "auto");
       formData.append("speaker_labels", String(!isQwen3Backend && Boolean(speakerLabels)));
       formData.append("enable_timestamps", String(Boolean(effectiveAsrEnableTimestamps)));
+      formData.append("vocal_separation", String(Boolean(vocalSeparationEnabled)));
+      formData.append("vocal_separation_model", vocalSeparationModel || "htdemucs");
       const controller = new AbortController();
       abortRef.current = controller;
 
@@ -830,8 +842,9 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     const nextUrl = URL.createObjectURL(file);
     setPendingAudio((prev) => {
       if (prev?.url) URL.revokeObjectURL(prev.url);
-      return { blob: file, fileName: file.name || "upload.wav", url: nextUrl };
+      return { blob: file, fileName: file.name || "upload.wav", url: nextUrl, source: "upload" };
     });
+    setVocalSeparationEnabled(true);
     setProjectTask({ status: "", failedChunks: [], warnings: [], chunkProgress: null, parseTaskId: "" });
     setError("");
   }
@@ -858,8 +871,9 @@ export default function SpeechRecognitionPage({ onNavigate }) {
         const nextUrl = URL.createObjectURL(blob);
         setPendingAudio((prev) => {
           if (prev?.url) URL.revokeObjectURL(prev.url);
-          return { blob, fileName: "recording.webm", url: nextUrl };
+          return { blob, fileName: "recording.webm", url: nextUrl, source: "recording" };
         });
+        setVocalSeparationEnabled(false);
         setProjectTask({ status: "", failedChunks: [], warnings: [], chunkProgress: null, parseTaskId: "" });
       };
       mediaRecorderRef.current = recorder;
@@ -1249,6 +1263,8 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       formData.append("backend", asrBackendConfigured || "whisper");
       formData.append("language", asrLanguage || "auto");
       formData.append("enable_timestamps", String(Boolean(effectiveAsrEnableTimestamps)));
+      formData.append("vocal_separation", String(Boolean(vocalSeparationEnabled)));
+      formData.append("vocal_separation_model", vocalSeparationModel || "htdemucs");
       formData.append("parse_mode", "verified_five_step_pipeline");
       formData.append("auto_parse", "true");
       formData.append("speaker_map", JSON.stringify(speakerMap || {}));
@@ -1692,11 +1708,16 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           onStopRecording={handleStopRecording}
           onUnloadAsr={handleUnloadAsr}
           onUpload={handleUpload}
+          onVocalSeparationChange={setVocalSeparationEnabled}
+          onVocalSeparationModelChange={setVocalSeparationModel}
           pendingAudio={pendingAudio}
           projectTask={projectTask}
           showTimestampToggle={showTimestampToggle}
           speakerLabelHint={speakerLabelHint}
           speakerLabels={speakerLabels}
+          vocalSeparationEnabled={vocalSeparationEnabled}
+          vocalSeparationHint={vocalSeparationHint}
+          vocalSeparationModel={vocalSeparationModel}
           warnings={warnings}
         />
       </div>

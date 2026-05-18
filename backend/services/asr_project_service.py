@@ -11,6 +11,7 @@ from typing import Any, Awaitable, Callable
 
 from backend.models import LlmParseRequest, Project
 from backend.persistence import append_project_event, save_project
+from .audio_vocal_separation_service import prepare_vocal_audio_for_asr
 from .project_source_audio_service import save_project_source_audio_mp3
 
 CHUNK_DURATION_MS = 10 * 60 * 1000
@@ -223,19 +224,27 @@ async def create_project_from_audio(
     asr_backend: str = "whisper",
     language: str = "auto",
     enable_timestamps: bool = False,
+    vocal_separation: bool = False,
+    vocal_separation_model: str = "htdemucs",
+    vocal_separation_repo_dir: str = "",
+    vocal_separation_device: str = "cpu",
     parse_mode: str,
     auto_parse: bool,
     speaker_map: dict[str, str] | None = None,
     enqueue_parse_task=None,
     on_progress: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
-    duration_ms = _probe_audio_duration_ms(audio_path)
-    windows = _build_chunk_windows(duration_ms)
     warnings: list[str] = []
     failed_chunks: list[dict[str, Any]] = []
     merged_segments: list[dict[str, Any]] = []
     completed_chunks = 0
-    total_chunks = len(windows)
+    vocal_payload: dict[str, Any] = {
+        "enabled": bool(vocal_separation),
+        "used": False,
+        "model": str(vocal_separation_model or "htdemucs"),
+        "repo_dir": str(vocal_separation_repo_dir or ""),
+        "warnings": [],
+    }
 
     async def emit(event: dict[str, Any]) -> None:
         if on_progress is None:
@@ -261,7 +270,6 @@ async def create_project_from_audio(
                 enable_timestamps=enable_timestamps,
             )
 
-    await emit({"type": "chunk_total", "total": total_chunks})
     orchestrator = getattr(state, "orchestrator", None)
     if orchestrator is not None and hasattr(orchestrator, "ensure_asr_ready"):
         await orchestrator.ensure_asr_ready(backend=asr_backend)
@@ -269,6 +277,27 @@ async def create_project_from_audio(
     work_dir = Path(tempfile.mkdtemp(prefix="asr_project_", dir=state.settings.output_dir))
     try:
         work_path = Path(work_dir)
+        separation = await prepare_vocal_audio_for_asr(
+            audio_path,
+            enabled=bool(vocal_separation),
+            model=vocal_separation_model,
+            repo_dir=vocal_separation_repo_dir,
+            device=vocal_separation_device,
+            work_dir=work_path / "vocal_separation",
+        )
+        vocal_payload = separation.to_payload()
+        if hasattr(state, "asr_vocal_separation_error"):
+            state.asr_vocal_separation_error = " | ".join(separation.warnings)
+        for warning in separation.warnings:
+            warnings.append(warning)
+            await emit({"type": "warning", "message": warning})
+
+        recognition_audio_path = separation.audio_path
+        duration_ms = _probe_audio_duration_ms(recognition_audio_path)
+        windows = _build_chunk_windows(duration_ms)
+        total_chunks = len(windows)
+        await emit({"type": "chunk_total", "total": total_chunks})
+
         for chunk_index, (start_ms, end_ms) in enumerate(windows):
             chunk_path = work_path / f"chunk_{chunk_index:04d}.wav"
             try:
@@ -282,10 +311,10 @@ async def create_project_from_audio(
                     }
                 )
                 if duration_ms > 0:
-                    await asyncio.to_thread(_extract_chunk, audio_path, chunk_path, start_ms, end_ms)
+                    await asyncio.to_thread(_extract_chunk, recognition_audio_path, chunk_path, start_ms, end_ms)
                     target_path = chunk_path
                 else:
-                    target_path = audio_path
+                    target_path = recognition_audio_path
                 result = await transcribe_with_language(target_path)
                 raw_alignments = result.get("alignments") if isinstance(result, dict) else []
                 normalized: list[dict[str, Any]] = []
@@ -464,6 +493,7 @@ async def create_project_from_audio(
         "speaker_map": _to_speaker_identity_map(effective_segments),
         "warnings": warnings,
         "failed_chunks": failed_chunks,
+        "vocal_separation": vocal_payload,
         "parse_task_id": parse_task_id,
         "chunk_progress": {
             "completed": completed_chunks,

@@ -88,6 +88,14 @@ class Settings:
     default_asr_backend: str = field(default_factory=lambda: os.getenv("BV_ASR_BACKEND", "whisper"))
     default_asr_model_path: str = field(default_factory=lambda: os.getenv("BV_ASR_MODEL_PATH", "base"))
     default_asr_device: str = field(default_factory=lambda: os.getenv("BV_ASR_DEVICE", os.getenv("BV_TTS_DEVICE", "cuda:0")))
+    default_asr_vocal_separation_enabled: bool = field(
+        default_factory=lambda: os.getenv("BV_ASR_VOCAL_SEPARATION_ENABLED", "false").lower() == "true"
+    )
+    default_asr_vocal_separation_model: str = field(default_factory=lambda: os.getenv("BV_ASR_VOCAL_SEPARATION_MODEL", "htdemucs"))
+    default_asr_vocal_separation_repo_dir: str = field(default_factory=lambda: os.getenv("BV_ASR_VOCAL_SEPARATION_REPO_DIR", ""))
+    default_asr_vocal_separation_device: str = field(
+        default_factory=lambda: os.getenv("BV_ASR_VOCAL_SEPARATION_DEVICE", os.getenv("BV_ASR_DEVICE", os.getenv("BV_TTS_DEVICE", "cuda:0")))
+    )
     default_qwen3_asr_crispasr_exe: str = field(default_factory=lambda: os.getenv("BV_QWEN3_ASR_CRISPASR_EXE", ""))
     default_qwen3_asr_model_path: str = field(default_factory=lambda: os.getenv("BV_QWEN3_ASR_MODEL_PATH", ""))
     default_qwen3_asr_forced_aligner_model_path: str = field(

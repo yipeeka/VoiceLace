@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 import tempfile
 from pathlib import Path
 from uuid import uuid4
@@ -10,6 +11,7 @@ from pydantic import ValidationError
 
 from backend.api.llm_routes import enqueue_parse_task
 from backend.services import create_project_from_audio, parse_speaker_map_form
+from backend.services.audio_vocal_separation_service import normalize_demucs_model, prepare_vocal_audio_for_asr
 from backend.state import get_app_state
 
 router = APIRouter()
@@ -47,6 +49,20 @@ async def _emit_asr_event(state, task: dict, task_id: str, event: dict) -> None:
     await state.realtime.publish("asr", task_id, event)
 
 
+def _get_vocal_separation_options(state, *, enabled_form: str | None, model_form: str | None) -> dict:
+    config = getattr(state.orchestrator, "config", None)
+    enabled = _parse_bool_form(
+        enabled_form,
+        default=bool(getattr(config, "asr_vocal_separation_enabled", False)),
+    )
+    return {
+        "enabled": enabled,
+        "model": normalize_demucs_model(model_form or getattr(config, "asr_vocal_separation_model", "htdemucs")),
+        "repo_dir": str(getattr(config, "asr_vocal_separation_repo_dir", "") or ""),
+        "device": str(getattr(config, "asr_vocal_separation_device", "") or getattr(config, "asr_device", "cpu") or "cpu"),
+    }
+
+
 async def _run_project_from_audio_task(task_id: str, task_input: dict, state) -> None:
     task = state.asr_tasks[task_id]
     task["status"] = "running"
@@ -65,6 +81,10 @@ async def _run_project_from_audio_task(task_id: str, task_input: dict, state) ->
             asr_backend=str(task_input.get("asr_backend") or "whisper"),
             language=str(task_input.get("language") or "auto"),
             enable_timestamps=bool(task_input.get("enable_timestamps")),
+            vocal_separation=bool(task_input.get("vocal_separation")),
+            vocal_separation_model=str(task_input.get("vocal_separation_model") or ""),
+            vocal_separation_repo_dir=str(task_input.get("vocal_separation_repo_dir") or ""),
+            vocal_separation_device=str(task_input.get("vocal_separation_device") or ""),
             parse_mode=task_input.get("parse_mode") or "verified_five_step_pipeline",
             auto_parse=bool(task_input.get("auto_parse")),
             speaker_map=task_input.get("speaker_map") or {},
@@ -92,6 +112,8 @@ async def transcribe_file(
     language: str = Form("auto"),
     speaker_labels: str | None = Form(None),
     enable_timestamps: str | None = Form(None),
+    vocal_separation: str | None = Form(None),
+    vocal_separation_model: str | None = Form(None),
     state=Depends(get_app_state),
 ):
     normalized_backend = (backend or "").strip().lower()
@@ -109,6 +131,7 @@ async def transcribe_file(
 
     suffix = Path(file.filename or "upload.wav").suffix or ".wav"
     tmp_path: Path | None = None
+    separation_work_dir: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
             delete=False,
@@ -118,15 +141,30 @@ async def transcribe_file(
             tmp_file.write(await file.read())
             tmp_path = Path(tmp_file.name)
 
+        vocal_options = _get_vocal_separation_options(state, enabled_form=vocal_separation, model_form=vocal_separation_model)
+        separation_work_dir = Path(tempfile.mkdtemp(prefix="asr_vocal_", dir=state.settings.output_dir))
+        separation = await prepare_vocal_audio_for_asr(
+            tmp_path,
+            enabled=bool(vocal_options["enabled"]),
+            model=str(vocal_options["model"]),
+            repo_dir=str(vocal_options["repo_dir"]),
+            device=str(vocal_options["device"]),
+            work_dir=separation_work_dir,
+        )
+        state.asr_vocal_separation_error = " | ".join(separation.warnings)
         await state.orchestrator.ensure_asr_ready(backend=normalized_backend)
         result = await _transcribe_with_optional_language(
             state.asr_engine,
-            str(tmp_path),
+            str(separation.audio_path),
             backend=normalized_backend,
             language=language,
             speaker_labels=effective_speaker_labels,
             enable_timestamps=effective_timestamps,
         )
+        warnings = list(result.get("warnings") if isinstance(result.get("warnings"), list) else [])
+        warnings.extend(separation.warnings)
+        result["warnings"] = warnings
+        result["vocal_separation"] = separation.to_payload()
         return result
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -138,6 +176,8 @@ async def transcribe_file(
     finally:
         if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
+        if separation_work_dir is not None:
+            shutil.rmtree(separation_work_dir, ignore_errors=True)
 
 
 @router.post("/project-from-audio")
@@ -148,6 +188,8 @@ async def project_from_audio(
     backend: str | None = Form(None),
     language: str = Form("auto"),
     enable_timestamps: str | None = Form(None),
+    vocal_separation: str | None = Form(None),
+    vocal_separation_model: str | None = Form(None),
     parse_mode: str = Form("verified_five_step_pipeline"),
     auto_parse: str | None = Form(None),
     speaker_map: str | None = Form(None),
@@ -177,10 +219,15 @@ async def project_from_audio(
             chosen_backend = "qwen3_crispasr"
         if chosen_backend not in {"whisper", "qwen3_crispasr"}:
             raise ValueError(f"Unsupported ASR backend: {backend}")
+        vocal_options = _get_vocal_separation_options(state, enabled_form=vocal_separation, model_form=vocal_separation_model)
         task_input = {
             "asr_backend": chosen_backend,
             "language": language,
             "enable_timestamps": _parse_bool_form(enable_timestamps, default=False),
+            "vocal_separation": bool(vocal_options["enabled"]),
+            "vocal_separation_model": str(vocal_options["model"]),
+            "vocal_separation_repo_dir": str(vocal_options["repo_dir"]),
+            "vocal_separation_device": str(vocal_options["device"]),
             "tmp_path": str(tmp_path),
             "audio_name": file.filename,
             "project_name": project_name,

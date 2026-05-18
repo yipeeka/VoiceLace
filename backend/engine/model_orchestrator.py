@@ -91,6 +91,10 @@ class OrchestratorConfig:
     asr_backend: str = settings.default_asr_backend
     asr_model_path: str = settings.default_asr_model_path
     asr_device: str = settings.default_asr_device
+    asr_vocal_separation_enabled: bool = settings.default_asr_vocal_separation_enabled
+    asr_vocal_separation_model: str = settings.default_asr_vocal_separation_model
+    asr_vocal_separation_repo_dir: str = settings.default_asr_vocal_separation_repo_dir
+    asr_vocal_separation_device: str = settings.default_asr_vocal_separation_device
     qwen3_asr_crispasr_exe: str = settings.default_qwen3_asr_crispasr_exe
     qwen3_asr_model_path: str = settings.default_qwen3_asr_model_path
     qwen3_asr_forced_aligner_model_path: str = settings.default_qwen3_asr_forced_aligner_model_path
@@ -182,6 +186,17 @@ class ModelOrchestrator:
         if asr_backend not in {"whisper", "qwen3_crispasr"}:
             asr_backend = "whisper"
         config.asr_backend = asr_backend
+
+        vocal_model = str(getattr(config, "asr_vocal_separation_model", "htdemucs") or "htdemucs").strip().lower()
+        if vocal_model not in {"htdemucs", "htdemucs_ft"}:
+            vocal_model = "htdemucs"
+        config.asr_vocal_separation_model = vocal_model
+        config.asr_vocal_separation_repo_dir = str(getattr(config, "asr_vocal_separation_repo_dir", "") or "").strip()
+        config.asr_vocal_separation_device = (
+            str(getattr(config, "asr_vocal_separation_device", "") or "").strip()
+            or str(getattr(config, "asr_device", "") or "cpu").strip()
+            or "cpu"
+        )
 
         try:
             config.qwen3_asr_threads = max(0, int(getattr(config, "qwen3_asr_threads", 0) or 0))

@@ -87,12 +87,29 @@ BV_TTS_DEVICE=cuda:0
 
 BV_ASR_MODEL_PATH=base
 BV_ASR_DEVICE=cuda:0
+BV_ASR_VOCAL_SEPARATION_ENABLED=false
+BV_ASR_VOCAL_SEPARATION_MODEL=htdemucs
+BV_ASR_VOCAL_SEPARATION_REPO_DIR=.\models\demucs
+BV_ASR_VOCAL_SEPARATION_DEVICE=cuda:0
 
 BV_MUSIC_ENABLED=false
 BV_MUSIC_MODEL_VARIANT=turbo
 BV_MUSIC_TURBO_MODEL_DIR=.\models\ACE-Step\acestep-v15-xl-turbo-diffusers
 BV_MUSIC_BASE_MODEL_DIR=.\models\ACE-Step\acestep-v15-xl-base-diffusers
 BV_MUSIC_DEVICE_MODE=cpu_offload
+```
+
+Optional ASR vocal isolation / 可选识别人声提取：
+
+- VoiceLace uses Demucs only when you enable `识别前提取人声`; uploaded audio enables the switch by default, recordings keep it off by default.
+- Demucs model files are managed manually. Put the local model repo wherever you prefer and set `BV_ASR_VOCAL_SEPARATION_REPO_DIR` or the matching Settings field.
+- `htdemucs` is the balanced default and is roughly 160 MB; `htdemucs_ft` is higher quality, slower, and roughly 640 MB.
+- VoiceLace does not silently download Demucs weights. If the repo path is missing or the model cannot load, ASR continues with the original audio and shows a warning.
+
+Quick local check / 本地验证命令：
+
+```powershell
+.\.venv\Scripts\python.exe -m demucs.separate --repo E:\models\demucs -n htdemucs --two-stems vocals samples\zh-CN-XiaoxiaoNeural.mp3
 ```
 
 For higher quality, switch to / 如果更看重效果，可以换成：

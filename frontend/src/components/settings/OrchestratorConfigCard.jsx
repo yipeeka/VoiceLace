@@ -23,6 +23,11 @@ const asrBackendOptions = [
   { value: "qwen3_crispasr", label: "Qwen3 CrispASR" },
 ];
 
+const demucsModelOptions = [
+  { value: "htdemucs", label: "htdemucs" },
+  { value: "htdemucs_ft", label: "htdemucs_ft (高质量)" },
+];
+
 function Field({ id, label, children, className = "" }) {
   return (
     <div className={`formGroup ${className}`}>
@@ -395,6 +400,36 @@ export default function OrchestratorConfigCard({ form, isSaving, onSetField, onS
                   value={form.asr_device ?? "cuda:0"}
                   onChange={(value) => onSetField("asr_device", value)}
                   placeholder="例如 cuda:0 或 cpu…"
+                />
+                <ToggleRow
+                  id="asr-vocal-separation-enabled"
+                  checked={form.asr_vocal_separation_enabled ?? false}
+                  onChange={(value) => onSetField("asr_vocal_separation_enabled", value)}
+                  title="默认启用识别前人声提取"
+                  description="语音识别页仍可按单次任务切换；模型由本地 Demucs 目录提供。"
+                />
+                <div className="editorGrid three settingsFieldGrid">
+                  <SelectField
+                    id="asr-vocal-separation-model"
+                    label="Demucs 模型"
+                    value={form.asr_vocal_separation_model ?? "htdemucs"}
+                    onChange={(value) => onSetField("asr_vocal_separation_model", value)}
+                    options={demucsModelOptions}
+                  />
+                  <TextField
+                    id="asr-vocal-separation-device"
+                    label="Demucs 设备"
+                    value={form.asr_vocal_separation_device ?? form.asr_device ?? "cuda:0"}
+                    onChange={(value) => onSetField("asr_vocal_separation_device", value)}
+                    placeholder="例如 cuda:0 或 cpu…"
+                  />
+                </div>
+                <TextField
+                  id="asr-vocal-separation-repo-dir"
+                  label="Demucs 本地模型目录"
+                  value={form.asr_vocal_separation_repo_dir ?? ""}
+                  onChange={(value) => onSetField("asr_vocal_separation_repo_dir", value)}
+                  placeholder="例如 E:/models/demucs…"
                 />
                 <TextField
                   id="qwen3-asr-crispasr-exe"

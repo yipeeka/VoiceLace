@@ -38,6 +38,10 @@ class RuntimeConfigTest(unittest.TestCase):
                 asr_backend="qwen3_crispasr",
                 asr_model_path="faster-whisper-large-v3",
                 asr_device="cuda:1",
+                asr_vocal_separation_enabled=True,
+                asr_vocal_separation_model="htdemucs_ft",
+                asr_vocal_separation_repo_dir="D:/models/demucs",
+                asr_vocal_separation_device="cuda:0",
                 qwen3_asr_crispasr_exe="D:/tools/CrispASR/crispasr.exe",
                 qwen3_asr_model_path="D:/models/qwen3-asr-0.6b-q4_k.gguf",
                 qwen3_asr_forced_aligner_model_path="D:/models/qwen3-forced-aligner-0.6b-q4_k.gguf",
@@ -59,6 +63,10 @@ class RuntimeConfigTest(unittest.TestCase):
             self.assertEqual(raw["music_model_dir"], "D:/AIModels/ACE-Step/acestep-v15-xl-turbo-diffusers")
             self.assertEqual(raw["music_device_mode"], "cpu_offload")
             self.assertEqual(raw["asr_backend"], "qwen3_crispasr")
+            self.assertTrue(raw["asr_vocal_separation_enabled"])
+            self.assertEqual(raw["asr_vocal_separation_model"], "htdemucs_ft")
+            self.assertEqual(raw["asr_vocal_separation_repo_dir"], "D:/models/demucs")
+            self.assertEqual(raw["asr_vocal_separation_device"], "cuda:0")
             self.assertEqual(raw["qwen3_asr_crispasr_exe"], "D:/tools/CrispASR/crispasr.exe")
             self.assertEqual(raw["qwen3_asr_model_path"], "D:/models/qwen3-asr-0.6b-q4_k.gguf")
             self.assertEqual(raw["qwen3_asr_forced_aligner_model_path"], "D:/models/qwen3-forced-aligner-0.6b-q4_k.gguf")
@@ -80,6 +88,10 @@ class RuntimeConfigTest(unittest.TestCase):
             self.assertEqual(loaded.music_model_dir, "D:/AIModels/ACE-Step/acestep-v15-xl-turbo-diffusers")
             self.assertEqual(loaded.music_device_mode, "cpu_offload")
             self.assertEqual(loaded.asr_backend, "qwen3_crispasr")
+            self.assertTrue(loaded.asr_vocal_separation_enabled)
+            self.assertEqual(loaded.asr_vocal_separation_model, "htdemucs_ft")
+            self.assertEqual(loaded.asr_vocal_separation_repo_dir, "D:/models/demucs")
+            self.assertEqual(loaded.asr_vocal_separation_device, "cuda:0")
             self.assertEqual(loaded.qwen3_asr_crispasr_exe, "D:/tools/CrispASR/crispasr.exe")
             self.assertEqual(loaded.qwen3_asr_model_path, "D:/models/qwen3-asr-0.6b-q4_k.gguf")
             self.assertEqual(loaded.qwen3_asr_forced_aligner_model_path, "D:/models/qwen3-forced-aligner-0.6b-q4_k.gguf")

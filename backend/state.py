@@ -42,6 +42,7 @@ class AppState:
     translation_engine_error: str = ""
     music_assist_engine_source: str = ""
     music_assist_engine_error: str = ""
+    asr_vocal_separation_error: str = ""
 
     def __post_init__(self) -> None:
         self.settings.ensure_directories()
