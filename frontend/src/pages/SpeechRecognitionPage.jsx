@@ -40,6 +40,8 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [isBuildingDubbingProject, setIsBuildingDubbingProject] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [isExtractingAudio, setIsExtractingAudio] = useState(false);
+  const [recordingElapsedSec, setRecordingElapsedSec] = useState(0);
   const [pendingAudio, setPendingAudio] = useState(null);
   const [audioClipRange, setAudioClipRange] = useState(null);
   const [audioDurationSec, setAudioDurationSec] = useState(0);
@@ -49,6 +51,8 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const [projectTask, setProjectTask] = useState({ status: "", failedChunks: [], warnings: [], chunkProgress: null, parseTaskId: "" });
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
+  const recordingTimerRef = useRef(null);
+  const recordingStartedAtRef = useRef(0);
   const abortRef = useRef(null);
   const translateAbortRef = useRef(null);
   const subtitleTranslateAbortRef = useRef(null);
@@ -148,7 +152,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const [subtitleTask, setSubtitleTask] = useState({ taskId: "", status: "", stageLabel: "", processed: 0, total: 0, percent: 0, cacheHits: 0 });
   const subtitleTaskIdRef = useRef("");
   const isTranslationEngineLoaded = Boolean(translationEngineStatus?.loaded);
-  const isProjectOpsBusy = isTranscribing || isRecording || isCreatingProject || isBuildingDubbingProject || isCreatingSubtitleProject || isTranslatingSubtitle;
+  const isProjectOpsBusy = isTranscribing || isRecording || isExtractingAudio || isCreatingProject || isBuildingDubbingProject || isCreatingSubtitleProject || isTranslatingSubtitle;
 
   const sortedProjects = useMemo(
     () => [...projects].sort((a, b) => Date.parse(b.updated_at || "") - Date.parse(a.updated_at || "")),
@@ -749,6 +753,10 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   useEffect(() => {
     refreshTranslationStatus();
     return () => {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
       if (abortRef.current) {
         abortRef.current.abort();
         abortRef.current = null;
@@ -838,6 +846,34 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     }
   }
 
+  function isVideoUpload(file) {
+    const type = String(file?.type || "").toLowerCase();
+    if (type.startsWith("video/")) return true;
+    const suffix = String(file?.name || "").toLowerCase().split(".").pop();
+    return ["mp4", "mov", "mkv", "webm", "avi", "m4v", "mpeg", "mpg"].includes(suffix || "");
+  }
+
+  function buildExtractedAudioFileName(fileName) {
+    const normalized = String(fileName || "video").trim() || "video";
+    const dotIndex = normalized.lastIndexOf(".");
+    const base = dotIndex > 0 ? normalized.slice(0, dotIndex) : normalized;
+    return `${base}-audio.wav`;
+  }
+
+  async function extractAudioFromVideo(file) {
+    const formData = new FormData();
+    formData.append("file", file, file.name || "video.mp4");
+    const response = await fetch(`${API_BASE_URL}/asr/extract-audio`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!response.ok) {
+      const message = await readErrorMessage(response, `HTTP ${response.status}`);
+      throw new Error(message);
+    }
+    return response.blob();
+  }
+
   async function preparePendingAudioForSubmit() {
     if (!pendingAudio?.blob) {
       throw new Error("请先上传或录制音频。");
@@ -871,20 +907,71 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     setError(nextMessage);
   }, [setError]);
 
+  function startRecordingTimer() {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+    }
+    recordingStartedAtRef.current = Date.now();
+    setRecordingElapsedSec(0);
+    recordingTimerRef.current = window.setInterval(() => {
+      const elapsedMs = Date.now() - recordingStartedAtRef.current;
+      setRecordingElapsedSec(Math.max(0, Math.floor(elapsedMs / 1000)));
+    }, 250);
+  }
+
+  function stopRecordingTimer({ reset = false } = {}) {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    if (recordingStartedAtRef.current) {
+      const elapsedMs = Date.now() - recordingStartedAtRef.current;
+      setRecordingElapsedSec(reset ? 0 : Math.max(0, Math.floor(elapsedMs / 1000)));
+    } else if (reset) {
+      setRecordingElapsedSec(0);
+    }
+    recordingStartedAtRef.current = 0;
+  }
+
   async function handleUpload(event) {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    const nextUrl = URL.createObjectURL(file);
+    const videoUpload = isVideoUpload(file);
+    setIsExtractingAudio(videoUpload);
+    setError("");
     setPendingAudio((prev) => {
       if (prev?.url) URL.revokeObjectURL(prev.url);
-      return { blob: file, fileName: file.name || "upload.wav", url: nextUrl, source: "upload" };
+      return null;
     });
     setAudioClipRange(null);
     setAudioDurationSec(0);
-    setVocalSeparationEnabled(true);
     setProjectTask({ status: "", failedChunks: [], warnings: [], chunkProgress: null, parseTaskId: "" });
-    setError("");
+    try {
+      const audioBlob = videoUpload ? await extractAudioFromVideo(file) : file;
+      const nextFileName = videoUpload ? buildExtractedAudioFileName(file.name) : (file.name || "upload.wav");
+      const nextUrl = URL.createObjectURL(audioBlob);
+      setPendingAudio((prev) => {
+        if (prev?.url) URL.revokeObjectURL(prev.url);
+        return {
+          blob: audioBlob,
+          fileName: nextFileName,
+          url: nextUrl,
+          source: videoUpload ? "video" : "upload",
+          originalFileName: file.name || "",
+        };
+      });
+      setVocalSeparationEnabled(true);
+      if (videoUpload) {
+        useUiStore.getState().pushToast({ title: "已从视频提取音频", tone: "success" });
+      }
+    } catch (err) {
+      const message = err?.message || "视频音频提取失败";
+      setError(message);
+      useUiStore.getState().pushToast({ title: `上传失败：${message}`, tone: "error" });
+    } finally {
+      setIsExtractingAudio(false);
+    }
   }
 
   async function handleStartRecording() {
@@ -904,6 +991,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       };
       recorder.onstop = () => {
         stream.getTracks().forEach((track) => track.stop());
+        stopRecordingTimer();
         const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
         chunksRef.current = [];
         const nextUrl = URL.createObjectURL(blob);
@@ -916,10 +1004,20 @@ export default function SpeechRecognitionPage({ onNavigate }) {
         setVocalSeparationEnabled(false);
         setProjectTask({ status: "", failedChunks: [], warnings: [], chunkProgress: null, parseTaskId: "" });
       };
+      recorder.onerror = (event) => {
+        stream.getTracks().forEach((track) => track.stop());
+        stopRecordingTimer({ reset: true });
+        setIsRecording(false);
+        const message = event?.error?.message || "录音中断，请重试。";
+        setError(message);
+        useUiStore.getState().pushToast({ title: `录音失败：${message}`, tone: "error" });
+      };
       mediaRecorderRef.current = recorder;
       recorder.start();
       setIsRecording(true);
+      startRecordingTimer();
     } catch (err) {
+      stopRecordingTimer({ reset: true });
       const message = err?.message || "录音权限被拒绝";
       setError(message);
       useUiStore.getState().pushToast({ title: `录音失败：${message}`, tone: "error" });
@@ -930,6 +1028,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     const recorder = mediaRecorderRef.current;
     if (!recorder || recorder.state === "inactive") {
       setIsRecording(false);
+      stopRecordingTimer({ reset: true });
       return;
     }
     recorder.stop();
@@ -1752,8 +1851,10 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           backendUsed={backendUsed}
           error={error}
           isCreatingProject={isCreatingProject}
+          isExtractingAudio={isExtractingAudio}
           isQwen3Backend={isQwen3Backend}
           isRecording={isRecording}
+          recordingElapsedSec={recordingElapsedSec}
           isTranscribing={isTranscribing}
           modelFiles={modelFiles}
           onAbortRecognize={handleAbortRecognize}
@@ -1787,7 +1888,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
         <RecognitionPreviewCard
           alignments={remappedAlignments}
           canInsert={canInsert}
-          isBusy={isTranscribing || isRecording || isCreatingProject}
+          isBusy={isTranscribing || isRecording || isExtractingAudio || isCreatingProject}
           isQwen3Backend={isQwen3Backend}
           onAppendToText={handleAppendToText}
           onClearResult={handleClearResult}

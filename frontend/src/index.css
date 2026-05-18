@@ -1174,6 +1174,16 @@ select.textInput option {
   background: color-mix(in srgb, var(--accent-primary) 9%, var(--bg-elevated));
 }
 
+.segmentCard.durationMismatch {
+  border-color: color-mix(in srgb, var(--warning) 70%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--warning) 26%, transparent);
+  background: color-mix(in srgb, var(--warning-dim) 26%, var(--bg-elevated));
+}
+
+.segmentCard.sourceLinked:not(.editing) {
+  cursor: pointer;
+}
+
 .segmentCard.qc-high {
   border-color: color-mix(in srgb, var(--danger) 68%, transparent);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 26%, transparent);
@@ -1317,7 +1327,9 @@ select.textInput option {
   background: var(--bg-elevated);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
-  transition: border-color var(--duration-fast) ease;
+  transition: border-color var(--duration-fast) ease,
+              background var(--duration-fast) ease,
+              box-shadow var(--duration-fast) ease;
 }
 
 .synthSegmentRow.done { border-left: 2px solid var(--success); }
@@ -1328,6 +1340,22 @@ select.textInput option {
 .synthSegmentRow.missing { border-left: 2px solid var(--danger); background: color-mix(in srgb, var(--danger-dim) 28%, transparent); }
 .synthSegmentRow.updated {
   animation: synthRowFlash 1.8s ease-out;
+}
+
+.synthSegmentRow.audioLinked {
+  cursor: pointer;
+}
+
+.synthSegmentRow.active {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-primary) 24%, transparent);
+  background: color-mix(in srgb, var(--accent-primary) 9%, var(--bg-elevated));
+}
+
+.synthSegmentRow.durationMismatch {
+  border-color: color-mix(in srgb, var(--warning) 72%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--warning) 24%, transparent);
+  background: color-mix(in srgb, var(--warning-dim) 22%, var(--bg-elevated));
 }
 
 .synthSegmentRow.actionsOpen,
@@ -1641,6 +1669,32 @@ select.textInput option {
 .segmentEditorFields.compact .segmentEditorFieldGrid,
 .segmentEditorFieldGrid.compact {
   grid-template-columns: 1fr;
+}
+
+.segmentTimingEditor {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr);
+  gap: 8px;
+  align-items: end;
+  padding: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
+}
+
+.segmentTimingEditor.compact {
+  grid-template-columns: 1fr;
+}
+
+.segmentTimingHint {
+  grid-column: 1 / -1;
+}
+
+.segmentTimingWarning {
+  margin-top: 6px;
+  color: var(--warning);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .statRow {

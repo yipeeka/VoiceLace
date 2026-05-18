@@ -37,6 +37,7 @@ function normalizeSegment(segment, index = 0) {
     emotion: segment?.emotion || "neutral",
     non_verbal: normalizeArray(segment?.non_verbal).map((item) => String(item).trim()).filter(Boolean),
     tts_overrides: normalizeObject(segment?.tts_overrides),
+    timing_check: normalizeObject(segment?.timing_check),
     source_text: (segment?.source_text || "").trim(),
     source_start_ms: sourceStartMs,
     source_end_ms: sourceEndMs,
@@ -54,6 +55,9 @@ function segmentContentChanged(a, b) {
     a.text !== b.text ||
     a.type !== b.type ||
     a.emotion !== b.emotion ||
+    a.source_start_ms !== b.source_start_ms ||
+    a.source_end_ms !== b.source_end_ms ||
+    a.source_duration_ms !== b.source_duration_ms ||
     !sameJson(a.non_verbal, b.non_verbal) ||
     !sameJson(a.tts_overrides, b.tts_overrides)
   );
@@ -65,6 +69,9 @@ function changedFields(a, b) {
   if (a.text !== b.text) fields.push("text");
   if (a.type !== b.type) fields.push("type");
   if (a.emotion !== b.emotion) fields.push("emotion");
+  if (a.source_start_ms !== b.source_start_ms) fields.push("source_start_ms");
+  if (a.source_end_ms !== b.source_end_ms) fields.push("source_end_ms");
+  if (a.source_duration_ms !== b.source_duration_ms) fields.push("source_duration_ms");
   if (!sameJson(a.non_verbal, b.non_verbal)) fields.push("non_verbal");
   if (!sameJson(a.tts_overrides, b.tts_overrides)) fields.push("tts_overrides");
   return fields;

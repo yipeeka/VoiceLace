@@ -6,6 +6,7 @@ import EmptyState from "../shared/EmptyState";
 import GlassCard from "../shared/GlassCard";
 import Button from "../ui/Button";
 import SegmentTimelineRow from "./SegmentTimelineRow";
+import { applySegmentSelectionClick } from "../../utils/scriptSidebar";
 
 export default function SynthesisTimelineCard({
   API_ORIGIN,
@@ -46,12 +47,14 @@ export default function SynthesisTimelineCard({
   handleDeleteSegment,
   setInsertAfterSegmentId,
   insertAfterSegmentId,
+  onLocateFullAudioSegment,
   playFrom,
   isAutoPlay,
   stop,
   pushToast,
 }) {
   const timelineRef = useRef(null);
+  const selectionAnchorSegmentIdRef = useRef(null);
   const speakerOptions = [
     { value: "narrator", label: "narrator" },
     ...Array.from(new Set((segments || []).map((segment) => (segment.speaker || "").trim()).filter(Boolean)))
@@ -76,6 +79,30 @@ export default function SynthesisTimelineCard({
     const targetTop = rowRect.top - containerRect.top + container.scrollTop;
     container.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
   }, [currentSegmentId, segments]);
+
+  useEffect(() => {
+    const visibleIds = new Set((segments || []).map((segment) => segment.segment_id).filter(Boolean));
+    if (selectionAnchorSegmentIdRef.current && !visibleIds.has(selectionAnchorSegmentIdRef.current)) {
+      selectionAnchorSegmentIdRef.current = null;
+    }
+  }, [segments]);
+
+  function handleClearSelectedSegments() {
+    setSelectedSegmentIds([]);
+    selectionAnchorSegmentIdRef.current = null;
+  }
+
+  function handleToggleSegmentSelected(segmentId, checked, shiftKey = false) {
+    setSelectedSegmentIds((ids) => applySegmentSelectionClick({
+      selectedIds: ids,
+      visibleSegments: segments,
+      targetId: segmentId,
+      checked,
+      shiftKey,
+      anchorId: selectionAnchorSegmentIdRef.current,
+    }));
+    selectionAnchorSegmentIdRef.current = segmentId;
+  }
 
   return (
     <GlassCard>
@@ -136,7 +163,7 @@ export default function SynthesisTimelineCard({
           <Button variant="secondary" size="sm" onClick={() => handleRegenerateSelected()} disabled={isRunning}>
             重新生成已选段落
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => setSelectedSegmentIds([])} disabled={isRunning}>
+          <Button variant="ghost" size="sm" onClick={handleClearSelectedSegments} disabled={isRunning}>
             清空选择
           </Button>
         </div>
@@ -151,6 +178,7 @@ export default function SynthesisTimelineCard({
             onClick={async () => {
               const ids = recommendedRegenerateIds.length ? recommendedRegenerateIds : staleTargetIds;
               setSelectedSegmentIds(ids);
+              selectionAnchorSegmentIdRef.current = ids[0] || null;
               await handleRegenerateSelected(ids);
             }}
           >
@@ -199,11 +227,7 @@ export default function SynthesisTimelineCard({
                     canReorder={canReorderTimeline}
                     isRunning={isRunning}
                     selected={selected}
-                    onToggleSelected={(checked) =>
-                      setSelectedSegmentIds((ids) =>
-                        checked ? (ids.includes(seg.segment_id) ? ids : [...ids, seg.segment_id]) : ids.filter((id) => id !== seg.segment_id)
-                      )
-                    }
+                    onToggleSelected={(checked, shiftKey) => handleToggleSegmentSelected(seg.segment_id, checked, shiftKey)}
                     staleItem={staleItem}
                     staleLabel={staleLabel}
                     segmentTiming={segmentTimings[seg.segment_id]}
@@ -222,6 +246,7 @@ export default function SynthesisTimelineCard({
                     handleSingleSegmentSynthesis={handleSingleSegmentSynthesis}
                     handleDeleteSegment={handleDeleteSegment}
                     setInsertAfterSegmentId={setInsertAfterSegmentId}
+                    onLocateFullAudioSegment={onLocateFullAudioSegment}
                     playFrom={playFrom}
                     pushToast={pushToast}
                   />

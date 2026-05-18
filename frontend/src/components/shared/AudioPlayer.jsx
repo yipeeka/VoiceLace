@@ -1,5 +1,5 @@
 import { Pause, Play, Volume2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { API_ORIGIN } from "../../utils/api";
 
@@ -126,17 +126,46 @@ export default function AudioPlayer({
   showTime = true,
   autoPlaySignal = 0,
   pauseSignal = 0,
+  seekToSeconds = null,
+  seekSignal = 0,
+  playOnSeek = false,
   onPlayStateChange = null,
   onTimeUpdate: onTimeUpdateProp = null,
 }) {
   const audioRef = useRef(null);
   const canvasRef = useRef(null);
   const pendingAutoPlayRef = useRef(false);
+  const pendingSeekSecondsRef = useRef(null);
+  const durationRef = useRef(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isReady, setIsReady] = useState(false);
   const [resolvedPeaks, setResolvedPeaks] = useState(peaks || null);
+
+  const applySeek = useCallback((seconds) => {
+    const audio = audioRef.current;
+    const rawSeconds = Number(seconds);
+    if (!audio || !Number.isFinite(rawSeconds)) {
+      return false;
+    }
+    const maxSeconds = Number.isFinite(audio.duration) && audio.duration > 0
+      ? audio.duration
+      : Number(durationRef.current || 0);
+    const nextTime = maxSeconds > 0
+      ? Math.max(0, Math.min(maxSeconds, rawSeconds))
+      : Math.max(0, rawSeconds);
+    try {
+      audio.currentTime = nextTime;
+    } catch {
+      pendingSeekSecondsRef.current = nextTime;
+      return false;
+    }
+    const resolvedTime = audio.currentTime || nextTime;
+    setCurrentTime(resolvedTime);
+    onTimeUpdateProp?.(resolvedTime);
+    return true;
+  }, [onTimeUpdateProp]);
 
   useEffect(() => {
     setResolvedPeaks(peaks || null);
@@ -150,12 +179,21 @@ export default function AudioPlayer({
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
+    durationRef.current = 0;
+    pendingSeekSecondsRef.current = null;
 
     const onLoadedMetadata = () => {
-      setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
+      const nextDuration = Number.isFinite(audio.duration) ? audio.duration : 0;
+      durationRef.current = nextDuration;
+      setDuration(nextDuration);
     };
     const onCanPlay = () => {
       setIsReady(true);
+      if (pendingSeekSecondsRef.current !== null) {
+        const nextSeek = pendingSeekSecondsRef.current;
+        pendingSeekSecondsRef.current = null;
+        applySeek(nextSeek);
+      }
       if (pendingAutoPlayRef.current) {
         pendingAutoPlayRef.current = false;
         audio.play().then(
@@ -190,8 +228,9 @@ export default function AudioPlayer({
       setIsReady(false);
       setCurrentTime(0);
       setDuration(0);
+      durationRef.current = 0;
     };
-  }, [audioUrl, onTimeUpdateProp]);
+  }, [audioUrl, onTimeUpdateProp, applySeek]);
 
   useEffect(() => {
     onPlayStateChange?.(isPlaying);
@@ -216,6 +255,33 @@ export default function AudioPlayer({
       );
     }
   }, [autoPlaySignal, audioUrl, isReady]);
+
+  useEffect(() => {
+    if (!audioUrl || !seekSignal) {
+      return;
+    }
+    const rawSeconds = Number(seekToSeconds);
+    if (!Number.isFinite(rawSeconds)) {
+      return;
+    }
+    pendingSeekSecondsRef.current = rawSeconds;
+    if (isReady && applySeek(rawSeconds)) {
+      pendingSeekSecondsRef.current = null;
+    }
+    if (playOnSeek) {
+      pendingAutoPlayRef.current = true;
+      const audio = audioRef.current;
+      if (audio && isReady) {
+        audio.play().then(
+          () => {
+            pendingAutoPlayRef.current = false;
+            setIsPlaying(true);
+          },
+          () => setIsPlaying(false),
+        );
+      }
+    }
+  }, [audioUrl, seekSignal, seekToSeconds, playOnSeek, isReady, applySeek]);
 
   useEffect(() => {
     if (!audioUrl || !pauseSignal) {

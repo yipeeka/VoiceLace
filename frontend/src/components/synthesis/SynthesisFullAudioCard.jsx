@@ -16,6 +16,9 @@ export default function SynthesisFullAudioCard({
   gapDurationMs,
   useSourceTimeline = false,
   onCurrentTimeChange,
+  seekToSeconds = null,
+  seekSignal = 0,
+  playOnSeek = false,
 }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [playSignal, setPlaySignal] = useState(0);
@@ -58,6 +61,9 @@ export default function SynthesisFullAudioCard({
         onCurrentTimeChange={onCurrentTimeChange}
         autoPlaySignal={playSignal}
         pauseSignal={pauseSignal}
+        seekToSeconds={seekToSeconds}
+        seekSignal={seekSignal}
+        playOnSeek={playOnSeek}
         onPlayStateChange={setIsPlaying}
       />
     </GlassCard>

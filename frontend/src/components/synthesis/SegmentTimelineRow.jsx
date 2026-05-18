@@ -8,9 +8,16 @@ import CharacterBadge from "../shared/CharacterBadge";
 import AudioPlayer from "../shared/AudioPlayer";
 import Button from "../ui/Button";
 import { ConfirmDialog } from "../ui/Dialog";
+import { getStoredSegmentDurationMismatch } from "../../utils/segmentTiming";
 
 const STATUS_ICON = { done: "✅", running: "⏳", pending: "⬜", error: "❌", skipped: "⏭", stale: "🟨", missing: "⚠", failed: "❌" };
 const STATUS_ROW_CLS = { done: "done", running: "running", pending: "pending", error: "error", stale: "stale", missing: "missing", failed: "error" };
+
+function isInteractiveRowTarget(target) {
+  return Boolean(target?.closest?.(
+    "button, input, label, select, textarea, a, [role='button'], [role='slider'], .dragHandle, .audioPlayer, .synthSegmentActions"
+  ));
+}
 
 export default function SegmentTimelineRow({
   API_ORIGIN,
@@ -37,6 +44,7 @@ export default function SegmentTimelineRow({
   handleSingleSegmentSynthesis,
   handleDeleteSegment,
   setInsertAfterSegmentId,
+  onLocateFullAudioSegment,
   playFrom,
   pushToast,
 }) {
@@ -50,6 +58,13 @@ export default function SegmentTimelineRow({
   const segStatus = seg.display_status ?? seg.status ?? "pending";
   const staleTone = staleItem?.status === "ready" ? "success" : "warning";
   const canPlaySegment = Boolean(seg.audio_url) && segStatus !== "missing" && segStatus !== "failed";
+  const durationMismatch = getStoredSegmentDurationMismatch(seg);
+  const canLocateFullAudio = Boolean(
+    segmentTiming &&
+    Number.isFinite(Number(segmentTiming.start)) &&
+    Number(segmentTiming.start) >= 0 &&
+    typeof onLocateFullAudioSegment === "function"
+  );
 
   useEffect(() => {
     if (!actionsOpen) return undefined;
@@ -77,12 +92,17 @@ export default function SegmentTimelineRow({
       <div
         ref={setNodeRef}
         data-segment-id={seg.segment_id}
-        className={`synthSegmentRow ${STATUS_ROW_CLS[segStatus] ?? "pending"} ${actionsOpen ? "actionsOpen" : ""} ${recentlyUpdatedSegmentId === seg.segment_id ? "updated" : ""}`}
+        className={`synthSegmentRow ${STATUS_ROW_CLS[segStatus] ?? "pending"} ${currentSegmentId === seg.segment_id ? "active" : ""} ${durationMismatch?.isMismatch ? "durationMismatch" : ""} ${canLocateFullAudio ? "audioLinked" : ""} ${actionsOpen ? "actionsOpen" : ""} ${recentlyUpdatedSegmentId === seg.segment_id ? "updated" : ""}`}
+        onClick={(event) => {
+          if (isEditing || !canLocateFullAudio || isInteractiveRowTarget(event.target)) {
+            return;
+          }
+          onLocateFullAudioSegment(seg);
+        }}
         style={{
           transform: CSS.Transform.toString(transform),
           transition,
           opacity: isDragging ? 0.6 : 1,
-          ...(currentSegmentId === seg.segment_id ? { borderColor: "var(--accent-primary)" } : {}),
           ...(isInsertAnchor ? { borderColor: "var(--accent-secondary)" } : {}),
           ...(isEditing ? { alignItems: "flex-start", flexWrap: "wrap" } : {}),
         }}
@@ -103,7 +123,10 @@ export default function SegmentTimelineRow({
           aria-label={`选择第 ${(seg.index ?? 0) + 1} 段`}
           checked={selected}
           disabled={isRunning}
-          onChange={(e) => onToggleSelected(e.target.checked)}
+          onChange={(event) => onToggleSelected(
+            event.target.checked,
+            Boolean(event.shiftKey || event.nativeEvent?.shiftKey)
+          )}
         />
       </label>
       <span className="synthSegmentIndex">#{(seg.index ?? 0) + 1}</span>
@@ -119,10 +142,18 @@ export default function SegmentTimelineRow({
           )}
         </div>
       </div>
-      {staleLabel || seg.draft_status === "unsaved" ? (
+      {staleLabel || seg.draft_status === "unsaved" || durationMismatch?.isMismatch ? (
         <div className="synthSegmentStateBadges">
           {staleLabel ? <span className={`statusBadge ${staleTone}`}>{staleLabel}</span> : null}
           {seg.draft_status === "unsaved" ? <span className="statusBadge warning">未保存改动</span> : null}
+          {durationMismatch?.isMismatch ? (
+            <span
+              className="statusBadge warning"
+              title={`剧本预检：目标时长 ${durationMismatch.targetSec.toFixed(2)}s，duration ${durationMismatch.expectedSec.toFixed(2)}s`}
+            >
+              可能差距过大
+            </span>
+          ) : null}
         </div>
       ) : null}
 

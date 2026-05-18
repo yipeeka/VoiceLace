@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
 from backend.api.llm_routes import enqueue_parse_task
@@ -15,6 +17,37 @@ from backend.services.audio_vocal_separation_service import normalize_demucs_mod
 from backend.state import get_app_state
 
 router = APIRouter()
+
+
+def _run_ffmpeg_extract_audio(input_path: Path, output_path: Path) -> None:
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(input_path),
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-c:a",
+        "pcm_s16le",
+        str(output_path),
+    ]
+    try:
+        subprocess.run(cmd, capture_output=True, check=True)
+    except FileNotFoundError as exc:
+        raise RuntimeError("未找到 ffmpeg，请先安装并加入 PATH。") from exc
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or b"").decode("utf-8", errors="ignore").strip()
+        raise RuntimeError(f"ffmpeg 提取音频失败：{stderr or exc}") from exc
+    if not output_path.exists() or output_path.stat().st_size <= 44:
+        raise RuntimeError("未从视频中提取到有效音频。")
+
+
+def _cleanup_paths(paths: list[Path]) -> None:
+    for path in paths:
+        path.unlink(missing_ok=True)
 
 
 def _parse_bool_form(val: str | None, default: bool = False) -> bool:
@@ -61,6 +94,47 @@ def _get_vocal_separation_options(state, *, enabled_form: str | None, model_form
         "repo_dir": str(getattr(config, "asr_vocal_separation_repo_dir", "") or ""),
         "device": str(getattr(config, "asr_vocal_separation_device", "") or getattr(config, "asr_device", "cpu") or "cpu"),
     }
+
+
+@router.post("/extract-audio")
+async def extract_audio_from_upload(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    state=Depends(get_app_state),
+):
+    suffix = Path(file.filename or "upload.mp4").suffix or ".mp4"
+    input_path: Path | None = None
+    output_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=suffix,
+            dir=state.settings.output_dir,
+        ) as tmp_file:
+            tmp_file.write(await file.read())
+            input_path = Path(tmp_file.name)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav", dir=state.settings.output_dir) as out_file:
+            output_path = Path(out_file.name)
+        await asyncio.to_thread(_run_ffmpeg_extract_audio, input_path, output_path)
+        background_tasks.add_task(_cleanup_paths, [input_path, output_path])
+        return FileResponse(
+            output_path,
+            media_type="audio/wav",
+            filename=f"{Path(file.filename or 'video').stem}-audio.wav",
+            background=background_tasks,
+        )
+    except RuntimeError as exc:
+        if input_path is not None:
+            input_path.unlink(missing_ok=True)
+        if output_path is not None:
+            output_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        if input_path is not None:
+            input_path.unlink(missing_ok=True)
+        if output_path is not None:
+            output_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=503, detail=f"视频音频提取不可用：{exc}") from exc
 
 
 async def _run_project_from_audio_task(task_id: str, task_input: dict, state) -> None:

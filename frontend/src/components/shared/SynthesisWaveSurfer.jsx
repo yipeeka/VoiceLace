@@ -58,6 +58,9 @@ export default function SynthesisWaveSurfer({
   onCurrentTimeChange = null,
   autoPlaySignal = 0,
   pauseSignal = 0,
+  seekToSeconds = null,
+  seekSignal = 0,
+  playOnSeek = false,
   onPlayStateChange = null,
 }) {
   const containerRef = useRef(null);
@@ -138,14 +141,23 @@ export default function SynthesisWaveSurfer({
 
     return segments.map((seg, idx) => {
       const dur = (seg.duration_ms || 2000) / 1000;
+      const sourceStartMs = Number(seg.source_start_ms);
+      const sourceEndMs = Number(seg.source_end_ms);
+      const hasSourceTiming =
+        useSourceTimeline &&
+        Number.isFinite(sourceStartMs) &&
+        Number.isFinite(sourceEndMs) &&
+        sourceStartMs >= 0 &&
+        sourceEndMs > sourceStartMs;
       let start = cursor;
-      if (useSourceTimeline) {
-        const sourceStartMs = Number(seg.source_start_ms);
-        if (Number.isFinite(sourceStartMs) && sourceStartMs >= 0) {
-          start = sourceStartMs / 1000;
-        }
+      let end = start + dur;
+      if (hasSourceTiming) {
+        start = sourceStartMs / 1000;
+        end = sourceEndMs / 1000;
+      } else if (useSourceTimeline && Number.isFinite(sourceStartMs) && sourceStartMs >= 0) {
+        start = sourceStartMs / 1000;
+        end = start + dur;
       }
-      const end = start + dur;
       if (!speakerColors[seg.speaker]) {
         speakerColors[seg.speaker] = colors[colorIndex % colors.length];
         colorIndex += 1;
@@ -329,6 +341,35 @@ export default function SynthesisWaveSurfer({
     }
     wavesurferRef.current.pause();
   }, [pauseSignal, isReady]);
+
+  useEffect(() => {
+    if (!seekSignal || !wavesurferRef.current || !isReady) {
+      return;
+    }
+    const rawSeconds = Number(seekToSeconds);
+    if (!Number.isFinite(rawSeconds)) {
+      return;
+    }
+    const nextTime = duration > 0
+      ? Math.max(0, Math.min(duration, rawSeconds))
+      : Math.max(0, rawSeconds);
+    try {
+      if (typeof wavesurferRef.current.setTime === "function") {
+        wavesurferRef.current.setTime(nextTime);
+      } else if (duration > 0) {
+        wavesurferRef.current.seekTo(nextTime / duration);
+      }
+      setCurrentTime(nextTime);
+      if (playOnSeek) {
+        wavesurferRef.current.play().catch(() => {
+          setIsPlaying(false);
+          setWaveformError("音频尚未就绪，请稍后重试。");
+        });
+      }
+    } catch {
+      setWaveformError("定位音频失败，请稍后重试。");
+    }
+  }, [seekSignal, seekToSeconds, playOnSeek, isReady, duration]);
 
   if (!audioUrl) return null;
 

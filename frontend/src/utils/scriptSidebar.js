@@ -41,6 +41,50 @@ export function pruneSelectedSegmentIds(selectedIds = [], visibleSegments = []) 
   return (selectedIds || []).filter((id) => visibleIds.has(id));
 }
 
+function getSegmentListIds(segments = []) {
+  return (segments || [])
+    .map((segment) => segment?.segment_id || segment?.id)
+    .filter(Boolean);
+}
+
+export function applySegmentSelectionClick({
+  selectedIds = [],
+  visibleSegments = [],
+  targetId = "",
+  checked = true,
+  shiftKey = false,
+  anchorId = "",
+} = {}) {
+  const visibleIds = getSegmentListIds(visibleSegments);
+  if (!targetId || !visibleIds.includes(targetId)) {
+    return selectedIds || [];
+  }
+
+  const selectedSet = new Set(selectedIds || []);
+  const targetIndex = visibleIds.indexOf(targetId);
+  const anchorIndex = anchorId ? visibleIds.indexOf(anchorId) : -1;
+  if (shiftKey && anchorIndex >= 0 && targetIndex >= 0) {
+    const start = Math.min(anchorIndex, targetIndex);
+    const end = Math.max(anchorIndex, targetIndex);
+    visibleIds.slice(start, end + 1).forEach((id) => {
+      if (checked) {
+        selectedSet.add(id);
+      } else {
+        selectedSet.delete(id);
+      }
+    });
+  } else if (checked) {
+    selectedSet.add(targetId);
+  } else {
+    selectedSet.delete(targetId);
+  }
+
+  const visibleIdSet = new Set(visibleIds);
+  const orderedVisibleSelection = visibleIds.filter((id) => selectedSet.has(id));
+  const hiddenSelection = (selectedIds || []).filter((id) => !visibleIdSet.has(id) && selectedSet.has(id));
+  return [...hiddenSelection, ...orderedVisibleSelection];
+}
+
 export function getInsertAnchorLabel(segments = [], insertAfterSegmentId = null) {
   if (!insertAfterSegmentId) {
     return "";

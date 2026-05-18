@@ -36,6 +36,7 @@ import {
   resolveSegmentDisplayStatus,
   resolveWorkflowStatus,
 } from "../utils/stale";
+import { buildSegmentTimingCheck } from "../utils/segmentTiming";
 
 function formatTimeMs(ms) {
   if (!ms || isNaN(ms)) return "0:00";
@@ -47,6 +48,7 @@ function formatTimeMs(ms) {
 
 const STATUS_FILTERS = new Set(["all", "stale", "done", "missing", "failed"]);
 const SYNTHESIS_PANELS = new Set(["synthesis", "postprocess"]);
+const SEGMENT_BOUNDARY_TOLERANCE_MS = 60;
 
 function readSynthesisQueryState() {
   if (typeof window === "undefined") {
@@ -96,6 +98,8 @@ export default function SynthesisPage() {
   const [recentlyUpdatedSegmentId, setRecentlyUpdatedSegmentId] = useState(null);
   const [resolvedSegmentDurations, setResolvedSegmentDurations] = useState({});
   const [fullAudioCurrentTime, setFullAudioCurrentTime] = useState(0);
+  const [fullAudioSeekSeconds, setFullAudioSeekSeconds] = useState(0);
+  const [fullAudioSeekSignal, setFullAudioSeekSignal] = useState(0);
   const [diffPreviewOpen, setDiffPreviewOpen] = useState(false);
   const [isUploadingPostAsset, setIsUploadingPostAsset] = useState(false);
   const [expandedSynthesisPanel, setExpandedSynthesisPanel] = useState(queryState.panel);
@@ -196,6 +200,8 @@ export default function SynthesisPage() {
       setRecentlyUpdatedSegmentId(null);
       setResolvedSegmentDurations({});
       setFullAudioCurrentTime(0);
+      setFullAudioSeekSeconds(0);
+      setFullAudioSeekSignal(0);
       setExpandedSynthesisPanel("synthesis");
       if (updatedRowTimerRef.current) {
         clearTimeout(updatedRowTimerRef.current);
@@ -459,6 +465,8 @@ export default function SynthesisPage() {
         source_start_ms: segment.source_start_ms,
         source_end_ms: segment.source_end_ms,
         source_duration_ms: segment.source_duration_ms,
+        tts_overrides: segment.tts_overrides,
+        timing_check: segment.timing_check,
         status: baseStatus,
         display_status: displayStatus,
         workflow_status: resolveWorkflowStatus(displayStatus),
@@ -591,14 +599,23 @@ export default function SynthesisPage() {
       const durationMs = Number(seg.duration_ms || 0) > 0
         ? Number(seg.duration_ms || 0)
         : Number(resolvedSegmentDurations[seg.segment_id] || 0);
+      const sourceStartMs = Number(seg.source_start_ms);
+      const sourceEndMs = Number(seg.source_end_ms);
+      const hasSourceTiming =
+        useSourceTimeline &&
+        Number.isFinite(sourceStartMs) &&
+        Number.isFinite(sourceEndMs) &&
+        sourceStartMs >= 0 &&
+        sourceEndMs > sourceStartMs;
       let start = cursor;
-      if (useSourceTimeline) {
-        const sourceStartMs = Number(seg.source_start_ms);
-        if (Number.isFinite(sourceStartMs) && sourceStartMs >= 0) {
-          start = sourceStartMs;
-        }
+      let resolvedEnd = start + durationMs;
+      if (hasSourceTiming) {
+        start = sourceStartMs;
+        resolvedEnd = sourceEndMs;
+      } else if (useSourceTimeline && Number.isFinite(sourceStartMs) && sourceStartMs >= 0) {
+        start = sourceStartMs;
+        resolvedEnd = start + durationMs;
       }
-      const resolvedEnd = start + durationMs;
       timings[seg.segment_id] = { start, end: resolvedEnd };
       cursor = useSourceTimeline ? Math.max(cursor, resolvedEnd) : resolvedEnd + gapMs;
     });
@@ -607,7 +624,17 @@ export default function SynthesisPage() {
 
   const { isAutoPlay, currentSegmentId, playFrom, stop } = usePlaybackQueue(visibleSegments);
   const fullAudioCurrentSegmentId = useMemo(() => {
-    const currentMs = Math.max(0, Number(fullAudioCurrentTime || 0) * 1000);
+    const currentMs = Math.max(0, Math.round(Number(fullAudioCurrentTime || 0) * 1000));
+    const boundarySegment = segments.find((segment) => {
+      const timing = segmentTimings[segment.segment_id];
+      if (!timing) {
+        return false;
+      }
+      return Math.abs(currentMs - Number(timing.start)) <= SEGMENT_BOUNDARY_TOLERANCE_MS;
+    });
+    if (boundarySegment) {
+      return boundarySegment.segment_id;
+    }
     const activeSegment = segments.find((segment) => {
       const timing = segmentTimings[segment.segment_id];
       if (!timing) {
@@ -618,6 +645,23 @@ export default function SynthesisPage() {
     return activeSegment?.segment_id || null;
   }, [fullAudioCurrentTime, segments, segmentTimings]);
   const highlightedSegmentId = currentSegmentId || fullAudioCurrentSegmentId;
+
+  function handleLocateFullAudioSegment(segment) {
+    if (!fullAudioUrl) {
+      pushToast({ title: "完整音频尚未生成，无法定位播放位置。", tone: "warning" });
+      return;
+    }
+    const timing = segmentTimings[segment?.segment_id];
+    const startMs = Number(timing?.start);
+    if (!Number.isFinite(startMs) || startMs < 0) {
+      pushToast({ title: "该片段缺少完整音频时间位置。", tone: "warning" });
+      return;
+    }
+    const seekSeconds = startMs / 1000;
+    setFullAudioCurrentTime(seekSeconds);
+    setFullAudioSeekSeconds(seekSeconds);
+    setFullAudioSeekSignal((value) => value + 1);
+  }
 
   const totalSegments = draftScript?.segments?.length ?? 0;
   const progressPct = totalSegments > 0 ? Math.round((progress.current / totalSegments) * 100) : 0;
@@ -679,7 +723,7 @@ export default function SynthesisPage() {
     }
     const normalized = normalizeSegmentFromEditorDraft(segmentDraft);
     if (!normalized.ok) {
-      pushToast({ title: `tts_overrides JSON 格式错误：${normalized.error}`, tone: "error" });
+      pushToast({ title: `片段编辑错误：${normalized.error}`, tone: "error" });
       return;
     }
     setDraftScript((current) => ({
@@ -713,7 +757,7 @@ export default function SynthesisPage() {
     }
     const normalized = normalizeSegmentFromEditorDraft(newSegment);
     if (!normalized.ok) {
-      pushToast({ title: `新增片段 tts_overrides JSON 格式错误：${normalized.error}`, tone: "error" });
+      pushToast({ title: `新增片段错误：${normalized.error}`, tone: "error" });
       return;
     }
     const toAdd = {
@@ -785,7 +829,7 @@ export default function SynthesisPage() {
     if (editingSegmentId && segmentDraft?.id === editingSegmentId) {
       const normalized = normalizeSegmentFromEditorDraft(segmentDraft);
       if (!normalized.ok) {
-        pushToast({ title: `当前编辑片段 tts_overrides JSON 格式错误：${normalized.error}`, tone: "error" });
+        pushToast({ title: `当前编辑片段错误：${normalized.error}`, tone: "error" });
         return;
       }
       workingDraftScript = {
@@ -810,6 +854,7 @@ export default function SynthesisPage() {
           segment.tts_overrides && typeof segment.tts_overrides === "object" && !Array.isArray(segment.tts_overrides)
             ? segment.tts_overrides
             : {},
+        timing_check: buildSegmentTimingCheck(segment),
       })),
     };
     const updated = await saveScript({ projectId: currentProject.id, script: payload });
@@ -1132,6 +1177,8 @@ export default function SynthesisPage() {
         gapDurationMs={Number(config.gap_duration_ms || 300)}
         useSourceTimeline={useSourceTimeline}
         onCurrentTimeChange={setFullAudioCurrentTime}
+        seekToSeconds={fullAudioSeekSeconds}
+        seekSignal={fullAudioSeekSignal}
       />
 
       <div className="pageGrid sidebarLayout">
@@ -1206,6 +1253,7 @@ export default function SynthesisPage() {
           handleDeleteSegment={handleDeleteSegment}
           setInsertAfterSegmentId={setInsertAfterSegmentId}
           insertAfterSegmentId={insertAfterSegmentId}
+          onLocateFullAudioSegment={handleLocateFullAudioSegment}
           playFrom={playFrom}
           isAutoPlay={isAutoPlay}
           stop={stop}

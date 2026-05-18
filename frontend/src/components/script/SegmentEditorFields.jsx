@@ -26,6 +26,8 @@ export default function SegmentEditorFields({
   const currentSpeaker = (draft?.speaker || "").trim();
   const isKnownSpeaker = knownSpeakerOptions.some((item) => item.value === currentSpeaker);
   const speakerSelectValue = isKnownSpeaker ? currentSpeaker : "__new__";
+  const canEditSourceTiming = draft?.sourceBoundsStartMs !== null && draft?.sourceBoundsStartMs !== undefined
+    && draft?.sourceBoundsEndMs !== null && draft?.sourceBoundsEndMs !== undefined;
 
   const resolvedSpeakerOptions = useMemo(
     () => [
@@ -102,6 +104,41 @@ export default function SegmentEditorFields({
       />
       {includeAdvanced ? (
         <>
+          {canEditSourceTiming ? (
+            <div className={`segmentTimingEditor${compact ? " compact" : ""}`}>
+              <div className="formGroup">
+                <label className="formLabel" htmlFor={`${fieldId}-source-start`}>
+                  起始时间
+                </label>
+                <input
+                  id={`${fieldId}-source-start`}
+                  className="textInput"
+                  name="sourceStart"
+                  autoComplete="off"
+                  value={draft?.sourceStartText || ""}
+                  onChange={(e) => onFieldChange("sourceStartText", e.target.value)}
+                  placeholder="HH:MM:SS.mmm"
+                />
+              </div>
+              <div className="formGroup">
+                <label className="formLabel" htmlFor={`${fieldId}-source-end`}>
+                  终止时间
+                </label>
+                <input
+                  id={`${fieldId}-source-end`}
+                  className="textInput"
+                  name="sourceEnd"
+                  autoComplete="off"
+                  value={draft?.sourceEndText || ""}
+                  onChange={(e) => onFieldChange("sourceEndText", e.target.value)}
+                  placeholder="HH:MM:SS.mmm"
+                />
+              </div>
+              <div className="muted segmentTimingHint">
+                只能在原时间范围内收窄，保存后会同步更新片段时间码。
+              </div>
+            </div>
+          ) : null}
           <input
             id={`${fieldId}-non-verbal`}
             className="textInput"

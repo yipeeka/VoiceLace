@@ -5,6 +5,13 @@ import AudioClipper from "./AudioClipper";
 import GlassCard from "../shared/GlassCard";
 import Button from "../ui/Button";
 
+function formatRecordingElapsed(seconds) {
+  const safeSeconds = Math.max(0, Math.floor(Number(seconds || 0)));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainingSeconds = safeSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+}
+
 export default function AsrRecognitionCard({
   asrBackendConfigured,
   asrLanguage,
@@ -13,8 +20,10 @@ export default function AsrRecognitionCard({
   backendUsed,
   error,
   isCreatingProject,
+  isExtractingAudio,
   isQwen3Backend,
   isRecording,
+  recordingElapsedSec,
   isTranscribing,
   modelFiles,
   onAbortRecognize,
@@ -47,8 +56,8 @@ export default function AsrRecognitionCard({
   const backendSelectId = `${generatedId}-asr-backend`;
   const languageSelectId = `${generatedId}-asr-language`;
   const demucsSelectId = `${generatedId}-demucs-model`;
-  const isBusy = isTranscribing || isRecording || isCreatingProject;
-  const uploadDisabled = isTranscribing || isCreatingProject;
+  const isBusy = isTranscribing || isRecording || isExtractingAudio || isCreatingProject;
+  const uploadDisabled = isTranscribing || isExtractingAudio || isCreatingProject;
 
   return (
     <GlassCard>
@@ -56,7 +65,7 @@ export default function AsrRecognitionCard({
         <Mic size={16} />
         语音识别
       </h2>
-      <p className="cardSubtitle">支持录音与上传音频，识别结果可直接接入文本输入。</p>
+      <p className="cardSubtitle">支持录音、上传音频或视频；视频会先提取音频再识别。</p>
 
       <div className="muted">ASR 后端：{asrBackendConfigured === "qwen3_crispasr" ? "Qwen3-ASR (CrispASR)" : "Whisper / Faster-Whisper"}</div>
 
@@ -162,9 +171,9 @@ export default function AsrRecognitionCard({
         <input
           ref={uploadInputRef}
           type="file"
-          accept="audio/*"
+          accept="audio/*,video/*"
           onChange={onUpload}
-          disabled={isTranscribing || isRecording || isCreatingProject}
+          disabled={isTranscribing || isRecording || isExtractingAudio || isCreatingProject}
           className="hiddenFileInput"
           tabIndex={-1}
         />
@@ -177,6 +186,11 @@ export default function AsrRecognitionCard({
         <Button variant="secondary" onClick={onUnloadAsr} disabled={isBusy}>
           卸载 ASR
         </Button>
+        {isRecording ? (
+          <span className="recordingDurationBadge" aria-live="polite">
+            录音中 · {formatRecordingElapsed(recordingElapsedSec)}
+          </span>
+        ) : null}
       </div>
       {asrUnavailableReason ? <div className="statusBadge warning">{asrUnavailableReason}</div> : null}
 
@@ -193,6 +207,7 @@ export default function AsrRecognitionCard({
       ) : null}
 
       {isTranscribing ? <div className="statusBadge default" aria-live="polite">识别中…</div> : null}
+      {isExtractingAudio ? <div className="statusBadge default" aria-live="polite">正在从视频提取音频…</div> : null}
       {isCreatingProject ? <div className="statusBadge default" aria-live="polite">正在分块转写并创建项目…</div> : null}
       {backendUsed ? <div className="muted">实际后端：{backendUsed}</div> : null}
       {modelFiles?.main_model_path ? <div className="muted" title={modelFiles.main_model_path}>模型：{modelFiles.main_model_path}</div> : null}

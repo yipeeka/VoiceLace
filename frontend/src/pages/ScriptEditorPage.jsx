@@ -30,9 +30,10 @@ import {
   mergeSelectedSegments,
   moveSelectedSegmentBlock,
 } from "../utils/scriptEditorState";
-import { buildCharacterStats, buildSpeakerOptions, filterSegmentsBySpeaker, getInsertAnchorLabel } from "../utils/scriptSidebar";
+import { applySegmentSelectionClick, buildCharacterStats, buildSpeakerOptions, filterSegmentsBySpeaker, getInsertAnchorLabel } from "../utils/scriptSidebar";
 import { hasEditingDraftChanges } from "../utils/scriptEditorDirty";
 import { computeScriptDiff, normalizeDraftScript } from "../utils/scriptDiff";
+import { buildSegmentTimingCheck, getSegmentDurationMismatch } from "../utils/segmentTiming";
 
 const QC_FOCUS_SEGMENTS_KEY = "beautyvoice.qc.focus_segments";
 const QC_FOCUS_SEGMENT_LEGACY_KEY = "beautyvoice.qc.focus_segment_id";
@@ -161,6 +162,12 @@ function readScriptSpeakerFilterFromLocation() {
   return new URL(window.location.href).searchParams.get("scriptSpeaker") || "all";
 }
 
+function isSegmentCardInteractiveTarget(target) {
+  return Boolean(target?.closest?.(
+    "button, input, label, select, textarea, a, [role='button'], .dragHandle, .segmentActions, .audioPlayer"
+  ));
+}
+
 function buildSrtTextFromSegments(segments) {
   const rows = (Array.isArray(segments) ? segments : [])
     .map((segment) => {
@@ -213,6 +220,7 @@ function SortableSegmentCard({
   canSelect,
   isSelected,
   onToggleSelected,
+  onLocateSource,
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: segment.id,
@@ -243,6 +251,7 @@ function SortableSegmentCard({
     segment?.tts_overrides && Number.isFinite(Number(segment.tts_overrides.duration))
       ? Number(segment.tts_overrides.duration).toFixed(2)
       : "";
+  const durationMismatch = getSegmentDurationMismatch(segment);
 
   return (
     <div
@@ -254,7 +263,13 @@ function SortableSegmentCard({
         ...(isSourceActive ? { outline: "2px solid color-mix(in srgb, var(--accent-primary) 72%, transparent)", outlineOffset: "-2px" } : {}),
         ...(isFocused ? { outline: "1px solid var(--accent-primary)", outlineOffset: "-1px" } : {}),
       }}
-      className={`segmentCard ${isEditing ? "editing" : ""} ${isSelected ? "selected" : ""} ${isInsertAnchor ? "insertAnchor" : ""} ${isSourceActive ? "sourceActive" : ""} ${qcSeverity ? `qc-${qcSeverity}` : ""}`}
+      className={`segmentCard ${isEditing ? "editing" : ""} ${isSelected ? "selected" : ""} ${durationMismatch?.isMismatch ? "durationMismatch" : ""} ${onLocateSource && hasSourceRange ? "sourceLinked" : ""} ${isInsertAnchor ? "insertAnchor" : ""} ${isSourceActive ? "sourceActive" : ""} ${qcSeverity ? `qc-${qcSeverity}` : ""}`}
+      onClick={(event) => {
+        if (isEditing || !onLocateSource || !hasSourceRange || isSegmentCardInteractiveTarget(event.target)) {
+          return;
+        }
+        onLocateSource(segment);
+      }}
     >
       {(canEdit || canSelect) && !isEditing ? (
         <div className="segmentControlRail">
@@ -277,7 +292,11 @@ function SortableSegmentCard({
                 type="checkbox"
                 checked={Boolean(isSelected)}
                 disabled={isSaving}
-                onChange={() => onToggleSelected(segment.id)}
+                onChange={(event) => onToggleSelected(
+                  segment.id,
+                  event.target.checked,
+                  Boolean(event.shiftKey || event.nativeEvent?.shiftKey)
+                )}
                 aria-label={`${isSelected ? "取消选择" : "选择"}第 ${(segment.index ?? 0) + 1} 段`}
               />
             </label>
@@ -364,6 +383,11 @@ function SortableSegmentCard({
                 {speedValue ? ` · speed ${speedValue}` : ""}
               </div>
             ) : null}
+            {durationMismatch?.isMismatch ? (
+              <div className="segmentTimingWarning">
+                目标时长 {durationMismatch.targetSec.toFixed(2)}s 与 duration {durationMismatch.expectedSec.toFixed(2)}s 差距较大
+              </div>
+            ) : null}
           </>
         )}
       </div>
@@ -442,6 +466,7 @@ export default function ScriptEditorPage() {
   const fileInputRef = useRef(null);
   const lastProjectIdRef = useRef(null);
   const segmentListRef = useRef(null);
+  const selectionAnchorSegmentIdRef = useRef(null);
   const qcJumpCursorRef = useRef(-1);
 
   const [savedScript, setSavedScript] = useState(() => normalizeDraftScript(script));
@@ -463,6 +488,8 @@ export default function ScriptEditorPage() {
   const [sourceAudioPlaying, setSourceAudioPlaying] = useState(false);
   const [sourceAudioPlaySignal, setSourceAudioPlaySignal] = useState(0);
   const [sourceAudioPauseSignal, setSourceAudioPauseSignal] = useState(0);
+  const [sourceAudioSeekSeconds, setSourceAudioSeekSeconds] = useState(0);
+  const [sourceAudioSeekSignal, setSourceAudioSeekSignal] = useState(0);
   const setProjectSaveAction = useUiStore((state) => state.setProjectSaveAction);
   const clearProjectSaveAction = useUiStore((state) => state.clearProjectSaveAction);
 
@@ -511,6 +538,7 @@ export default function ScriptEditorPage() {
       setInsertAfterSegmentId(null);
       setActiveSpeakerFilter("all");
       setSelectedSegmentIds([]);
+      selectionAnchorSegmentIdRef.current = null;
       setNewSegment(createSegmentDraft(normalized.segments.length));
       lastProjectIdRef.current = projectId;
       return;
@@ -623,7 +651,7 @@ export default function ScriptEditorPage() {
     : "";
   const sourceAudioAbsoluteMs = sourceAudioStartMs + Math.max(0, Math.round(Number(sourceAudioCurrentTime || 0) * 1000));
   const sourceActiveSegmentId = useMemo(() => {
-    if (!sourceAudioUrl || !sourceAudioPlaying) {
+    if (!sourceAudioUrl || (!sourceAudioPlaying && !sourceAudioSeekSignal && Number(sourceAudioCurrentTime || 0) <= 0)) {
       return "";
     }
     const active = (segments || [])
@@ -639,7 +667,7 @@ export default function ScriptEditorPage() {
       .sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs)
       .find((segment) => sourceAudioAbsoluteMs >= segment.startMs && sourceAudioAbsoluteMs < segment.endMs);
     return active?.id || "";
-  }, [segments, sourceAudioAbsoluteMs, sourceAudioPlaying, sourceAudioUrl]);
+  }, [segments, sourceAudioAbsoluteMs, sourceAudioCurrentTime, sourceAudioPlaying, sourceAudioSeekSignal, sourceAudioUrl]);
   const reportQcHighlightBySegmentId = useMemo(
     () => buildQcHighlightBySegmentId(parseQcReport?.issues),
     [parseQcReport?.issues]
@@ -680,6 +708,9 @@ export default function ScriptEditorPage() {
       const next = current.filter((id) => visibleSegmentIdSet.has(id));
       return next.length === current.length ? current : next;
     });
+    if (selectionAnchorSegmentIdRef.current && !visibleSegmentIdSet.has(selectionAnchorSegmentIdRef.current)) {
+      selectionAnchorSegmentIdRef.current = null;
+    }
   }, [visibleSegmentIdSet]);
 
   useEffect(() => {
@@ -702,6 +733,8 @@ export default function ScriptEditorPage() {
   useEffect(() => {
     setSourceAudioCurrentTime(0);
     setSourceAudioPlaying(false);
+    setSourceAudioSeekSeconds(0);
+    setSourceAudioSeekSignal(0);
   }, [sourceAudioUrl]);
 
   useEffect(() => {
@@ -772,17 +805,41 @@ export default function ScriptEditorPage() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  function toggleSelectedSegment(segmentId) {
+  function toggleSelectedSegment(segmentId, checked, shiftKey = false) {
     setSelectedSegmentIds((current) => {
-      if (current.includes(segmentId)) {
-        return current.filter((id) => id !== segmentId);
-      }
-      return [...current, segmentId];
+      return applySegmentSelectionClick({
+        selectedIds: current,
+        visibleSegments,
+        targetId: segmentId,
+        checked,
+        shiftKey,
+        anchorId: selectionAnchorSegmentIdRef.current,
+      });
     });
+    selectionAnchorSegmentIdRef.current = segmentId;
   }
 
   function clearSelectedSegments() {
     setSelectedSegmentIds([]);
+    selectionAnchorSegmentIdRef.current = null;
+  }
+
+  function handleLocateSourceSegment(segment) {
+    if (!sourceAudioUrl) {
+      return;
+    }
+    const startMs = Number(segment?.source_start_ms);
+    if (!Number.isFinite(startMs) || startMs < 0) {
+      useUiStore.getState().pushToast({
+        title: "该片段没有可定位的源音频时间",
+        tone: "warning",
+      });
+      return;
+    }
+    const seekSeconds = Math.max(0, (startMs - sourceAudioStartMs) / 1000);
+    setSourceAudioCurrentTime(seekSeconds);
+    setSourceAudioSeekSeconds(seekSeconds);
+    setSourceAudioSeekSignal((value) => value + 1);
   }
 
   function handleDragEnd(event) {
@@ -844,7 +901,7 @@ export default function ScriptEditorPage() {
     const normalized = normalizeSegmentFromEditorDraft(draft);
     if (!normalized.ok) {
       useUiStore.getState().pushToast({
-        title: `tts_overrides JSON 格式错误：${normalized.error}`,
+        title: `片段编辑错误：${normalized.error}`,
         tone: "error",
       });
       return;
@@ -868,7 +925,7 @@ export default function ScriptEditorPage() {
     const normalized = normalizeSegmentFromEditorDraft(newSegment);
     if (!normalized.ok) {
       useUiStore.getState().pushToast({
-        title: `新增片段 tts_overrides JSON 格式错误：${normalized.error}`,
+        title: `新增片段错误：${normalized.error}`,
         tone: "error",
       });
       return;
@@ -960,7 +1017,7 @@ export default function ScriptEditorPage() {
       const normalized = normalizeSegmentFromEditorDraft(segmentDraft);
       if (!normalized.ok) {
         useUiStore.getState().pushToast({
-          title: `当前编辑片段 tts_overrides JSON 格式错误：${normalized.error}`,
+          title: `当前编辑片段错误：${normalized.error}`,
           tone: "error",
         });
         return;
@@ -984,6 +1041,7 @@ export default function ScriptEditorPage() {
       tts_overrides: segment.tts_overrides && typeof segment.tts_overrides === "object" && !Array.isArray(segment.tts_overrides)
         ? segment.tts_overrides
         : {},
+      timing_check: buildSegmentTimingCheck(segment),
     }));
     const payload = {
       ...savedScript,
@@ -1442,6 +1500,8 @@ export default function ScriptEditorPage() {
               compact
               autoPlaySignal={sourceAudioPlaySignal}
               pauseSignal={sourceAudioPauseSignal}
+              seekToSeconds={sourceAudioSeekSeconds}
+              seekSignal={sourceAudioSeekSignal}
               onTimeUpdate={setSourceAudioCurrentTime}
               onPlayStateChange={setSourceAudioPlaying}
             />
@@ -1478,6 +1538,7 @@ export default function ScriptEditorPage() {
                     onSetInsertAnchor={setInsertAfterSegmentId}
                     onDelete={handleDelete}
                     onToggleSelected={toggleSelectedSegment}
+                    onLocateSource={sourceAudioUrl ? handleLocateSourceSegment : null}
                   />
                 ))}
               </div>

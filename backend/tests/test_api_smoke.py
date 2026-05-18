@@ -485,6 +485,32 @@ class ApiSmokeTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_asr_extract_audio_from_video_returns_wav_and_cleans_temps(self) -> None:
+        original_extract = asr_routes._run_ffmpeg_extract_audio
+        captured_paths: dict[str, Path] = {}
+
+        def fake_extract(input_path: Path, output_path: Path) -> None:
+            captured_paths["input"] = input_path
+            captured_paths["output"] = output_path
+            self.assertTrue(input_path.exists())
+            self.assertEqual(input_path.read_bytes(), b"fake-video-bytes")
+            output_path.write_bytes(b"RIFF" + (b"\0" * 44))
+
+        asr_routes._run_ffmpeg_extract_audio = fake_extract
+        try:
+            response = self.client.post(
+                "/api/v1/asr/extract-audio",
+                files={"file": ("clip.mp4", b"fake-video-bytes", "video/mp4")},
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.headers.get("content-type"), "audio/wav")
+            self.assertIn("clip-audio.wav", response.headers.get("content-disposition", ""))
+            self.assertTrue(response.content.startswith(b"RIFF"))
+            self.assertFalse(captured_paths["input"].exists())
+            self.assertFalse(captured_paths["output"].exists())
+        finally:
+            asr_routes._run_ffmpeg_extract_audio = original_extract
+
     def test_asr_project_from_audio_endpoint_shape(self) -> None:
         original_runner = asr_routes._run_project_from_audio_task
 

@@ -41,6 +41,40 @@ test("computeScriptDiff detects content modifications", () => {
   assert.equal(diff.reordered, false);
 });
 
+test("computeScriptDiff detects source timing modifications", () => {
+  const saved = makeScript([
+    {
+      id: "a",
+      speaker: "narrator",
+      text: "A",
+      type: "narration",
+      source_start_ms: 1000,
+      source_end_ms: 3000,
+      source_duration_ms: 2000,
+    },
+  ]);
+  const draft = makeScript([
+    {
+      id: "a",
+      speaker: "narrator",
+      text: "A",
+      type: "narration",
+      source_start_ms: 1200,
+      source_end_ms: 2800,
+      source_duration_ms: 1600,
+    },
+  ]);
+
+  const diff = computeScriptDiff(saved, draft);
+  assert.equal(diff.hasChanges, true);
+  assert.deepEqual(diff.modifiedSegmentIds, ["a"]);
+  assert.deepEqual(diff.modifiedSegments[0].changedFields, [
+    "source_start_ms",
+    "source_end_ms",
+    "source_duration_ms",
+  ]);
+});
+
 test("computeScriptDiff detects reorder only", () => {
   const saved = makeScript([
     { id: "a", speaker: "narrator", text: "A", type: "narration" },

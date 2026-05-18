@@ -150,6 +150,21 @@
   display: none;
 }
 
+.recordingDurationBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid color-mix(in srgb, var(--danger) 36%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger-dim) 76%, transparent);
+  color: var(--danger);
+  font-size: 12.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .audioClipper {
   display: flex;
   flex-direction: column;

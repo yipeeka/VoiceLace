@@ -11,6 +11,9 @@ const BASE = {
   emotion: "neutral",
   non_verbal: [],
   tts_overrides: {},
+  source_start_ms: 1000,
+  source_end_ms: 3000,
+  source_duration_ms: 2000,
 };
 
 function makeDraft(overrides = {}) {
@@ -21,6 +24,10 @@ function makeDraft(overrides = {}) {
     emotion: BASE.emotion,
     nonVerbalText: "",
     ttsOverridesText: "{}",
+    sourceStartText: "00:00:01.000",
+    sourceEndText: "00:00:03.000",
+    sourceBoundsStartMs: 1000,
+    sourceBoundsEndMs: 3000,
     ...overrides,
   };
 }
@@ -47,4 +54,8 @@ test("hasEditingDraftChanges detects non_verbal and overrides updates", () => {
     ttsOverridesText: '{"speed":1.1}',
   });
   assert.equal(hasEditingDraftChanges(BASE, draft), true);
+});
+
+test("hasEditingDraftChanges detects source timing updates", () => {
+  assert.equal(hasEditingDraftChanges(BASE, makeDraft({ sourceEndText: "00:00:02.500" })), true);
 });

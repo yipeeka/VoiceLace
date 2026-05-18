@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  applySegmentSelectionClick,
   buildCharacterStats,
   buildSpeakerOptions,
   filterSegmentsBySpeaker,
@@ -67,6 +68,66 @@ test("filterSegmentsByWorkflowStatus narrows down by mapped workflow status", ()
 test("pruneSelectedSegmentIds keeps only visible segment ids", () => {
   const visible = [{ segment_id: "a" }, { id: "b" }];
   assert.deepEqual(pruneSelectedSegmentIds(["a", "b", "c"], visible), ["a", "b"]);
+});
+
+test("applySegmentSelectionClick selects visible range with shift click", () => {
+  const visible = [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }];
+  assert.deepEqual(
+    applySegmentSelectionClick({
+      selectedIds: ["a"],
+      visibleSegments: visible,
+      targetId: "d",
+      checked: true,
+      shiftKey: true,
+      anchorId: "a",
+    }),
+    ["a", "b", "c", "d"],
+  );
+});
+
+test("applySegmentSelectionClick supports mixed segment_id and id values", () => {
+  const visible = [{ segment_id: "a" }, { id: "b" }, { segment_id: "c" }];
+  assert.deepEqual(
+    applySegmentSelectionClick({
+      selectedIds: ["a"],
+      visibleSegments: visible,
+      targetId: "c",
+      checked: true,
+      shiftKey: true,
+      anchorId: "a",
+    }),
+    ["a", "b", "c"],
+  );
+});
+
+test("applySegmentSelectionClick falls back to single toggle without visible anchor", () => {
+  const visible = [{ id: "a" }, { id: "b" }, { id: "c" }];
+  assert.deepEqual(
+    applySegmentSelectionClick({
+      selectedIds: ["a"],
+      visibleSegments: visible,
+      targetId: "c",
+      checked: true,
+      shiftKey: true,
+      anchorId: "missing",
+    }),
+    ["a", "c"],
+  );
+});
+
+test("applySegmentSelectionClick can clear a selected range", () => {
+  const visible = [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }];
+  assert.deepEqual(
+    applySegmentSelectionClick({
+      selectedIds: ["a", "b", "c", "d"],
+      visibleSegments: visible,
+      targetId: "c",
+      checked: false,
+      shiftKey: true,
+      anchorId: "a",
+    }),
+    ["d"],
+  );
 });
 
 test("getInsertAnchorLabel formats target segment index", () => {
