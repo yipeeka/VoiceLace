@@ -12,6 +12,7 @@ import { useScriptStore } from "../stores/useScriptStore";
 import { useSpeechRecognitionStore } from "../stores/useSpeechRecognitionStore";
 import { useUiStore } from "../stores/useUiStore";
 import { API_BASE_URL, getWsBaseUrl } from "../utils/api";
+import { buildClipFileName, createClippedWavBlob } from "../utils/audioClip";
 import { buildProjectFilePayload, openProjectFileWithPicker, saveProjectFile } from "../utils/projectFile";
 import {
   buildProjectOption,
@@ -40,6 +41,8 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const [isBuildingDubbingProject, setIsBuildingDubbingProject] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [pendingAudio, setPendingAudio] = useState(null);
+  const [audioClipRange, setAudioClipRange] = useState(null);
+  const [audioDurationSec, setAudioDurationSec] = useState(0);
   const [newProjectName, setNewProjectName] = useState("");
   const [renameProjectName, setRenameProjectName] = useState("");
   const [projectName, setProjectName] = useState("");
@@ -835,6 +838,39 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     }
   }
 
+  async function preparePendingAudioForSubmit() {
+    if (!pendingAudio?.blob) {
+      throw new Error("请先上传或录制音频。");
+    }
+    const fullAudio = {
+      blob: pendingAudio.blob,
+      fileName: pendingAudio.fileName || "audio.wav",
+      source: "full",
+      clipRange: null,
+    };
+    if (!audioClipRange) {
+      return fullAudio;
+    }
+    if (!audioDurationSec) {
+      throw new Error("音频尚未加载完成，请稍后再试。");
+    }
+    const clipped = await createClippedWavBlob(pendingAudio.blob, audioClipRange, audioDurationSec);
+    if (!clipped.range) {
+      return fullAudio;
+    }
+    return {
+      blob: clipped.blob,
+      fileName: buildClipFileName(pendingAudio.fileName || "audio.wav", clipped.range),
+      source: "clip",
+      clipRange: clipped.range,
+    };
+  }
+
+  const handleAudioClipError = useCallback((message) => {
+    const nextMessage = String(message || "音频截取不可用。");
+    setError(nextMessage);
+  }, [setError]);
+
   async function handleUpload(event) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -844,6 +880,8 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       if (prev?.url) URL.revokeObjectURL(prev.url);
       return { blob: file, fileName: file.name || "upload.wav", url: nextUrl, source: "upload" };
     });
+    setAudioClipRange(null);
+    setAudioDurationSec(0);
     setVocalSeparationEnabled(true);
     setProjectTask({ status: "", failedChunks: [], warnings: [], chunkProgress: null, parseTaskId: "" });
     setError("");
@@ -873,6 +911,8 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           if (prev?.url) URL.revokeObjectURL(prev.url);
           return { blob, fileName: "recording.webm", url: nextUrl, source: "recording" };
         });
+        setAudioClipRange(null);
+        setAudioDurationSec(0);
         setVocalSeparationEnabled(false);
         setProjectTask({ status: "", failedChunks: [], warnings: [], chunkProgress: null, parseTaskId: "" });
       };
@@ -901,7 +941,14 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       setError("请先上传或录制音频。");
       return;
     }
-    await transcribeBlob(pendingAudio.blob, pendingAudio.fileName || "audio.wav");
+    try {
+      const audio = await preparePendingAudioForSubmit();
+      await transcribeBlob(audio.blob, audio.fileName);
+    } catch (err) {
+      const message = err?.message || "音频截取失败";
+      setError(message);
+      useUiStore.getState().pushToast({ title: message, tone: "error" });
+    }
   }
 
   function handleAbortRecognize() {
@@ -1210,8 +1257,9 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       });
       try {
         if (pendingAudio?.blob) {
+          const audio = await preparePendingAudioForSubmit();
           const sourceAudioForm = new FormData();
-          sourceAudioForm.append("file", pendingAudio.blob, pendingAudio.fileName || "audio.wav");
+          sourceAudioForm.append("file", audio.blob, audio.fileName);
           const sourceAudioResponse = await fetch(`${API_BASE_URL}/projects/${project.id}/source-audio`, {
             method: "POST",
             body: sourceAudioForm,
@@ -1256,8 +1304,9 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     setIsCreatingProject(true);
     setError("");
     try {
+      const audio = await preparePendingAudioForSubmit();
       const formData = new FormData();
-      formData.append("file", pendingAudio.blob, pendingAudio.fileName || "audio.wav");
+      formData.append("file", audio.blob, audio.fileName);
       formData.append("project_name", projectName.trim());
       formData.append("speaker_labels", String(!isQwen3Backend && Boolean(speakerLabels)));
       formData.append("backend", asrBackendConfigured || "whisper");
@@ -1708,6 +1757,9 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           isTranscribing={isTranscribing}
           modelFiles={modelFiles}
           onAbortRecognize={handleAbortRecognize}
+          onAudioClipDurationChange={setAudioDurationSec}
+          onAudioClipError={handleAudioClipError}
+          onAudioClipRangeChange={setAudioClipRange}
           onAsrBackendChange={setAsrBackend}
           onAsrLanguageChange={setAsrLanguage}
           onRecognize={handleRecognize}
@@ -1718,6 +1770,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           onUpload={handleUpload}
           onVocalSeparationChange={setVocalSeparationEnabled}
           onVocalSeparationModelChange={setVocalSeparationModel}
+          audioClipRange={audioClipRange}
           pendingAudio={pendingAudio}
           projectTask={projectTask}
           showTimestampToggle={showTimestampToggle}

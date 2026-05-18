@@ -1,5 +1,7 @@
 import { Mic, Square, Upload } from "lucide-react";
+import { useId, useRef } from "react";
 
+import AudioClipper from "./AudioClipper";
 import GlassCard from "../shared/GlassCard";
 import Button from "../ui/Button";
 
@@ -17,6 +19,9 @@ export default function AsrRecognitionCard({
   modelFiles,
   onAbortRecognize,
   onAsrBackendChange,
+  onAudioClipDurationChange,
+  onAudioClipError,
+  onAudioClipRangeChange,
   onAsrLanguageChange,
   onRecognize,
   onSpeakerLabelsChange,
@@ -28,6 +33,7 @@ export default function AsrRecognitionCard({
   onVocalSeparationModelChange,
   pendingAudio,
   projectTask,
+  audioClipRange,
   showTimestampToggle,
   speakerLabelHint,
   speakerLabels,
@@ -36,6 +42,11 @@ export default function AsrRecognitionCard({
   vocalSeparationModel,
   warnings,
 }) {
+  const generatedId = useId();
+  const uploadInputRef = useRef(null);
+  const backendSelectId = `${generatedId}-asr-backend`;
+  const languageSelectId = `${generatedId}-asr-language`;
+  const demucsSelectId = `${generatedId}-demucs-model`;
   const isBusy = isTranscribing || isRecording || isCreatingProject;
   const uploadDisabled = isTranscribing || isCreatingProject;
 
@@ -51,8 +62,10 @@ export default function AsrRecognitionCard({
 
       <div className="editorGrid three speechAsrGrid">
         <div className="formGroup">
-          <label className="formLabel">ASR 后端</label>
+          <label className="formLabel" htmlFor={backendSelectId}>ASR 后端</label>
           <select
+            id={backendSelectId}
+            name="asr_backend"
             className="textInput"
             value={asrBackendConfigured}
             onChange={(event) => onAsrBackendChange(event.target.value)}
@@ -63,8 +76,10 @@ export default function AsrRecognitionCard({
           </select>
         </div>
         <div className="formGroup">
-          <label className="formLabel">识别语言</label>
+          <label className="formLabel" htmlFor={languageSelectId}>识别语言</label>
           <select
+            id={languageSelectId}
+            name="asr_language"
             className="textInput"
             value={asrLanguage || "auto"}
             onChange={(event) => onAsrLanguageChange(event.target.value)}
@@ -93,8 +108,10 @@ export default function AsrRecognitionCard({
           <span>识别前提取人声</span>
         </label>
         <div className="formGroup">
-          <label className="formLabel">Demucs 模型</label>
+          <label className="formLabel" htmlFor={demucsSelectId}>Demucs 模型</label>
           <select
+            id={demucsSelectId}
+            name="demucs_model"
             className="textInput"
             value={vocalSeparationModel || "htdemucs"}
             onChange={(event) => onVocalSeparationModelChange(event.target.value)}
@@ -133,11 +150,24 @@ export default function AsrRecognitionCard({
         >
           {isRecording ? "停止录音" : "开始录音"}
         </Button>
-        <label className={`btn btn-secondary uploadAudioButton ${uploadDisabled ? "disabled" : ""}`}>
-          <Upload size={15} />
+        <Button
+          variant="secondary"
+          onClick={() => uploadInputRef.current?.click()}
+          disabled={uploadDisabled || isRecording}
+          icon={Upload}
+          className="uploadAudioButton"
+        >
           上传音频
-          <input type="file" accept="audio/*" onChange={onUpload} disabled={isTranscribing || isRecording || isCreatingProject} className="hiddenFileInput" />
-        </label>
+        </Button>
+        <input
+          ref={uploadInputRef}
+          type="file"
+          accept="audio/*"
+          onChange={onUpload}
+          disabled={isTranscribing || isRecording || isCreatingProject}
+          className="hiddenFileInput"
+          tabIndex={-1}
+        />
         <Button variant="primary" onClick={onRecognize} disabled={isBusy || !pendingAudio?.blob || Boolean(asrUnavailableReason)}>
           开始识别
         </Button>
@@ -151,16 +181,24 @@ export default function AsrRecognitionCard({
       {asrUnavailableReason ? <div className="statusBadge warning">{asrUnavailableReason}</div> : null}
 
       {pendingAudio?.url ? (
-        <audio controls preload="metadata" className="fullWidthAudio" src={pendingAudio.url} />
+        <AudioClipper
+          audioUrl={pendingAudio.url}
+          fileName={pendingAudio.fileName}
+          disabled={isBusy}
+          clipRange={audioClipRange}
+          onClipRangeChange={onAudioClipRangeChange}
+          onDurationChange={onAudioClipDurationChange}
+          onError={onAudioClipError}
+        />
       ) : null}
 
-      {isTranscribing ? <div className="statusBadge default">识别中...</div> : null}
-      {isCreatingProject ? <div className="statusBadge default">正在分块转写并创建项目...</div> : null}
+      {isTranscribing ? <div className="statusBadge default" aria-live="polite">识别中…</div> : null}
+      {isCreatingProject ? <div className="statusBadge default" aria-live="polite">正在分块转写并创建项目…</div> : null}
       {backendUsed ? <div className="muted">实际后端：{backendUsed}</div> : null}
       {modelFiles?.main_model_path ? <div className="muted" title={modelFiles.main_model_path}>模型：{modelFiles.main_model_path}</div> : null}
-      {error ? <div className="errorText">{error}</div> : null}
+      {error ? <div className="errorText" role="alert">{error}</div> : null}
       {warnings.length ? (
-        <div className="statusBadge warning blockStatus">
+        <div className="statusBadge warning blockStatus" aria-live="polite">
           {warnings.join(" | ")}
         </div>
       ) : null}
@@ -171,12 +209,12 @@ export default function AsrRecognitionCard({
         </div>
       ) : null}
       {projectTask?.warnings?.length ? (
-        <div className="statusBadge warning blockStatus">
+        <div className="statusBadge warning blockStatus" aria-live="polite">
           {projectTask.warnings.join(" | ")}
         </div>
       ) : null}
       {projectTask?.failedChunks?.length ? (
-        <div className="errorText">失败分块：{projectTask.failedChunks.map((item) => `#${item.index + 1}`).join(", ")}</div>
+        <div className="errorText" role="alert">失败分块：{projectTask.failedChunks.map((item) => `#${item.index + 1}`).join(", ")}</div>
       ) : null}
       {projectTask?.parseTaskId ? <div className="muted">自动解析任务：{projectTask.parseTaskId}</div> : null}
     </GlassCard>

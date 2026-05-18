@@ -29,6 +29,26 @@
   }
 }
 
+@media (max-width: 1180px) {
+  .speechPageLayout .projectToolbar {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .speechPageLayout .projectToolbar .projectToolbarGroupMore {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 760px) {
+  .speechPageLayout .projectToolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .speechPageLayout .projectToolbar .projectToolbarGroupMore {
+    grid-column: auto;
+  }
+}
+
 @media (max-width: 1320px) {
   .speechPageLayout .editorGrid.three {
     grid-template-columns: 1fr 1fr;
@@ -130,8 +150,105 @@
   display: none;
 }
 
-.fullWidthAudio {
+.audioClipper {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.audioClipperHeader,
+.audioClipperMeta,
+.audioClipperActions,
+.audioClipperControls,
+.audioClipperDuration,
+.audioClipperZoom {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.audioClipperHeader {
+  justify-content: space-between;
+}
+
+.audioClipperMeta {
+  flex-wrap: wrap;
+}
+
+.audioClipperFile {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audioClipperActions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.audioClipperWave {
   width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.audioClipperControls {
+  display: grid;
+  grid-template-columns: minmax(92px, 0.55fr) minmax(92px, 0.55fr) max-content minmax(180px, 1fr);
+  align-items: end;
+}
+
+.audioClipperControls .formGroup,
+.audioClipperZoom .formGroup {
+  margin: 0;
+}
+
+.audioClipperDuration {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.audioClipperZoom {
+  color: var(--text-muted);
+}
+
+.audioClipperZoom .formGroup {
+  flex: 1;
+}
+
+.audioClipperHint {
+  line-height: 1.5;
+}
+
+@media (max-width: 720px) {
+  .audioClipperHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .audioClipperControls {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .audioClipperDuration,
+  .audioClipperZoom {
+    grid-column: 1 / -1;
+  }
 }
 
 .projectImportWarnings {
