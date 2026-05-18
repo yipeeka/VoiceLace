@@ -19,7 +19,17 @@ import { useUiStore } from "../stores/useUiStore";
 import { API_BASE_URL } from "../utils/api";
 import { formatError } from "../utils/errors";
 import { buildProjectFilePayload, saveProjectFile } from "../utils/projectFile";
-import { buildSegmentEditorDraft, createSegmentDraft, normalizeSegmentFromEditorDraft } from "../utils/segmentEditorState";
+import {
+  buildSegmentEditorDraft,
+  createSegmentDraft,
+  normalizeSegmentFromEditorDraft,
+} from "../utils/segmentEditorState";
+import {
+  deleteSelectedSegments,
+  getSegmentSelectionMeta,
+  mergeSelectedSegments,
+  moveSelectedSegmentBlock,
+} from "../utils/scriptEditorState";
 import { buildCharacterStats, buildSpeakerOptions, filterSegmentsBySpeaker, getInsertAnchorLabel } from "../utils/scriptSidebar";
 import { hasEditingDraftChanges } from "../utils/scriptEditorDirty";
 import { computeScriptDiff, normalizeDraftScript } from "../utils/scriptDiff";
@@ -137,6 +147,20 @@ function escapeSelectorValue(value) {
   return raw.replace(/["\\]/g, "\\$&");
 }
 
+function getPreferredScrollBehavior() {
+  if (typeof window === "undefined") {
+    return "smooth";
+  }
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+}
+
+function readScriptSpeakerFilterFromLocation() {
+  if (typeof window === "undefined") {
+    return "all";
+  }
+  return new URL(window.location.href).searchParams.get("scriptSpeaker") || "all";
+}
+
 function buildSrtTextFromSegments(segments) {
   const rows = (Array.isArray(segments) ? segments : [])
     .map((segment) => {
@@ -186,6 +210,9 @@ function SortableSegmentCard({
   canMergeWithNext,
   onSetInsertAnchor,
   onDelete,
+  canSelect,
+  isSelected,
+  onToggleSelected,
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: segment.id,
@@ -227,19 +254,36 @@ function SortableSegmentCard({
         ...(isSourceActive ? { outline: "2px solid color-mix(in srgb, var(--accent-primary) 72%, transparent)", outlineOffset: "-2px" } : {}),
         ...(isFocused ? { outline: "1px solid var(--accent-primary)", outlineOffset: "-1px" } : {}),
       }}
-      className={`segmentCard ${isEditing ? "editing" : ""} ${isInsertAnchor ? "insertAnchor" : ""} ${isSourceActive ? "sourceActive" : ""} ${qcSeverity ? `qc-${qcSeverity}` : ""}`}
+      className={`segmentCard ${isEditing ? "editing" : ""} ${isSelected ? "selected" : ""} ${isInsertAnchor ? "insertAnchor" : ""} ${isSourceActive ? "sourceActive" : ""} ${qcSeverity ? `qc-${qcSeverity}` : ""}`}
     >
-      {/* Drag handle */}
-      {canEdit && !isEditing && (
-        <div
-          className={`dragHandle ${canReorder ? "" : "disabled"}`}
-          title={canReorder ? "拖拽调整顺序" : "当前筛选状态下暂不支持拖拽排序"}
-          aria-label={canReorder ? "拖拽调整顺序" : "当前筛选状态下暂不支持拖拽排序"}
-          {...(canReorder ? { ...attributes, ...listeners } : {})}
-        >
-          <GripVertical size={15} />
+      {(canEdit || canSelect) && !isEditing ? (
+        <div className="segmentControlRail">
+          {canEdit ? (
+            <button
+              type="button"
+              className={`dragHandle ${canReorder ? "" : "disabled"}`}
+              disabled={!canReorder}
+              title={canReorder ? "拖拽调整顺序" : "当前筛选状态下暂不支持拖拽排序"}
+              aria-label={canReorder ? "拖拽调整顺序" : "当前筛选状态下暂不支持拖拽排序"}
+              {...(canReorder ? { ...attributes, ...listeners } : {})}
+            >
+              <GripVertical aria-hidden="true" focusable="false" size={15} />
+            </button>
+          ) : null}
+
+          {canSelect ? (
+            <label className="segmentSelectControl" title={isSelected ? "取消选择片段" : "选择片段"}>
+              <input
+                type="checkbox"
+                checked={Boolean(isSelected)}
+                disabled={isSaving}
+                onChange={() => onToggleSelected(segment.id)}
+                aria-label={`${isSelected ? "取消选择" : "选择"}第 ${(segment.index ?? 0) + 1} 段`}
+              />
+            </label>
+          ) : null}
         </div>
-      )}
+      ) : null}
 
       {/* Color bar */}
       <div className="segmentColorBar" style={{ background: charColor }} />
@@ -263,7 +307,7 @@ function SortableSegmentCard({
                 disabled={isSaving || !draft?.text?.trim()}
                 onClick={() => onApplyDraft(segment.id)}
               >
-                {isSaving ? "处理中..." : "应用到草稿"}
+                {isSaving ? "处理中…" : "应用到草稿"}
               </Button>
               <Button variant="ghost" size="sm" onClick={() => onCancelEdit(segment.id)}>
                 取消
@@ -271,10 +315,10 @@ function SortableSegmentCard({
               <Button
                 variant="ghost"
                 size="sm"
+                icon={Scissors}
                 onClick={() => onSplitAtCursor(segment.id)}
                 title="按当前光标位置拆分"
               >
-                <Scissors size={13} />
                 拆分
               </Button>
             </div>
@@ -328,36 +372,44 @@ function SortableSegmentCard({
       {!isEditing && (
         <div className="segmentActions">
           <button
+            type="button"
             className="btn btn-ghost btn-sm btn-icon"
             disabled={!canEdit || isSaving}
             onClick={() => onBeginEdit(segment)}
             title="编辑"
+            aria-label={`编辑第 ${(segment.index ?? 0) + 1} 段`}
           >
-            <Pencil size={13} />
+            <Pencil aria-hidden="true" focusable="false" size={13} />
           </button>
           <button
+            type="button"
             className="btn btn-danger btn-sm btn-icon"
             disabled={!canEdit || isSaving}
             onClick={() => onDelete(segment.id)}
             title="删除"
+            aria-label={`删除第 ${(segment.index ?? 0) + 1} 段`}
           >
-            <Trash2 size={13} />
+            <Trash2 aria-hidden="true" focusable="false" size={13} />
           </button>
           <button
+            type="button"
             className="btn btn-ghost btn-sm btn-icon"
             disabled={!canEdit || isSaving}
             onClick={() => onSetInsertAnchor(segment.id)}
             title="新增片段插入到此段后"
+            aria-label={`在第 ${(segment.index ?? 0) + 1} 段后新增片段`}
           >
-            <Plus size={13} />
+            <Plus aria-hidden="true" focusable="false" size={13} />
           </button>
           <button
+            type="button"
             className="btn btn-ghost btn-sm btn-icon"
             disabled={!canEdit || isSaving || !canMergeWithNext}
             onClick={() => onMergeWithNext(segment.id)}
             title={canMergeWithNext ? "与下一段合并" : "没有下一段可合并"}
+            aria-label={`将第 ${(segment.index ?? 0) + 1} 段与下一段合并`}
           >
-            <Combine size={13} />
+            <Combine aria-hidden="true" focusable="false" size={13} />
           </button>
         </div>
       )}
@@ -383,7 +435,6 @@ export default function ScriptEditorPage() {
     batchUpdateSegments,
     searchReplaceSegments,
     splitSegment,
-    mergeSegments,
     loadProjectScript,
     isSaving,
     error,
@@ -404,7 +455,8 @@ export default function ScriptEditorPage() {
   const [qcHighlightBySegmentId, setQcHighlightBySegmentId] = useState({});
   const [newSegment, setNewSegment] = useState(() => createSegmentDraft(0));
   const [insertAfterSegmentId, setInsertAfterSegmentId] = useState(null);
-  const [activeSpeakerFilter, setActiveSpeakerFilter] = useState("all");
+  const [activeSpeakerFilter, setActiveSpeakerFilter] = useState(readScriptSpeakerFilterFromLocation);
+  const [selectedSegmentIds, setSelectedSegmentIds] = useState([]);
   const [diffPreviewOpen, setDiffPreviewOpen] = useState(false);
   const [batchToolsOpen, setBatchToolsOpen] = useState(false);
   const [sourceAudioCurrentTime, setSourceAudioCurrentTime] = useState(0);
@@ -458,6 +510,7 @@ export default function ScriptEditorPage() {
       setCursorBySegmentId({});
       setInsertAfterSegmentId(null);
       setActiveSpeakerFilter("all");
+      setSelectedSegmentIds([]);
       setNewSegment(createSegmentDraft(normalized.segments.length));
       lastProjectIdRef.current = projectId;
       return;
@@ -543,6 +596,20 @@ export default function ScriptEditorPage() {
     () => filterSegmentsBySpeaker(segments, activeSpeakerFilter),
     [segments, activeSpeakerFilter]
   );
+  const visibleSegmentIds = useMemo(() => visibleSegments.map((segment) => segment.id), [visibleSegments]);
+  const visibleSegmentIdSet = useMemo(() => new Set(visibleSegmentIds), [visibleSegmentIds]);
+  const selectedSegmentIdSet = useMemo(() => new Set(selectedSegmentIds), [selectedSegmentIds]);
+  const selectionMeta = useMemo(
+    () => getSegmentSelectionMeta(segments, selectedSegmentIds),
+    [segments, selectedSegmentIds]
+  );
+  const selectedCount = selectionMeta.count;
+  const canMergeSelection = selectedCount >= 2 && selectionMeta.isContiguous;
+  const selectionHint = selectedCount <= 1
+    ? "选择多个连续片段后可拖拽移动或合并"
+    : selectionMeta.isContiguous
+      ? "连续片段可拖拽移动或合并"
+      : "移动和合并需要选择连续片段";
   const sourceAudioAsset = currentProject?.audio_assets || {};
   const sourceAudioRelpath = String(sourceAudioAsset?.source_audio_mp3_relpath || "");
   const sourceAudioStartMs = Number.isFinite(Number(sourceAudioAsset?.source_audio_start_ms))
@@ -609,13 +676,20 @@ export default function ScriptEditorPage() {
   );
 
   useEffect(() => {
+    setSelectedSegmentIds((current) => {
+      const next = current.filter((id) => visibleSegmentIdSet.has(id));
+      return next.length === current.length ? current : next;
+    });
+  }, [visibleSegmentIdSet]);
+
+  useEffect(() => {
     if (!focusSegmentId) {
       return;
     }
     const nodes = segmentListRef.current?.querySelectorAll("[data-segment-id]") || document.querySelectorAll("[data-segment-id]");
     for (const node of nodes) {
       if (node?.getAttribute("data-segment-id") === focusSegmentId) {
-        node.scrollIntoView({ behavior: "smooth", block: "center" });
+        node.scrollIntoView({ behavior: getPreferredScrollBehavior(), block: "center" });
         break;
       }
     }
@@ -643,7 +717,7 @@ export default function ScriptEditorPage() {
     const nodeRect = node.getBoundingClientRect();
     container.scrollTo({
       top: container.scrollTop + nodeRect.top - containerRect.top,
-      behavior: "smooth",
+      behavior: getPreferredScrollBehavior(),
     });
   }, [sourceActiveSegmentId, sourceAudioPlaying]);
 
@@ -674,16 +748,42 @@ export default function ScriptEditorPage() {
     if (activeSpeakerFilter === "all") {
       return;
     }
+    if (!characters.length) {
+      return;
+    }
     const exists = characters.some((character) => character.name === activeSpeakerFilter);
     if (!exists) {
       setActiveSpeakerFilter("all");
     }
   }, [activeSpeakerFilter, characters]);
 
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (activeSpeakerFilter === "all") {
+      url.searchParams.delete("scriptSpeaker");
+    } else {
+      url.searchParams.set("scriptSpeaker", activeSpeakerFilter);
+    }
+    window.history.replaceState(window.history.state, "", url);
+  }, [activeSpeakerFilter]);
+
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
+
+  function toggleSelectedSegment(segmentId) {
+    setSelectedSegmentIds((current) => {
+      if (current.includes(segmentId)) {
+        return current.filter((id) => id !== segmentId);
+      }
+      return [...current, segmentId];
+    });
+  }
+
+  function clearSelectedSegments() {
+    setSelectedSegmentIds([]);
+  }
 
   function handleDragEnd(event) {
     const { active, over } = event;
@@ -691,6 +791,19 @@ export default function ScriptEditorPage() {
     if (!over || active.id === over.id) return;
     applyDraftMutation((current) => {
       const list = current.segments ?? [];
+      if (selectedSegmentIds.includes(active.id) && selectedSegmentIds.length > 1) {
+        if (!getSegmentSelectionMeta(list, selectedSegmentIds).isContiguous) {
+          useUiStore.getState().pushToast({
+            title: "请先选择连续片段后再移动",
+            tone: "warning",
+          });
+          return current;
+        }
+        return {
+          ...current,
+          segments: moveSelectedSegmentBlock(list, selectedSegmentIds, over.id),
+        };
+      }
       const oldIdx = list.findIndex((item) => item.id === active.id);
       const newIdx = list.findIndex((item) => item.id === over.id);
       if (oldIdx < 0 || newIdx < 0 || oldIdx === newIdx) {
@@ -704,6 +817,7 @@ export default function ScriptEditorPage() {
   function beginEdit(segment) {
     setEditingId(segment.id);
     setSegmentDraft(buildSegmentEditorDraft(segment));
+    setSelectedSegmentIds((current) => current.filter((id) => id !== segment.id));
   }
 
   function cancelEdit(id) {
@@ -784,18 +898,57 @@ export default function ScriptEditorPage() {
     });
   }
 
-  function handleDelete(id) {
+  async function handleDelete(id) {
+    const target = (draftScript?.segments || []).find((segment) => segment.id === id);
+    const confirmed = await useUiStore.getState().requestConfirm({
+      title: "删除片段？",
+      description: target?.text
+        ? `第 ${(target.index ?? 0) + 1} 段会从当前草稿中移除，保存剧本后生效。`
+        : "该片段会从当前草稿中移除，保存剧本后生效。",
+      confirmLabel: "删除片段",
+      cancelLabel: "取消",
+      danger: true,
+    });
+    if (!confirmed) {
+      return;
+    }
     applyDraftMutation((current) => ({
       ...current,
-      segments: (current.segments || [])
-        .filter((segment) => segment.id !== id)
-        .map((segment, index) => ({ ...segment, index })),
+      segments: deleteSelectedSegments(current.segments || [], [id]),
     }));
     setEditingId((current) => (current === id ? null : current));
     setSegmentDraft((current) => (current?.id === id ? null : current));
     setInsertAfterSegmentId((current) => (current === id ? null : current));
+    setSelectedSegmentIds((current) => current.filter((segmentId) => segmentId !== id));
     useUiStore.getState().pushToast({
       title: "已加入草稿，点击“保存剧本”后生效",
+      tone: "default",
+    });
+  }
+
+  async function handleDeleteSelectedSegments() {
+    if (!selectedCount) return;
+    const confirmed = await useUiStore.getState().requestConfirm({
+      title: "删除选中片段？",
+      description: `将从当前草稿中删除 ${selectedCount} 段，保存剧本后生效。`,
+      confirmLabel: "删除选中片段",
+      cancelLabel: "取消",
+      danger: true,
+    });
+    if (!confirmed) {
+      return;
+    }
+    const idsToDelete = [...selectedSegmentIds];
+    applyDraftMutation((current) => ({
+      ...current,
+      segments: deleteSelectedSegments(current.segments || [], idsToDelete),
+    }));
+    setEditingId((current) => (idsToDelete.includes(current) ? null : current));
+    setSegmentDraft((current) => (idsToDelete.includes(current?.id) ? null : current));
+    setInsertAfterSegmentId((current) => (idsToDelete.includes(current) ? null : current));
+    setSelectedSegmentIds([]);
+    useUiStore.getState().pushToast({
+      title: `已删除 ${idsToDelete.length} 段到草稿`,
       tone: "default",
     });
   }
@@ -975,6 +1128,19 @@ export default function ScriptEditorPage() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [draftScript, undoStack.length, redoStack.length]);
 
+  useEffect(() => {
+    if (!hasUnsavedChanges) {
+      return undefined;
+    }
+    function onBeforeUnload(event) {
+      event.preventDefault();
+      event.returnValue = "";
+      return "";
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [hasUnsavedChanges]);
+
   async function handleGlobalRenameCharacter({ fromName, toName }) {
     if (!currentProject?.id) return;
     if (hasUnsavedChanges) {
@@ -1090,24 +1256,44 @@ export default function ScriptEditorPage() {
   }
 
   async function handleMergeWithNext(segmentId) {
-    if (!currentProject?.id) return;
-    if (hasUnsavedChanges) {
-      useUiStore.getState().pushToast({ title: "请先保存当前草稿后再执行合并", tone: "warning" });
-      return;
-    }
     const nextSegmentId = findNextSegmentId(segmentId);
     if (!nextSegmentId) return;
-    const updated = await mergeSegments({
-      projectId: currentProject.id,
-      firstSegmentId: segmentId,
-      secondSegmentId: nextSegmentId,
+    applyDraftMutation((current) => ({
+      ...current,
+      segments: mergeSelectedSegments(current.segments || [], [segmentId, nextSegmentId]),
+    }));
+    setEditingId((current) => (current === nextSegmentId ? null : current));
+    setSegmentDraft((current) => (current?.id === nextSegmentId ? null : current));
+    setInsertAfterSegmentId((current) => (current === nextSegmentId ? null : current));
+    setSelectedSegmentIds((current) => current.filter((id) => id !== nextSegmentId));
+    useUiStore.getState().pushToast({
+      title: "已合并到草稿，点击“保存剧本”后生效",
+      tone: "default",
     });
-    const normalized = normalizeDraftScript(updated);
-    setSavedScript(normalized);
-    resetHistory(normalized);
-    setEditingId(null);
-    setSegmentDraft(null);
-    await refreshCurrentProject(currentProject.id);
+  }
+
+  function handleMergeSelectedSegments() {
+    if (!canMergeSelection) {
+      useUiStore.getState().pushToast({
+        title: "请选择连续的多个片段后再合并",
+        tone: "warning",
+      });
+      return;
+    }
+    const idsToMerge = [...selectionMeta.selectedIds];
+    const firstId = idsToMerge[0];
+    applyDraftMutation((current) => ({
+      ...current,
+      segments: mergeSelectedSegments(current.segments || [], idsToMerge),
+    }));
+    setEditingId((current) => (idsToMerge.includes(current) && current !== firstId ? null : current));
+    setSegmentDraft((current) => (idsToMerge.includes(current?.id) && current?.id !== firstId ? null : current));
+    setInsertAfterSegmentId((current) => (idsToMerge.includes(current) ? null : current));
+    setSelectedSegmentIds([firstId]);
+    useUiStore.getState().pushToast({
+      title: `已合并 ${idsToMerge.length} 段到草稿`,
+      tone: "default",
+    });
   }
 
   function handleJumpToNextQcHighlight() {
@@ -1120,7 +1306,7 @@ export default function ScriptEditorPage() {
     requestAnimationFrame(() => {
       const node = segmentListRef.current?.querySelector(`[data-segment-id="${escapeSelectorValue(nextId)}"]`);
       if (node) {
-        node.scrollIntoView({ behavior: "smooth", block: "center" });
+        node.scrollIntoView({ behavior: getPreferredScrollBehavior(), block: "center" });
       }
     });
   }
@@ -1146,37 +1332,40 @@ export default function ScriptEditorPage() {
         actionContent={
           <>
             <div className="controlRow" style={{ gap: 8, flexWrap: "wrap" }}>
-              <Button variant="ghost" onClick={handleUndo} disabled={!undoStack.length}>
-                <Undo2 size={14} />
+              <Button variant="ghost" icon={Undo2} onClick={handleUndo} disabled={!undoStack.length}>
                 撤销
               </Button>
-              <Button variant="ghost" onClick={handleRedo} disabled={!redoStack.length}>
-                <Redo2 size={14} />
+              <Button variant="ghost" icon={Redo2} onClick={handleRedo} disabled={!redoStack.length}>
                 重做
               </Button>
             </div>
-            <Button variant="primary" onClick={handleSaveScript} disabled={!canEdit || isSaving || !hasUnsavedChanges}>
-              <Save size={14} />
-              {isSaving ? "保存中..." : hasUnsavedChanges ? "保存剧本" : "已保存"}
+            <Button variant="primary" icon={Save} onClick={handleSaveScript} disabled={!canEdit || isSaving || !hasUnsavedChanges}>
+              {isSaving ? "保存中…" : hasUnsavedChanges ? "保存剧本" : "已保存"}
             </Button>
             <Button variant="secondary" onClick={() => setDiffPreviewOpen(true)} disabled={!hasUnsavedChanges}>
               查看差异
             </Button>
-            <Button variant="secondary" onClick={() => setBatchToolsOpen(true)} disabled={!canEdit || isSaving}>
-              <Settings2 size={14} />
+            <Button variant="secondary" icon={Settings2} onClick={() => setBatchToolsOpen(true)} disabled={!canEdit || isSaving}>
               批量工具
             </Button>
             <Button variant="secondary" onClick={handleExportJson} disabled={!script?.segments?.length}>
               导出 JSON
             </Button>
-            <Button variant="secondary" onClick={handleExportSrt} disabled={!timelineSegmentCount}>
-              <FileDown size={14} />
+            <Button variant="secondary" icon={FileDown} onClick={handleExportSrt} disabled={!timelineSegmentCount}>
               导出 SRT
             </Button>
             <Button variant="secondary" onClick={() => fileInputRef.current?.click()} disabled={!canEdit}>
               导入 JSON
             </Button>
-            <input ref={fileInputRef} type="file" accept=".json" style={{ display: "none" }} onChange={handleImportJson} />
+            <input
+              ref={fileInputRef}
+              type="file"
+              name="scriptJsonImport"
+              aria-label="导入剧本 JSON"
+              accept=".json"
+              style={{ display: "none" }}
+              onChange={handleImportJson}
+            />
           </>
         }
       />
@@ -1198,11 +1387,45 @@ export default function ScriptEditorPage() {
               className="statusBadge warning clickableBadge"
               onClick={handleJumpToNextQcHighlight}
               title="点击跳到下一条质检高亮片段"
+              aria-label={`跳到下一条质检高亮片段，共 ${visibleQcHighlightCount} 段`}
             >
               质检高亮 {visibleQcHighlightCount} 段
             </button>
           ) : null}
         </div>
+
+        {selectedCount ? (
+          <div className="selectionToolbar" aria-live="polite">
+            <span className="statusBadge default">已选择 {selectedCount} 段</span>
+            <span className={`statusBadge ${selectionMeta.isContiguous ? "success" : "warning"}`}>
+              {selectionHint}
+            </span>
+            <div className="controlRow" style={{ marginLeft: "auto", gap: 8 }}>
+              <Button
+                variant="danger"
+                size="sm"
+                icon={Trash2}
+                disabled={!canEdit || isSaving}
+                onClick={handleDeleteSelectedSegments}
+              >
+                删除
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={Combine}
+                disabled={!canEdit || isSaving || !canMergeSelection}
+                onClick={handleMergeSelectedSegments}
+                title={canMergeSelection ? "合并选中片段" : "请选择连续的多个片段"}
+              >
+                合并
+              </Button>
+              <Button variant="ghost" size="sm" onClick={clearSelectedSegments}>
+                清除选择
+              </Button>
+            </div>
+          </div>
+        ) : null}
 
         {sourceAudioUrl ? (
           <div className="scriptSourceAudioPanel">
@@ -1241,8 +1464,10 @@ export default function ScriptEditorPage() {
                     draft={segmentDraft?.id === segment.id ? segmentDraft : null}
                     speakerOptions={segmentSpeakerOptions}
                     canEdit={canEdit}
-                    canReorder={!isFilterActive}
+                    canReorder={!isFilterActive && (!selectedSegmentIdSet.has(segment.id) || selectedCount <= 1 || selectionMeta.isContiguous)}
                     isSaving={isSaving}
+                    canSelect={canEdit}
+                    isSelected={selectedSegmentIdSet.has(segment.id)}
                     onBeginEdit={beginEdit}
                     onUpdateDraft={updateDraft}
                     onApplyDraft={applyDraft}
@@ -1252,6 +1477,7 @@ export default function ScriptEditorPage() {
                     canMergeWithNext={Boolean(findNextSegmentId(segment.id))}
                     onSetInsertAnchor={setInsertAfterSegmentId}
                     onDelete={handleDelete}
+                    onToggleSelected={toggleSelectedSegment}
                   />
                 ))}
               </div>

@@ -143,17 +143,26 @@ export default function ScriptBatchToolsDrawer({
         ) : null}
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="batchTabsList">
-            <TabsTrigger value="rename"><PencilLine size={13} /> 角色改名</TabsTrigger>
-            <TabsTrigger value="merge"><Blend size={13} /> 角色合并</TabsTrigger>
-            <TabsTrigger value="batch"><Settings2 size={13} /> 批量属性</TabsTrigger>
-            <TabsTrigger value="replace"><Replace size={13} /> 搜索替换</TabsTrigger>
-            <TabsTrigger value="structure"><UsersRound size={13} /> 片段结构</TabsTrigger>
+            <TabsTrigger value="rename"><PencilLine aria-hidden="true" focusable="false" size={13} /> 角色改名</TabsTrigger>
+            <TabsTrigger value="merge"><Blend aria-hidden="true" focusable="false" size={13} /> 角色合并</TabsTrigger>
+            <TabsTrigger value="batch"><Settings2 aria-hidden="true" focusable="false" size={13} /> 批量属性</TabsTrigger>
+            <TabsTrigger value="replace"><Replace aria-hidden="true" focusable="false" size={13} /> 搜索替换</TabsTrigger>
+            <TabsTrigger value="structure"><UsersRound aria-hidden="true" focusable="false" size={13} /> 片段结构</TabsTrigger>
           </TabsList>
 
           <TabsContent value="rename">
             <div className="listStack">
-              <Select value={fromName} onValueChange={setFromName} options={characterOptions} placeholder="选择源角色" />
-              <input className="textInput" value={toName} onChange={(e) => setToName(e.target.value)} placeholder="输入新角色名" />
+              <Select aria-label="源角色" value={fromName} onValueChange={setFromName} options={characterOptions} placeholder="选择源角色…" />
+              <input
+                className="textInput"
+                name="renameTarget"
+                aria-label="新角色名"
+                autoComplete="off"
+                spellCheck={false}
+                value={toName}
+                onChange={(e) => setToName(e.target.value)}
+                placeholder="输入新角色名…"
+              />
               <div className="muted">预览影响：{renamePreviewCount} 段</div>
               <div className="controlRow" style={{ justifyContent: "flex-end" }}>
                 <Button
@@ -161,7 +170,7 @@ export default function ScriptBatchToolsDrawer({
                   disabled={isSaving || !fromName || !toName || fromName === toName || renamePreviewCount <= 0}
                   onClick={() => onRenameCharacter?.({ fromName, toName })}
                 >
-                  {isSaving ? "执行中..." : "执行改名"}
+                  {isSaving ? "执行中…" : "执行改名"}
                 </Button>
               </div>
             </div>
@@ -169,8 +178,8 @@ export default function ScriptBatchToolsDrawer({
 
           <TabsContent value="merge">
             <div className="listStack">
-              <Select value={mergeSourceName} onValueChange={setMergeSourceName} options={characterOptions} placeholder="选择源角色（将被合并）" />
-              <Select value={mergeTargetName} onValueChange={setMergeTargetName} options={characterOptions} placeholder="选择目标角色（将保留）" />
+              <Select aria-label="将被合并的源角色" value={mergeSourceName} onValueChange={setMergeSourceName} options={characterOptions} placeholder="选择源角色（将被合并）…" />
+              <Select aria-label="将保留的目标角色" value={mergeTargetName} onValueChange={setMergeTargetName} options={characterOptions} placeholder="选择目标角色（将保留）…" />
               <div className="muted">预览影响：{mergePreviewCount} 段（目标角色音色优先）</div>
               <div className="controlRow" style={{ justifyContent: "flex-end" }}>
                 <Button
@@ -178,7 +187,7 @@ export default function ScriptBatchToolsDrawer({
                   disabled={isSaving || !mergeSourceName || !mergeTargetName || mergeSourceName === mergeTargetName || mergePreviewCount <= 0}
                   onClick={() => onMergeCharacter?.({ sourceName: mergeSourceName, targetName: mergeTargetName })}
                 >
-                  {isSaving ? "执行中..." : "执行合并"}
+                  {isSaving ? "执行中…" : "执行合并"}
                 </Button>
               </div>
             </div>
@@ -188,29 +197,33 @@ export default function ScriptBatchToolsDrawer({
             <div className="listStack">
               <div className="muted">选择情绪 -&gt; 目标情绪</div>
               <Select
+                aria-label="源情绪"
                 value={fromEmotion}
                 onValueChange={setFromEmotion}
                 options={[{ value: "", label: "全部情绪" }, ...emotionOptionsInScope]}
-                placeholder="选择情绪（源）"
+                placeholder="选择情绪（源）…"
               />
               <Select
+                aria-label="目标情绪"
                 value={targetEmotion}
                 onValueChange={setTargetEmotion}
                 options={[{ value: "", label: "目标情绪不改" }, ...EMOTION_OPTIONS]}
-                placeholder="目标情绪"
+                placeholder="目标情绪…"
               />
               <div className="muted">选择类型 -&gt; 目标类型</div>
               <Select
+                aria-label="源类型"
                 value={fromType}
                 onValueChange={setFromType}
                 options={[{ value: "", label: "全部类型" }, ...typeOptionsInScope]}
-                placeholder="选择类型（源）"
+                placeholder="选择类型（源）…"
               />
               <Select
+                aria-label="目标类型"
                 value={targetType}
                 onValueChange={setTargetType}
                 options={[{ value: "", label: "目标类型不改" }, ...TYPE_OPTIONS]}
-                placeholder="目标类型"
+                placeholder="目标类型…"
               />
               <div className="muted">
                 预览影响：{batchPreviewCount} 段
@@ -230,7 +243,7 @@ export default function ScriptBatchToolsDrawer({
                     })
                   }
                 >
-                  {isSaving ? "执行中..." : "执行批量修改"}
+                  {isSaving ? "执行中…" : "执行批量修改"}
                 </Button>
               </div>
             </div>
@@ -238,10 +251,31 @@ export default function ScriptBatchToolsDrawer({
 
           <TabsContent value="replace">
             <div className="listStack">
-              <input className="textInput" value={findText} onChange={(e) => setFindText(e.target.value)} placeholder="查找文本" />
-              <input className="textInput" value={replaceText} onChange={(e) => setReplaceText(e.target.value)} placeholder="替换为（可空）" />
+              <input
+                className="textInput"
+                name="findText"
+                aria-label="查找文本"
+                autoComplete="off"
+                value={findText}
+                onChange={(e) => setFindText(e.target.value)}
+                placeholder="查找文本…"
+              />
+              <input
+                className="textInput"
+                name="replaceText"
+                aria-label="替换文本"
+                autoComplete="off"
+                value={replaceText}
+                onChange={(e) => setReplaceText(e.target.value)}
+                placeholder="替换为（可空）…"
+              />
               <label className="controlRow" style={{ justifyContent: "flex-start", gap: 8 }}>
-                <input type="checkbox" checked={caseSensitive} onChange={(e) => setCaseSensitive(e.target.checked)} />
+                <input
+                  type="checkbox"
+                  name="caseSensitive"
+                  checked={caseSensitive}
+                  onChange={(e) => setCaseSensitive(e.target.checked)}
+                />
                 区分大小写
               </label>
               <div className="muted">预览命中：{searchPreview.hitCount} 处，影响 {searchPreview.affectedCount} 段</div>
@@ -250,8 +284,8 @@ export default function ScriptBatchToolsDrawer({
                   {searchPreview.rows.map((row) => (
                     <div key={row.segmentId} className="statRow" style={{ display: "block" }}>
                       <div className="muted">#{row.segmentId} · 命中 {row.hit} 次</div>
-                      <div className="muted">旧：{row.before}</div>
-                      <div className="muted">新：{row.after}</div>
+                      <div className="muted scriptPreviewText">旧：{row.before}</div>
+                      <div className="muted scriptPreviewText">新：{row.after}</div>
                     </div>
                   ))}
                 </div>
@@ -262,7 +296,7 @@ export default function ScriptBatchToolsDrawer({
                   disabled={isSaving || !findText || searchPreview.affectedCount <= 0}
                   onClick={() => onSearchReplace?.({ find: findText, replace: replaceText, caseSensitive })}
                 >
-                  {isSaving ? "执行中..." : "执行替换"}
+                  {isSaving ? "执行中…" : "执行替换"}
                 </Button>
               </div>
             </div>

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useId, useMemo } from "react";
 
 import Select from "../ui/Select";
 import { EMOTION_OPTIONS, TYPE_OPTIONS } from "../../constants/scriptOptions";
@@ -12,6 +12,7 @@ export default function SegmentEditorFields({
   speakerOptions = [],
   compact = false,
 }) {
+  const fieldId = useId();
   const knownSpeakerOptions = useMemo(() => {
     const map = new Map();
     map.set("narrator", { value: "narrator", label: "narrator" });
@@ -37,7 +38,12 @@ export default function SegmentEditorFields({
   return (
     <div className={`segmentEditorFields${compact ? " compact" : ""}`}>
       <div className={`segmentEditorFieldGrid${compact ? " compact" : ""}`}>
+        <label className="visuallyHidden" htmlFor={`${fieldId}-speaker`}>
+          角色
+        </label>
         <Select
+          id={`${fieldId}-speaker`}
+          aria-label="角色"
           value={speakerSelectValue}
           onValueChange={(value) => {
             if (value === "__new__") {
@@ -48,12 +54,22 @@ export default function SegmentEditorFields({
           }}
           options={resolvedSpeakerOptions}
         />
+        <label className="visuallyHidden" htmlFor={`${fieldId}-type`}>
+          片段类型
+        </label>
         <Select
+          id={`${fieldId}-type`}
+          aria-label="片段类型"
           value={draft?.type || "dialogue"}
           onValueChange={(value) => onFieldChange("type", value)}
           options={TYPE_OPTIONS}
         />
+        <label className="visuallyHidden" htmlFor={`${fieldId}-emotion`}>
+          情绪
+        </label>
         <Select
+          id={`${fieldId}-emotion`}
+          aria-label="情绪"
           value={draft?.emotion || "neutral"}
           onValueChange={(value) => onFieldChange("emotion", value)}
           options={EMOTION_OPTIONS}
@@ -61,14 +77,22 @@ export default function SegmentEditorFields({
       </div>
       {speakerSelectValue === "__new__" ? (
         <input
+          id={`${fieldId}-new-speaker`}
           className="textInput"
+          name="speaker"
+          aria-label="新角色名"
+          autoComplete="off"
+          spellCheck={false}
           value={currentSpeaker}
           onChange={(e) => onFieldChange("speaker", e.target.value)}
-          placeholder="输入新角色名（留空保存后会回退 narrator）"
+          placeholder="输入新角色名…"
         />
       ) : null}
       <textarea
+        id={`${fieldId}-text`}
         className="textArea compactArea"
+        name="segmentText"
+        aria-label="片段文本"
         value={draft?.text || ""}
         onChange={(e) => onFieldChange("text", e.target.value)}
         onClick={(e) => onTextCursorChange?.(e.target.selectionStart ?? 0)}
@@ -79,19 +103,29 @@ export default function SegmentEditorFields({
       {includeAdvanced ? (
         <>
           <input
+            id={`${fieldId}-non-verbal`}
             className="textInput"
+            name="nonVerbal"
+            aria-label="non_verbal 只读"
+            autoComplete="off"
+            spellCheck={false}
             value={draft?.nonVerbalText || ""}
             readOnly
             aria-readonly="true"
-            placeholder="non_verbal（只读）"
+            placeholder="non_verbal（只读）…"
             title="non_verbal 当前为只读显示"
           />
           <textarea
+            id={`${fieldId}-tts-overrides`}
             className="textArea compactArea"
+            name="ttsOverrides"
+            aria-label="tts_overrides JSON"
+            autoComplete="off"
+            spellCheck={false}
             value={draft?.ttsOverridesText || "{}"}
             onChange={(e) => onFieldChange("ttsOverridesText", e.target.value)}
             style={{ minHeight: 88, fontFamily: "monospace", fontSize: 12 }}
-            placeholder='tts_overrides JSON（仅支持 speed/duration/denoise/num_step/guidance_scale）'
+            placeholder='例如 {"speed":1.1}…'
           />
           <div style={{ fontSize: 12, color: "var(--textMuted)" }}>
             支持字段：

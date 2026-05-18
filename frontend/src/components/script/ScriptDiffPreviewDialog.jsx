@@ -39,13 +39,13 @@ export default function ScriptDiffPreviewDialog({
           {added.map((item) => (
             <div key={`add-${item.id}`} className="statRow">
               <span>新增 #{item.index + 1} · {item.speaker}</span>
-              <span className="muted">{item.textPreview}</span>
+              <span className="muted scriptPreviewText">{item.textPreview}</span>
             </div>
           ))}
           {removed.map((item) => (
             <div key={`rm-${item.id}`} className="statRow">
               <span>删除 #{item.index + 1} · {item.speaker}</span>
-              <span className="muted">{item.textPreview}</span>
+              <span className="muted scriptPreviewText">{item.textPreview}</span>
             </div>
           ))}
           {modified.map((item) => (
@@ -54,8 +54,8 @@ export default function ScriptDiffPreviewDialog({
                 <span>修改 #{item.index + 1} · {item.afterSpeaker}</span>
                 <span className="muted">字段: {formatChangedFields(item.changedFields)}</span>
               </div>
-              <div className="muted">旧: {item.beforeTextPreview}</div>
-              <div className="muted">新: {item.afterTextPreview}</div>
+              <div className="muted scriptPreviewText">旧: {item.beforeTextPreview}</div>
+              <div className="muted scriptPreviewText">新: {item.afterTextPreview}</div>
             </div>
           ))}
           {!summary.hasChanges ? (
