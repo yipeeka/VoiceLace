@@ -172,7 +172,6 @@
   min-width: 0;
 }
 
-.audioClipperHeader,
 .audioClipperMeta,
 .audioClipperActions,
 .audioClipperControls,
@@ -185,11 +184,18 @@
 }
 
 .audioClipperHeader {
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 8px 12px;
+  align-items: start;
+  min-width: 0;
 }
 
 .audioClipperMeta {
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: max-content minmax(0, max-content);
+  gap: 8px 10px;
+  align-items: center;
 }
 
 .audioClipperFile {
@@ -199,9 +205,23 @@
   white-space: nowrap;
 }
 
+.audioClipperTime {
+  grid-column: 1 / -1;
+  min-height: 20px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .audioClipperActions {
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: max-content;
+  justify-items: end;
   justify-content: flex-end;
+  align-items: start;
+}
+
+.audioClipperActions .btn {
+  min-width: 122px;
 }
 
 .audioClipperWave {
@@ -252,8 +272,15 @@
 
 @media (max-width: 720px) {
   .audioClipperHeader {
-    align-items: flex-start;
-    flex-direction: column;
+    grid-template-columns: 1fr;
+  }
+
+  .audioClipperMeta {
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
+
+  .audioClipperActions {
+    justify-items: stretch;
   }
 
   .audioClipperControls {

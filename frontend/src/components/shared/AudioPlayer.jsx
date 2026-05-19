@@ -169,7 +169,7 @@ export default function AudioPlayer({
 
   useEffect(() => {
     setResolvedPeaks(peaks || null);
-  }, [audioUrl, audioBlob, peaks]);
+  }, [audioUrl, audioBlob, peaks, peaksUrl]);
 
   useEffect(() => {
     const audio = audioRef.current;

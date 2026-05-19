@@ -640,14 +640,26 @@ export default function ScriptEditorPage() {
       : "移动和合并需要选择连续片段";
   const sourceAudioAsset = currentProject?.audio_assets || {};
   const sourceAudioRelpath = String(sourceAudioAsset?.source_audio_mp3_relpath || "");
+  const sourceAudioName = String(sourceAudioAsset?.source_audio_name || "");
   const sourceAudioStartMs = Number.isFinite(Number(sourceAudioAsset?.source_audio_start_ms))
     ? Number(sourceAudioAsset.source_audio_start_ms)
     : 0;
   const sourceAudioEndMs = Number.isFinite(Number(sourceAudioAsset?.source_audio_end_ms))
     ? Number(sourceAudioAsset.source_audio_end_ms)
     : 0;
+  const sourceAudioDurationMs = Number.isFinite(Number(sourceAudioAsset?.source_audio_duration_ms))
+    ? Number(sourceAudioAsset.source_audio_duration_ms)
+    : 0;
+  const sourceAudioVersion = encodeURIComponent([
+    sourceAudioRelpath,
+    sourceAudioName,
+    sourceAudioStartMs,
+    sourceAudioEndMs,
+    sourceAudioDurationMs,
+    currentProject?.updated_at || "",
+  ].join("|"));
   const sourceAudioUrl = currentProject?.id && sourceAudioRelpath
-    ? `${API_BASE_URL}/projects/${currentProject.id}/source-audio?asset=${encodeURIComponent(sourceAudioRelpath)}`
+    ? `${API_BASE_URL}/projects/${currentProject.id}/source-audio?asset=${encodeURIComponent(sourceAudioRelpath)}&v=${sourceAudioVersion}`
     : "";
   const sourceAudioAbsoluteMs = sourceAudioStartMs + Math.max(0, Math.round(Number(sourceAudioCurrentTime || 0) * 1000));
   const sourceActiveSegmentId = useMemo(() => {

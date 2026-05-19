@@ -229,7 +229,7 @@ export default function AudioClipper({
             {hasClip ? "使用截取片段" : "使用完整音频"}
           </span>
           <span className="muted audioClipperFile" title={fileName || ""}>{fileName || "audio"}</span>
-          <span className="muted">{formatClipTime(currentTime)} / {formatClipTime(duration)}</span>
+          <span className="muted audioClipperTime">{formatClipTime(currentTime)} / {formatClipTime(duration)}</span>
         </div>
         <div className="audioClipperActions">
           <Button
