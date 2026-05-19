@@ -34,6 +34,7 @@ export default function AsrRecognitionCard({
   onAsrLanguageChange,
   onRecognize,
   onSpeakerLabelsChange,
+  onSilenceAwareSplitChange,
   onStartRecording,
   onStopRecording,
   onUnloadAsr,
@@ -44,6 +45,7 @@ export default function AsrRecognitionCard({
   projectTask,
   audioClipRange,
   showTimestampToggle,
+  silenceAwareSplit,
   speakerLabelHint,
   speakerLabels,
   vocalSeparationEnabled,
@@ -145,6 +147,15 @@ export default function AsrRecognitionCard({
               disabled={isTranscribing || isRecording || isCreatingProject}
             />
             <span>输出说话人标签（说话人1：文本）</span>
+          </label>
+          <label className="controlRow inlineCheckRow">
+            <input
+              type="checkbox"
+              checked={Boolean(silenceAwareSplit)}
+              onChange={(event) => onSilenceAwareSplitChange(event.target.checked)}
+              disabled={isTranscribing || isRecording || isCreatingProject}
+            />
+            <span>避开长静音切分片段</span>
           </label>
           {speakerLabelHint ? <div className="muted">{speakerLabelHint}</div> : null}
         </>

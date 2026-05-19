@@ -445,10 +445,14 @@ class ApiSmokeTest(unittest.TestCase):
             audio_path: str,
             *,
             backend: str = "whisper",
+            language: str = "auto",
             speaker_labels: bool = False,
             enable_timestamps: bool | None = None,
+            silence_aware_split: bool = True,
         ):
             self.assertTrue(Path(audio_path).exists())
+            self.assertEqual(language, "auto")
+            self.assertFalse(silence_aware_split)
             return {
                 "text": "测试文本",
                 "labeled_text": "说话人1：测试文本",
@@ -465,7 +469,7 @@ class ApiSmokeTest(unittest.TestCase):
         try:
             response = self.client.post(
                 "/api/v1/asr/transcribe-file",
-                data={"backend": "whisper", "speaker_labels": "true"},
+                data={"backend": "whisper", "speaker_labels": "true", "silence_aware_split": "false"},
                 files={"file": ("sample.wav", b"RIFFdemo", "audio/wav")},
             )
             self.assertEqual(response.status_code, 200)
@@ -515,6 +519,7 @@ class ApiSmokeTest(unittest.TestCase):
         original_runner = asr_routes._run_project_from_audio_task
 
         async def fake_runner(task_id, task_input, state):
+            self.assertFalse(task_input["silence_aware_split"])
             task = state.asr_tasks[task_id]
             task["status"] = "done"
             task["result"] = {
@@ -540,6 +545,7 @@ class ApiSmokeTest(unittest.TestCase):
                     "speaker_labels": "true",
                     "parse_mode": "verified_five_step_pipeline",
                     "auto_parse": "true",
+                    "silence_aware_split": "false",
                     "speaker_map": "{\"说话人1\":\"旁白\"}",
                 },
                 files={"file": ("sample.wav", b"RIFFdemo", "audio/wav")},

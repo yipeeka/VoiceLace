@@ -57,7 +57,16 @@ def _parse_bool_form(val: str | None, default: bool = False) -> bool:
     return normalized in {"1", "true", "yes", "on"}
 
 
-async def _transcribe_with_optional_language(engine, audio_path: str, *, backend: str, language: str, speaker_labels: bool, enable_timestamps: bool):
+async def _transcribe_with_optional_language(
+    engine,
+    audio_path: str,
+    *,
+    backend: str,
+    language: str,
+    speaker_labels: bool,
+    enable_timestamps: bool,
+    silence_aware_split: bool,
+):
     try:
         return await engine.transcribe(
             audio_path,
@@ -65,9 +74,10 @@ async def _transcribe_with_optional_language(engine, audio_path: str, *, backend
             language=language,
             speaker_labels=speaker_labels,
             enable_timestamps=enable_timestamps,
+            silence_aware_split=silence_aware_split,
         )
     except TypeError as exc:
-        if "language" not in str(exc) or "unexpected keyword" not in str(exc):
+        if "language" not in str(exc) and "silence_aware_split" not in str(exc) and "unexpected keyword" not in str(exc):
             raise
         return await engine.transcribe(
             audio_path,
@@ -155,6 +165,7 @@ async def _run_project_from_audio_task(task_id: str, task_input: dict, state) ->
             asr_backend=str(task_input.get("asr_backend") or "whisper"),
             language=str(task_input.get("language") or "auto"),
             enable_timestamps=bool(task_input.get("enable_timestamps")),
+            silence_aware_split=bool(task_input.get("silence_aware_split", True)),
             vocal_separation=bool(task_input.get("vocal_separation")),
             vocal_separation_model=str(task_input.get("vocal_separation_model") or ""),
             vocal_separation_repo_dir=str(task_input.get("vocal_separation_repo_dir") or ""),
@@ -188,6 +199,7 @@ async def transcribe_file(
     enable_timestamps: str | None = Form(None),
     vocal_separation: str | None = Form(None),
     vocal_separation_model: str | None = Form(None),
+    silence_aware_split: str | None = Form(None),
     state=Depends(get_app_state),
 ):
     normalized_backend = (backend or "").strip().lower()
@@ -199,9 +211,11 @@ async def transcribe_file(
         raise HTTPException(status_code=400, detail=f"Unsupported ASR backend: {backend}")
     effective_speaker_labels = _parse_bool_form(speaker_labels, default=False)
     effective_timestamps = _parse_bool_form(enable_timestamps, default=False)
+    effective_silence_aware_split = _parse_bool_form(silence_aware_split, default=True)
     if normalized_backend == "qwen3_crispasr":
         effective_speaker_labels = False
         effective_timestamps = False
+        effective_silence_aware_split = False
 
     suffix = Path(file.filename or "upload.wav").suffix or ".wav"
     tmp_path: Path | None = None
@@ -234,6 +248,7 @@ async def transcribe_file(
             language=language,
             speaker_labels=effective_speaker_labels,
             enable_timestamps=effective_timestamps,
+            silence_aware_split=effective_silence_aware_split,
         )
         warnings = list(result.get("warnings") if isinstance(result.get("warnings"), list) else [])
         warnings.extend(separation.warnings)
@@ -264,6 +279,7 @@ async def project_from_audio(
     enable_timestamps: str | None = Form(None),
     vocal_separation: str | None = Form(None),
     vocal_separation_model: str | None = Form(None),
+    silence_aware_split: str | None = Form(None),
     parse_mode: str = Form("verified_five_step_pipeline"),
     auto_parse: str | None = Form(None),
     speaker_map: str | None = Form(None),
@@ -298,6 +314,7 @@ async def project_from_audio(
             "asr_backend": chosen_backend,
             "language": language,
             "enable_timestamps": _parse_bool_form(enable_timestamps, default=False),
+            "silence_aware_split": _parse_bool_form(silence_aware_split, default=True),
             "vocal_separation": bool(vocal_options["enabled"]),
             "vocal_separation_model": str(vocal_options["model"]),
             "vocal_separation_repo_dir": str(vocal_options["repo_dir"]),
@@ -313,6 +330,7 @@ async def project_from_audio(
         if chosen_backend == "qwen3_crispasr":
             task_input["speaker_labels"] = False
             task_input["enable_timestamps"] = False
+            task_input["silence_aware_split"] = False
         handle = asyncio.create_task(_run_project_from_audio_task(task_id, task_input, state))
         state.asr_task_handles[task_id] = handle
         return {"task_id": task_id}

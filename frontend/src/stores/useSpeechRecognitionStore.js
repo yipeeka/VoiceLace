@@ -17,6 +17,7 @@ export const useSpeechRecognitionStore = create((set) => ({
   asrBackend: "whisper",
   asrLanguage: "auto",
   asrEnableTimestamps: false,
+  silenceAwareSplit: true,
   vocalSeparationEnabled: false,
   vocalSeparationModel: "htdemucs",
   translationResult: "",
@@ -57,6 +58,7 @@ export const useSpeechRecognitionStore = create((set) => ({
     set({ asrLanguage: val || "auto" });
   },
   setAsrEnableTimestamps: (asrEnableTimestamps) => set({ asrEnableTimestamps: Boolean(asrEnableTimestamps) }),
+  setSilenceAwareSplit: (silenceAwareSplit) => set({ silenceAwareSplit: Boolean(silenceAwareSplit) }),
   setVocalSeparationEnabled: (vocalSeparationEnabled) => set({ vocalSeparationEnabled: Boolean(vocalSeparationEnabled) }),
   setVocalSeparationModel: (vocalSeparationModel) => {
     const val = String(vocalSeparationModel ?? "htdemucs").trim().toLowerCase();
@@ -93,6 +95,7 @@ export const useSpeechRecognitionStore = create((set) => ({
       translationResult: "",
       translationError: "",
       asrEnableTimestamps: false,
+      silenceAwareSplit: true,
       asrLanguage: "auto",
       vocalSeparationEnabled: false,
       vocalSeparationModel: "htdemucs",

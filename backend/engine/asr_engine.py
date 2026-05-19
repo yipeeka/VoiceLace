@@ -17,9 +17,12 @@ TIMELINE_TEXT_PADDING_SEC = 0.65
 TIMELINE_LONG_SEGMENT_MIN_DIFF_SEC = 2.0
 TIMELINE_LONG_SEGMENT_RATIO = 2.2
 TIMELINE_MAX_CORRECTED_TEXT_RATIO = 1.35
-TIMELINE_WORD_SPLIT_GAP_SEC = 1.0
-TIMELINE_WORD_SPLIT_PUNCTUATION_GAP_SEC = 1.0
+TIMELINE_WORD_SPLIT_GAP_SEC = 0.7
+TIMELINE_WORD_SPLIT_PUNCTUATION_GAP_SEC = 0.7
 TIMELINE_MIN_SPLIT_SEGMENT_SEC = 0.7
+SILENCE_AWARE_MIN_SILENCE_MS = 1000
+SILENCE_AWARE_SEEK_STEP_MS = 20
+SILENCE_AWARE_THRESHOLD_DBFS = -45
 
 
 class ASREngine:
@@ -114,6 +117,7 @@ class ASREngine:
         language: str | None = None,
         speaker_labels: bool = False,
         enable_timestamps: bool | None = None,
+        silence_aware_split: bool = True,
     ) -> dict[str, Any]:
         target = Path(audio_path)
         if not target.exists():
@@ -164,12 +168,23 @@ class ASREngine:
                 rebuilt_text = "\n".join(str(seg.get("text", "")).strip() for seg in aligned_segments if str(seg.get("text", "")).strip()).strip()
                 if rebuilt_text:
                     raw_text = rebuilt_text
-        aligned_segments, split_count = self._split_segments_by_word_gaps(aligned_segments)
+        silence_ranges: list[dict[str, float]] = []
+        if silence_aware_split and target_backend == "whisper":
+            try:
+                silence_ranges = self._detect_silence_ranges(target)
+            except Exception as exc:
+                warnings.append(f"长静音检测失败，已回退词间切分：{exc}")
+        aligned_segments, split_count, silence_split_count = self._split_segments_by_word_gaps(
+            aligned_segments,
+            silence_ranges=silence_ranges if silence_aware_split else None,
+        )
         if split_count:
             warnings.append(f"已按词间静音自动拆分 {split_count} 个识别片段。")
             rebuilt_text = "\n".join(str(seg.get("text", "")).strip() for seg in aligned_segments if str(seg.get("text", "")).strip()).strip()
             if rebuilt_text:
                 raw_text = rebuilt_text
+        if silence_split_count:
+            warnings.append(f"已避开 {silence_split_count} 段长静音区域切分识别片段。")
         audio_duration_sec = self._probe_audio_duration_seconds(target)
         aligned_segments, corrected_count = self._correct_segment_timings(
             aligned_segments,
@@ -400,10 +415,71 @@ class ASREngine:
         return text.strip()
 
     @classmethod
-    def _split_segments_by_word_gaps(cls, segments: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    @staticmethod
+    def _normalize_silence_ranges(silence_ranges: Any) -> list[dict[str, float]]:
+        if not isinstance(silence_ranges, list):
+            return []
+        normalized: list[dict[str, float]] = []
+        for item in silence_ranges:
+            if not isinstance(item, dict):
+                continue
+            start = ASREngine._coerce_finite_seconds(item.get("start"))
+            end = ASREngine._coerce_finite_seconds(item.get("end"))
+            if start is None or end is None or end <= start:
+                continue
+            normalized.append({"start": round(start, 3), "end": round(end, 3)})
+        return sorted(normalized, key=lambda value: (value["start"], value["end"]))
+
+    @staticmethod
+    def _find_silence_between(prev_end: float, next_start: float, silence_ranges: list[dict[str, float]]) -> dict[str, float] | None:
+        if next_start <= prev_end:
+            return None
+        for item in silence_ranges:
+            start = float(item["start"])
+            end = float(item["end"])
+            if end <= prev_end:
+                continue
+            if start >= next_start:
+                break
+            if max(start, prev_end) < min(end, next_start):
+                return item
+            if start >= prev_end and end <= next_start:
+                return item
+        return None
+
+    @staticmethod
+    def _detect_silence_ranges(audio_path: Path) -> list[dict[str, float]]:
+        try:
+            from pydub import AudioSegment
+            from pydub.silence import detect_silence
+        except Exception as exc:
+            raise RuntimeError(f"缺少 pydub 静音检测依赖：{exc}") from exc
+
+        audio = AudioSegment.from_file(audio_path)
+        ranges_ms = detect_silence(
+            audio,
+            min_silence_len=SILENCE_AWARE_MIN_SILENCE_MS,
+            silence_thresh=SILENCE_AWARE_THRESHOLD_DBFS,
+            seek_step=SILENCE_AWARE_SEEK_STEP_MS,
+        )
+        return [
+            {"start": round(max(0, int(start_ms)) / 1000.0, 3), "end": round(max(0, int(end_ms)) / 1000.0, 3)}
+            for start_ms, end_ms in ranges_ms
+            if int(end_ms) > int(start_ms)
+        ]
+
+    @classmethod
+    def _split_segments_by_word_gaps(
+        cls,
+        segments: list[dict[str, Any]],
+        *,
+        silence_ranges: list[dict[str, float]] | None = None,
+    ) -> tuple[list[dict[str, Any]], int, int]:
         next_segments: list[dict[str, Any]] = []
         split_count = 0
+        silence_split_count = 0
         sentence_end = {"。", "！", "？", ".", "!", "?"}
+        normalized_silence_ranges = cls._normalize_silence_ranges(silence_ranges)
 
         def group_duration(group: dict[str, Any]) -> float:
             words = group.get("words") if isinstance(group, dict) else []
@@ -426,12 +502,8 @@ class ASREngine:
                 return
             group["suffix_text"] = cls._join_tokens_for_language(str(group.get("suffix_text", "")).strip(), clean)
 
-        def absorb_short_groups(raw_groups: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
-            groups = [
-                {"words": list(group), "prefix_text": "", "suffix_text": ""}
-                for group in raw_groups
-                if group
-            ]
+        def absorb_short_groups(raw_groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            groups = [dict(group) for group in raw_groups if group.get("words")]
             index = 0
             while len(groups) > 1 and index < len(groups):
                 if group_duration(groups[index]) >= TIMELINE_MIN_SPLIT_SEGMENT_SEC:
@@ -459,6 +531,57 @@ class ASREngine:
                 index = max(0, index - 1)
             return groups
 
+        def segment_duration(segment: dict[str, Any]) -> float:
+            start = cls._coerce_finite_seconds(segment.get("start"))
+            end = cls._coerce_finite_seconds(segment.get("end"))
+            if start is None or end is None:
+                return 0.0
+            return max(0.0, end - start)
+
+        def segment_gap(previous: dict[str, Any], next_item: dict[str, Any]) -> float:
+            previous_end = cls._coerce_finite_seconds(previous.get("end"))
+            next_start = cls._coerce_finite_seconds(next_item.get("start"))
+            if previous_end is None or next_start is None:
+                return 0.0
+            return max(0.0, next_start - previous_end)
+
+        def prepend_segment_text(segment: dict[str, Any], text: str) -> None:
+            clean = str(text or "").strip()
+            if clean:
+                segment["text"] = cls._join_tokens_for_language(clean, str(segment.get("text", "")).strip())
+
+        def append_segment_text(segment: dict[str, Any], text: str) -> None:
+            clean = str(text or "").strip()
+            if clean:
+                segment["text"] = cls._join_tokens_for_language(str(segment.get("text", "")).strip(), clean)
+
+        def absorb_short_created_segments(created_segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            segments = [dict(segment) for segment in created_segments if str(segment.get("text", "")).strip()]
+            index = 0
+            while len(segments) > 1 and index < len(segments):
+                if segment_duration(segments[index]) >= TIMELINE_MIN_SPLIT_SEGMENT_SEC:
+                    index += 1
+                    continue
+                text = str(segments[index].get("text", "")).strip()
+                if index == 0:
+                    prepend_segment_text(segments[1], text)
+                    segments.pop(0)
+                    continue
+                if index == len(segments) - 1:
+                    append_segment_text(segments[index - 1], text)
+                    segments.pop(index)
+                    index = max(0, index - 1)
+                    continue
+                previous_gap = segment_gap(segments[index - 1], segments[index])
+                next_gap = segment_gap(segments[index], segments[index + 1])
+                if previous_gap <= next_gap:
+                    append_segment_text(segments[index - 1], text)
+                else:
+                    prepend_segment_text(segments[index + 1], text)
+                segments.pop(index)
+                index = max(0, index - 1)
+            return segments
+
         for seg in segments:
             item = dict(seg or {})
             words = cls._normalize_word_items(item.get("words"))
@@ -466,20 +589,30 @@ class ASREngine:
                 next_segments.append(item)
                 continue
 
-            groups: list[list[dict[str, Any]]] = []
-            current: list[dict[str, Any]] = [words[0]]
+            groups: list[dict[str, Any]] = []
+            current: dict[str, Any] = {"words": [words[0]], "prefix_text": "", "suffix_text": "", "start_boundary": None, "end_boundary": None}
             for word in words[1:]:
-                previous = current[-1]
+                previous = current["words"][-1]
                 gap = max(0.0, float(word["start"]) - float(previous["end"]))
                 previous_text = str(previous.get("text", "")).strip()
-                split_here = gap >= TIMELINE_WORD_SPLIT_GAP_SEC
-                if previous_text[-1:] in sentence_end and gap >= TIMELINE_WORD_SPLIT_PUNCTUATION_GAP_SEC:
+                silence_range = cls._find_silence_between(float(previous["end"]), float(word["start"]), normalized_silence_ranges)
+                split_here = silence_range is not None or gap > TIMELINE_WORD_SPLIT_GAP_SEC
+                if previous_text[-1:] in sentence_end and gap > TIMELINE_WORD_SPLIT_PUNCTUATION_GAP_SEC:
                     split_here = True
                 if split_here:
+                    if silence_range is not None:
+                        current["end_boundary"] = float(silence_range["start"])
+                        silence_split_count += 1
                     groups.append(current)
-                    current = [word]
+                    current = {
+                        "words": [word],
+                        "prefix_text": "",
+                        "suffix_text": "",
+                        "start_boundary": float(silence_range["end"]) if silence_range is not None else None,
+                        "end_boundary": None,
+                    }
                 else:
-                    current.append(word)
+                    current["words"].append(word)
             groups.append(current)
 
             if len(groups) < 2:
@@ -501,8 +634,10 @@ class ASREngine:
                 ).strip()
                 if not text:
                     continue
-                group_start = max(0.0, float(words[0]["start"]) - TIMELINE_WORD_PADDING_SEC)
-                group_end = float(words[-1]["end"]) + TIMELINE_WORD_PADDING_SEC
+                start_boundary = cls._coerce_finite_seconds(group.get("start_boundary"))
+                end_boundary = cls._coerce_finite_seconds(group.get("end_boundary"))
+                group_start = max(0.0, start_boundary if start_boundary is not None else float(words[0]["start"]) - TIMELINE_WORD_PADDING_SEC)
+                group_end = end_boundary if end_boundary is not None else float(words[-1]["end"]) + TIMELINE_WORD_PADDING_SEC
                 if original_start is not None:
                     group_start = max(original_start, group_start)
                 if original_end is not None:
@@ -516,16 +651,21 @@ class ASREngine:
                         "end": group_end,
                         "text": text,
                         "words": words,
+                        "preserve_timing_boundaries": start_boundary is not None or end_boundary is not None,
                     }
                 )
 
             if not created:
                 next_segments.append(item)
                 continue
+            created = absorb_short_created_segments(created)
+            if not created:
+                next_segments.append(item)
+                continue
             split_count += max(0, len(created) - 1)
             next_segments.extend(created)
 
-        return next_segments, split_count
+        return next_segments, split_count, silence_split_count
 
     @staticmethod
     def _estimate_speaking_seconds(text: str) -> float:
@@ -600,7 +740,9 @@ class ASREngine:
             original_start = start
             original_end = end
             word_range = cls._word_time_range(item.get("words"))
-            if word_range:
+            if item.get("preserve_timing_boundaries"):
+                pass
+            elif word_range:
                 word_start, word_end = word_range
                 start = max(original_start, word_start - TIMELINE_WORD_PADDING_SEC)
                 end = min(original_end, word_end + TIMELINE_WORD_PADDING_SEC)

@@ -224,6 +224,7 @@ async def create_project_from_audio(
     asr_backend: str = "whisper",
     language: str = "auto",
     enable_timestamps: bool = False,
+    silence_aware_split: bool = True,
     vocal_separation: bool = False,
     vocal_separation_model: str = "htdemucs",
     vocal_separation_repo_dir: str = "",
@@ -259,9 +260,10 @@ async def create_project_from_audio(
                 language=language,
                 speaker_labels=speaker_labels,
                 enable_timestamps=enable_timestamps,
+                silence_aware_split=silence_aware_split,
             )
         except TypeError as exc:
-            if "language" not in str(exc) or "unexpected keyword" not in str(exc):
+            if "language" not in str(exc) and "silence_aware_split" not in str(exc) and "unexpected keyword" not in str(exc):
                 raise
             return await state.asr_engine.transcribe(
                 str(target_path),

@@ -285,7 +285,7 @@ class AsrEngineTest(unittest.TestCase):
                                 {"start": 37.150, "end": 37.700, "word": "解析"},
                                 {"start": 37.760, "end": 38.200, "word": "完成"},
                                 {"start": 38.260, "end": 38.620, "word": "后，"},
-                                {"start": 39.520, "end": 40.200, "word": "进入"},
+                                {"start": 39.300, "end": 40.200, "word": "进入"},
                                 {"start": 40.260, "end": 40.900, "word": "基础"},
                                 {"start": 40.960, "end": 41.520, "word": "编辑"},
                                 {"start": 41.580, "end": 42.100, "word": "页面。"},
@@ -304,7 +304,97 @@ class AsrEngineTest(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def test_transcribe_merges_split_groups_shorter_than_one_second(self) -> None:
+    def test_transcribe_prefers_detected_silence_boundaries_for_split(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-silence-boundary-split"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            engine = ASREngine()
+
+            async def fake_transcribe(_: object):
+                return (
+                    "解析完成后，进入基础编辑页面。",
+                    [
+                        {
+                            "start": 36.990,
+                            "end": 48.900,
+                            "text": "解析完成后，进入基础编辑页面。",
+                            "words": [
+                                {"start": 37.150, "end": 37.700, "word": "解析"},
+                                {"start": 37.760, "end": 38.200, "word": "完成"},
+                                {"start": 38.260, "end": 38.620, "word": "后，"},
+                                {"start": 45.200, "end": 45.580, "word": "进入"},
+                                {"start": 45.640, "end": 46.380, "word": "基础"},
+                                {"start": 46.440, "end": 47.120, "word": "编辑"},
+                                {"start": 47.180, "end": 47.760, "word": "页面。"},
+                            ],
+                        }
+                    ],
+                    "faster-whisper",
+                )
+
+            engine._transcribe_whisper_segments = fake_transcribe  # type: ignore[assignment]
+            engine._detect_silence_ranges = lambda _path: [{"start": 39.0, "end": 44.0}]  # type: ignore[method-assign]
+
+            result = asyncio.run(engine.transcribe(str(wav_path), backend="whisper", speaker_labels=False))
+            self.assertEqual(len(result["alignments"]), 2)
+            self.assertEqual(result["alignments"][0]["end_ms"], 39000)
+            self.assertEqual(result["alignments"][1]["start_ms"], 44000)
+            self.assertIn("已避开 1 段长静音区域切分识别片段。", result["warnings"])
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_transcribe_can_disable_silence_aware_split(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-silence-split-disabled"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            engine = ASREngine()
+
+            async def fake_transcribe(_: object):
+                return (
+                    "解析完成后，进入基础编辑页面。",
+                    [
+                        {
+                            "start": 36.990,
+                            "end": 48.900,
+                            "text": "解析完成后，进入基础编辑页面。",
+                            "words": [
+                                {"start": 37.150, "end": 37.700, "word": "解析"},
+                                {"start": 37.760, "end": 38.200, "word": "完成"},
+                                {"start": 38.260, "end": 38.620, "word": "后，"},
+                                {"start": 45.200, "end": 45.580, "word": "进入"},
+                                {"start": 45.640, "end": 46.380, "word": "基础"},
+                                {"start": 46.440, "end": 47.120, "word": "编辑"},
+                                {"start": 47.180, "end": 47.760, "word": "页面。"},
+                            ],
+                        }
+                    ],
+                    "faster-whisper",
+                )
+
+            engine._transcribe_whisper_segments = fake_transcribe  # type: ignore[assignment]
+            engine._detect_silence_ranges = lambda _path: [{"start": 39.0, "end": 44.0}]  # type: ignore[method-assign]
+
+            result = asyncio.run(engine.transcribe(str(wav_path), backend="whisper", speaker_labels=False, silence_aware_split=False))
+            self.assertEqual(len(result["alignments"]), 2)
+            self.assertLess(result["alignments"][0]["end_ms"], 39000)
+            self.assertGreater(result["alignments"][1]["start_ms"], 44000)
+            self.assertNotIn("已避开 1 段长静音区域切分识别片段。", result["warnings"])
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_silence_ranges_keep_millisecond_precision(self) -> None:
+        result = ASREngine._normalize_silence_ranges([
+            {"start": 36.9234, "end": 44.8765},
+        ])
+        self.assertEqual(result, [{"start": 36.923, "end": 44.877}])
+
+    def test_transcribe_merges_split_groups_shorter_than_min_duration(self) -> None:
         temp_dir = settings.data_dir / "tmp-tests" / "asr-merge-short-split"
         shutil.rmtree(temp_dir, ignore_errors=True)
         temp_dir.mkdir(parents=True, exist_ok=True)
@@ -340,6 +430,71 @@ class AsrEngineTest(unittest.TestCase):
             self.assertEqual(result["alignments"][0]["text"], "好，进入基础编辑页面。")
             self.assertGreaterEqual(result["alignments"][0]["start_ms"], 39100)
             self.assertNotIn("已按词间静音自动拆分 1 个识别片段。", result["warnings"])
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_transcribe_removes_segments_that_become_short_after_silence_boundaries(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-merge-boundary-short-split"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            engine = ASREngine()
+
+            async def fake_transcribe(_: object):
+                return (
+                    "点击开始解析按钮。\n解析完成后，进入基础编辑页面。",
+                    [
+                        {
+                            "start": 25.460,
+                            "end": 31.550,
+                            "text": "点击开始解析按钮。",
+                            "words": [
+                                {"start": 25.100, "end": 25.380, "word": "点"},
+                                {"start": 26.700, "end": 26.900, "word": "击"},
+                                {"start": 26.960, "end": 27.560, "word": "开始"},
+                                {"start": 27.620, "end": 28.180, "word": "解析"},
+                                {"start": 28.240, "end": 28.820, "word": "按钮。"},
+                            ],
+                        },
+                        {
+                            "start": 36.990,
+                            "end": 48.900,
+                            "text": "解析完成后，进入基础编辑页面。",
+                            "words": [
+                                {"start": 37.050, "end": 37.120, "word": "解"},
+                                {"start": 38.300, "end": 38.520, "word": "析"},
+                                {"start": 38.580, "end": 39.120, "word": "完成"},
+                                {"start": 39.180, "end": 39.540, "word": "后，"},
+                                {"start": 45.200, "end": 45.580, "word": "进入"},
+                                {"start": 45.640, "end": 46.380, "word": "基础"},
+                                {"start": 46.440, "end": 47.120, "word": "编辑"},
+                                {"start": 47.180, "end": 47.760, "word": "页面。"},
+                            ],
+                        },
+                    ],
+                    "faster-whisper",
+                )
+
+            engine._transcribe_whisper_segments = fake_transcribe  # type: ignore[assignment]
+            engine._detect_silence_ranges = lambda _path: [  # type: ignore[method-assign]
+                {"start": 25.460, "end": 26.500},
+                {"start": 37.120, "end": 38.000},
+                {"start": 40.000, "end": 44.000},
+            ]
+
+            result = asyncio.run(engine.transcribe(str(wav_path), backend="whisper", speaker_labels=False))
+            self.assertEqual([item["text"] for item in result["alignments"]], [
+                "点击开始解析按钮。",
+                "解析完成后，",
+                "进入基础编辑页面。",
+            ])
+            for item in result["alignments"]:
+                self.assertLess(item["start_ms"], item["end_ms"])
+                self.assertGreaterEqual(item["end_ms"] - item["start_ms"], 700)
+            self.assertEqual(result["alignments"][0]["start_ms"], 26500)
+            self.assertEqual(result["alignments"][1]["start_ms"], 38000)
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 

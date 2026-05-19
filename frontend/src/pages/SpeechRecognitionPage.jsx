@@ -91,6 +91,8 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const setAsrLanguage = useSpeechRecognitionStore((state) => state.setAsrLanguage);
   const asrEnableTimestamps = useSpeechRecognitionStore((state) => state.asrEnableTimestamps);
   const setAsrEnableTimestamps = useSpeechRecognitionStore((state) => state.setAsrEnableTimestamps);
+  const silenceAwareSplit = useSpeechRecognitionStore((state) => state.silenceAwareSplit);
+  const setSilenceAwareSplit = useSpeechRecognitionStore((state) => state.setSilenceAwareSplit);
   const vocalSeparationEnabled = useSpeechRecognitionStore((state) => state.vocalSeparationEnabled);
   const setVocalSeparationEnabled = useSpeechRecognitionStore((state) => state.setVocalSeparationEnabled);
   const vocalSeparationModel = useSpeechRecognitionStore((state) => state.vocalSeparationModel);
@@ -791,6 +793,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       formData.append("language", asrLanguage || "auto");
       formData.append("speaker_labels", String(!isQwen3Backend && Boolean(speakerLabels)));
       formData.append("enable_timestamps", String(Boolean(effectiveAsrEnableTimestamps)));
+      formData.append("silence_aware_split", String(!isQwen3Backend && Boolean(silenceAwareSplit)));
       formData.append("vocal_separation", String(Boolean(vocalSeparationEnabled)));
       formData.append("vocal_separation_model", vocalSeparationModel || "htdemucs");
       const controller = new AbortController();
@@ -1411,6 +1414,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       formData.append("backend", asrBackendConfigured || "whisper");
       formData.append("language", asrLanguage || "auto");
       formData.append("enable_timestamps", String(Boolean(effectiveAsrEnableTimestamps)));
+      formData.append("silence_aware_split", String(!isQwen3Backend && Boolean(silenceAwareSplit)));
       formData.append("vocal_separation", String(Boolean(vocalSeparationEnabled)));
       formData.append("vocal_separation_model", vocalSeparationModel || "htdemucs");
       formData.append("parse_mode", "verified_five_step_pipeline");
@@ -1865,6 +1869,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           onAsrLanguageChange={setAsrLanguage}
           onRecognize={handleRecognize}
           onSpeakerLabelsChange={setSpeakerLabels}
+          onSilenceAwareSplitChange={setSilenceAwareSplit}
           onStartRecording={handleStartRecording}
           onStopRecording={handleStopRecording}
           onUnloadAsr={handleUnloadAsr}
@@ -1875,6 +1880,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           pendingAudio={pendingAudio}
           projectTask={projectTask}
           showTimestampToggle={showTimestampToggle}
+          silenceAwareSplit={silenceAwareSplit}
           speakerLabelHint={speakerLabelHint}
           speakerLabels={speakerLabels}
           vocalSeparationEnabled={vocalSeparationEnabled}
