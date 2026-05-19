@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import math
 from pathlib import Path
 import re
 import subprocess
@@ -9,6 +10,16 @@ import tempfile
 from typing import Any
 
 from backend.config import settings
+
+
+TIMELINE_WORD_PADDING_SEC = 0.08
+TIMELINE_TEXT_PADDING_SEC = 0.65
+TIMELINE_LONG_SEGMENT_MIN_DIFF_SEC = 2.0
+TIMELINE_LONG_SEGMENT_RATIO = 2.2
+TIMELINE_MAX_CORRECTED_TEXT_RATIO = 1.35
+TIMELINE_WORD_SPLIT_GAP_SEC = 1.0
+TIMELINE_WORD_SPLIT_PUNCTUATION_GAP_SEC = 1.0
+TIMELINE_MIN_SPLIT_SEGMENT_SEC = 0.7
 
 
 class ASREngine:
@@ -153,6 +164,20 @@ class ASREngine:
                 rebuilt_text = "\n".join(str(seg.get("text", "")).strip() for seg in aligned_segments if str(seg.get("text", "")).strip()).strip()
                 if rebuilt_text:
                     raw_text = rebuilt_text
+        aligned_segments, split_count = self._split_segments_by_word_gaps(aligned_segments)
+        if split_count:
+            warnings.append(f"已按词间静音自动拆分 {split_count} 个识别片段。")
+            rebuilt_text = "\n".join(str(seg.get("text", "")).strip() for seg in aligned_segments if str(seg.get("text", "")).strip()).strip()
+            if rebuilt_text:
+                raw_text = rebuilt_text
+        audio_duration_sec = self._probe_audio_duration_seconds(target)
+        aligned_segments, corrected_count = self._correct_segment_timings(
+            aligned_segments,
+            audio_duration_sec=audio_duration_sec,
+        )
+        if corrected_count:
+            warnings.append(f"已矫正 {corrected_count} 个异常过长或过宽的识别时间轴片段。")
+
         speaker_map: dict[str, str] = {}
         has_timestamps = any(
             isinstance(seg.get("start"), (int, float)) and isinstance(seg.get("end"), (int, float))
@@ -264,40 +289,63 @@ class ASREngine:
         language_arg = None if str(language or "auto").strip().lower() in {"", "auto", "unknown"} else str(language).strip().lower()
         if self._backend == "openai-whisper":
             whisper_device, _, _ = self._parse_device(self.device)
-            kwargs = {"fp16": whisper_device.startswith("cuda")}
+            kwargs = {"fp16": whisper_device.startswith("cuda"), "word_timestamps": True}
             if language_arg:
                 kwargs["language"] = language_arg
-            result = self._model.transcribe(str(target), **kwargs)
+            try:
+                result = self._model.transcribe(str(target), **kwargs)
+            except TypeError as exc:
+                if "word_timestamps" not in str(exc) and "unexpected keyword" not in str(exc):
+                    raise
+                kwargs.pop("word_timestamps", None)
+                result = self._model.transcribe(str(target), **kwargs)
             raw_text = str(result.get("text", "")).strip()
             for seg in result.get("segments", []) or []:
                 text = str(seg.get("text", "")).strip()
                 if not text:
                     continue
-                segments.append(
-                    {
-                        "start": float(seg.get("start", 0.0) or 0.0),
-                        "end": float(seg.get("end", 0.0) or 0.0),
-                        "text": text,
-                    }
-                )
+                item = {
+                    "start": float(seg.get("start", 0.0) or 0.0),
+                    "end": float(seg.get("end", 0.0) or 0.0),
+                    "text": text,
+                }
+                words = seg.get("words")
+                if isinstance(words, list):
+                    item["words"] = words
+                segments.append(item)
         elif self._backend == "faster-whisper":
-            kwargs = {"beam_size": 5, "vad_filter": True}
+            kwargs = {"beam_size": 5, "vad_filter": True, "word_timestamps": True}
             if language_arg:
                 kwargs["language"] = language_arg
-            fw_segments, _ = self._model.transcribe(str(target), **kwargs)
+            try:
+                fw_segments, _ = self._model.transcribe(str(target), **kwargs)
+            except TypeError as exc:
+                if "word_timestamps" not in str(exc) and "unexpected keyword" not in str(exc):
+                    raise
+                kwargs.pop("word_timestamps", None)
+                fw_segments, _ = self._model.transcribe(str(target), **kwargs)
             raw_parts: list[str] = []
             for seg in fw_segments:
                 text = str(getattr(seg, "text", "")).strip()
                 if not text:
                     continue
                 raw_parts.append(text)
-                segments.append(
-                    {
-                        "start": float(getattr(seg, "start", 0.0) or 0.0),
-                        "end": float(getattr(seg, "end", 0.0) or 0.0),
-                        "text": text,
-                    }
-                )
+                item = {
+                    "start": float(getattr(seg, "start", 0.0) or 0.0),
+                    "end": float(getattr(seg, "end", 0.0) or 0.0),
+                    "text": text,
+                }
+                words = getattr(seg, "words", None)
+                if words:
+                    item["words"] = [
+                        {
+                            "start": getattr(word, "start", None),
+                            "end": getattr(word, "end", None),
+                            "word": getattr(word, "word", ""),
+                        }
+                        for word in words
+                    ]
+                segments.append(item)
             raw_text = "".join(raw_parts).strip()
         else:
             raise RuntimeError("ASR backend unavailable")
@@ -305,6 +353,284 @@ class ASREngine:
         if not segments and raw_text:
             segments = [{"start": None, "end": None, "text": raw_text}]
         return raw_text, segments, self._backend or "whisper"
+
+    @staticmethod
+    def _coerce_finite_seconds(value: Any) -> float | None:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(number) or number < 0:
+            return None
+        return number
+
+    @classmethod
+    def _word_time_range(cls, words: Any) -> tuple[float, float] | None:
+        normalized = cls._normalize_word_items(words)
+        starts = [float(word["start"]) for word in normalized]
+        ends = [float(word["end"]) for word in normalized]
+        if not starts or not ends:
+            return None
+        return min(starts), max(ends)
+
+    @classmethod
+    def _normalize_word_items(cls, words: Any) -> list[dict[str, Any]]:
+        if not isinstance(words, list):
+            return []
+        normalized: list[dict[str, Any]] = []
+        for word in words:
+            if isinstance(word, dict):
+                start = cls._coerce_finite_seconds(word.get("start"))
+                end = cls._coerce_finite_seconds(word.get("end"))
+                text = str(word.get("word") or word.get("text") or "").strip()
+            else:
+                start = cls._coerce_finite_seconds(getattr(word, "start", None))
+                end = cls._coerce_finite_seconds(getattr(word, "end", None))
+                text = str(getattr(word, "word", "") or getattr(word, "text", "") or "").strip()
+            if start is None or end is None or end <= start or not text:
+                continue
+            normalized.append({"start": start, "end": end, "text": text})
+        return normalized
+
+    @classmethod
+    def _join_word_texts(cls, words: list[dict[str, Any]]) -> str:
+        text = ""
+        for word in words:
+            text = cls._join_tokens_for_language(text, str(word.get("text", "")).strip())
+        return text.strip()
+
+    @classmethod
+    def _split_segments_by_word_gaps(cls, segments: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+        next_segments: list[dict[str, Any]] = []
+        split_count = 0
+        sentence_end = {"。", "！", "？", ".", "!", "?"}
+
+        def group_duration(group: dict[str, Any]) -> float:
+            words = group.get("words") if isinstance(group, dict) else []
+            if not words:
+                return 0.0
+            return max(0.0, float(words[-1]["end"]) - float(words[0]["start"]))
+
+        def group_text(group: dict[str, Any]) -> str:
+            return cls._join_word_texts(group.get("words") or [])
+
+        def add_prefix_text(group: dict[str, Any], text: str) -> None:
+            clean = str(text or "").strip()
+            if not clean:
+                return
+            group["prefix_text"] = cls._join_tokens_for_language(clean, str(group.get("prefix_text", "")).strip())
+
+        def add_suffix_text(group: dict[str, Any], text: str) -> None:
+            clean = str(text or "").strip()
+            if not clean:
+                return
+            group["suffix_text"] = cls._join_tokens_for_language(str(group.get("suffix_text", "")).strip(), clean)
+
+        def absorb_short_groups(raw_groups: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+            groups = [
+                {"words": list(group), "prefix_text": "", "suffix_text": ""}
+                for group in raw_groups
+                if group
+            ]
+            index = 0
+            while len(groups) > 1 and index < len(groups):
+                if group_duration(groups[index]) >= TIMELINE_MIN_SPLIT_SEGMENT_SEC:
+                    index += 1
+                    continue
+                text = group_text(groups[index])
+                if index == 0:
+                    add_prefix_text(groups[1], text)
+                    groups.pop(0)
+                    continue
+                if index == len(groups) - 1:
+                    add_suffix_text(groups[index - 1], text)
+                    groups.pop(index)
+                    index = max(0, index - 1)
+                    continue
+                previous_words = groups[index - 1]["words"]
+                next_words = groups[index + 1]["words"]
+                previous_gap = max(0.0, float(groups[index]["words"][0]["start"]) - float(previous_words[-1]["end"]))
+                next_gap = max(0.0, float(next_words[0]["start"]) - float(groups[index]["words"][-1]["end"]))
+                if previous_gap <= next_gap:
+                    add_suffix_text(groups[index - 1], text)
+                else:
+                    add_prefix_text(groups[index + 1], text)
+                groups.pop(index)
+                index = max(0, index - 1)
+            return groups
+
+        for seg in segments:
+            item = dict(seg or {})
+            words = cls._normalize_word_items(item.get("words"))
+            if len(words) < 2:
+                next_segments.append(item)
+                continue
+
+            groups: list[list[dict[str, Any]]] = []
+            current: list[dict[str, Any]] = [words[0]]
+            for word in words[1:]:
+                previous = current[-1]
+                gap = max(0.0, float(word["start"]) - float(previous["end"]))
+                previous_text = str(previous.get("text", "")).strip()
+                split_here = gap >= TIMELINE_WORD_SPLIT_GAP_SEC
+                if previous_text[-1:] in sentence_end and gap >= TIMELINE_WORD_SPLIT_PUNCTUATION_GAP_SEC:
+                    split_here = True
+                if split_here:
+                    groups.append(current)
+                    current = [word]
+                else:
+                    current.append(word)
+            groups.append(current)
+
+            if len(groups) < 2:
+                next_segments.append(item)
+                continue
+            groups = absorb_short_groups(groups)
+            if not groups:
+                next_segments.append(item)
+                continue
+
+            original_start = cls._coerce_finite_seconds(item.get("start"))
+            original_end = cls._coerce_finite_seconds(item.get("end"))
+            created: list[dict[str, Any]] = []
+            for group in groups:
+                words = group.get("words") or []
+                text = cls._join_tokens_for_language(
+                    cls._join_tokens_for_language(str(group.get("prefix_text", "")).strip(), cls._join_word_texts(words)),
+                    str(group.get("suffix_text", "")).strip(),
+                ).strip()
+                if not text:
+                    continue
+                group_start = max(0.0, float(words[0]["start"]) - TIMELINE_WORD_PADDING_SEC)
+                group_end = float(words[-1]["end"]) + TIMELINE_WORD_PADDING_SEC
+                if original_start is not None:
+                    group_start = max(original_start, group_start)
+                if original_end is not None:
+                    group_end = min(original_end, group_end)
+                if group_end < group_start:
+                    group_end = group_start
+                created.append(
+                    {
+                        **item,
+                        "start": group_start,
+                        "end": group_end,
+                        "text": text,
+                        "words": words,
+                    }
+                )
+
+            if not created:
+                next_segments.append(item)
+                continue
+            split_count += max(0, len(created) - 1)
+            next_segments.extend(created)
+
+        return next_segments, split_count
+
+    @staticmethod
+    def _estimate_speaking_seconds(text: str) -> float:
+        raw = str(text or "").strip()
+        if not raw:
+            return 0.4
+        cjk_count = len(re.findall(r"[\u4e00-\u9fff]", raw))
+        latin_tokens = re.findall(r"[A-Za-z0-9']+", raw)
+        punctuation = re.findall(r"[，。！？；,.!?;:]", raw)
+        if cjk_count > 0:
+            base = cjk_count / 3.2
+        else:
+            base = max(1, len(latin_tokens)) / 2.6
+        pause = len(punctuation) * 0.12
+        return max(0.4, min(60.0, base + pause))
+
+    @staticmethod
+    def _probe_audio_duration_seconds(audio_path: Path) -> float | None:
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(audio_path),
+        ]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, check=True)
+        except Exception:
+            return None
+        stdout = proc.stdout or b""
+        if isinstance(stdout, bytes):
+            raw = stdout.decode("utf-8", errors="ignore").strip()
+        else:
+            raw = str(stdout).strip()
+        try:
+            duration = float(raw)
+        except ValueError:
+            return None
+        if not math.isfinite(duration) or duration <= 0:
+            return None
+        return duration
+
+    @classmethod
+    def _correct_segment_timings(
+        cls,
+        segments: list[dict[str, Any]],
+        *,
+        audio_duration_sec: float | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
+        corrected: list[dict[str, Any]] = []
+        corrected_count = 0
+        audio_duration = cls._coerce_finite_seconds(audio_duration_sec)
+
+        for seg in segments:
+            item = dict(seg or {})
+            start = cls._coerce_finite_seconds(item.get("start"))
+            end = cls._coerce_finite_seconds(item.get("end"))
+            if start is None or end is None:
+                corrected.append(item)
+                continue
+            raw_start = start
+            raw_end = end
+            if audio_duration is not None:
+                start = min(start, audio_duration)
+                end = min(end, audio_duration)
+            if end < start:
+                end = start
+
+            original_start = start
+            original_end = end
+            word_range = cls._word_time_range(item.get("words"))
+            if word_range:
+                word_start, word_end = word_range
+                start = max(original_start, word_start - TIMELINE_WORD_PADDING_SEC)
+                end = min(original_end, word_end + TIMELINE_WORD_PADDING_SEC)
+                if audio_duration is not None:
+                    end = min(end, audio_duration)
+                if end < start:
+                    end = start
+            else:
+                duration = end - start
+                estimated = cls._estimate_speaking_seconds(str(item.get("text", "")))
+                is_suspiciously_long = (
+                    duration - estimated >= TIMELINE_LONG_SEGMENT_MIN_DIFF_SEC
+                    and duration >= max(estimated * TIMELINE_LONG_SEGMENT_RATIO, estimated + TIMELINE_LONG_SEGMENT_MIN_DIFF_SEC)
+                )
+                if is_suspiciously_long:
+                    corrected_duration = max(
+                        0.45,
+                        min(duration, max(estimated + TIMELINE_TEXT_PADDING_SEC, estimated * TIMELINE_MAX_CORRECTED_TEXT_RATIO)),
+                    )
+                    end = start + corrected_duration
+                    if audio_duration is not None:
+                        end = min(end, audio_duration)
+
+            if abs(start - raw_start) > 0.05 or abs(end - raw_end) > 0.05:
+                corrected_count += 1
+            item["start"] = start
+            item["end"] = max(start, end)
+            corrected.append(item)
+
+        return corrected, corrected_count
 
     def _validate_crispasr_config(self) -> None:
         exe = Path(str(self.crispasr_exe or "").strip()).expanduser()
