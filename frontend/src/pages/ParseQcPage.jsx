@@ -30,6 +30,11 @@ function severityRank(value) {
   return 1;
 }
 
+function qcProfileLabel(profile) {
+  if (profile === "dubbing_timeline") return "配音时间轴";
+  return "文本解析";
+}
+
 function extractIssueSegmentIds(issue) {
   const ids = [];
   const directIds = Array.isArray(issue?.segment_ids) ? issue.segment_ids : [];
@@ -80,6 +85,8 @@ export default function ParseQcPage({ onNavigate }) {
 
   const summary = parseQcReport?.summary || {};
   const metrics = parseQcReport?.metrics || {};
+  const profile = parseQcReport?.profile || "script_parse";
+  const isDubbingTimeline = profile === "dubbing_timeline";
   const issues = useMemo(() => (Array.isArray(parseQcReport?.issues) ? parseQcReport.issues : []), [parseQcReport?.issues]);
   const affectedSummary = useMemo(() => {
     const bySeverity = { high: new Set(), medium: new Set(), low: new Set() };
@@ -181,6 +188,7 @@ export default function ParseQcPage({ onNavigate }) {
         ) : (
           <div className="controlRow" style={{ gap: 8, flexWrap: "wrap" }}>
             <span className="statusBadge default">告警类型 {summary.issue_count ?? 0}</span>
+            <span className="statusBadge default">画像 {qcProfileLabel(profile)}</span>
             <span className="statusBadge default">影响片段 {affectedSummary.all}</span>
             <span className="statusBadge error">高 {affectedSummary.high}</span>
             <span className="statusBadge warning">中 {affectedSummary.medium}</span>
@@ -194,12 +202,28 @@ export default function ParseQcPage({ onNavigate }) {
       <GlassCard>
         <h2 className="cardTitle">指标</h2>
         <div className="listStack">
+          <div className="statRow"><span>质检画像</span><strong>{qcProfileLabel(profile)}</strong></div>
           <div className="statRow"><span>原文字符</span><strong>{metrics.source_char_count ?? 0}</strong></div>
           <div className="statRow"><span>片段数</span><strong>{metrics.segment_count ?? 0}</strong></div>
-          <div className="statRow"><span>疑似漏段</span><strong>{metrics.coverage_missing_count ?? 0}</strong></div>
-          <div className="statRow"><span>顺序异常</span><strong>{metrics.coverage_out_of_order_count ?? 0}</strong></div>
-          <div className="statRow"><span>角色变体组</span><strong>{metrics.character_variant_group_count ?? 0}</strong></div>
-          <div className="statRow"><span>超长片段</span><strong>{metrics.long_segment_count ?? 0}</strong></div>
+          {isDubbingTimeline ? (
+            <>
+              <div className="statRow"><span>时间轴片段</span><strong>{metrics.timeline_segment_count ?? 0}</strong></div>
+              <div className="statRow"><span>空文本片段</span><strong>{metrics.empty_segment_count ?? 0}</strong></div>
+              <div className="statRow"><span>时间轴缺失</span><strong>{metrics.timeline_missing_count ?? 0}</strong></div>
+              <div className="statRow"><span>时间轴非法</span><strong>{metrics.timeline_invalid_count ?? 0}</strong></div>
+              <div className="statRow"><span>时间轴重叠</span><strong>{metrics.timeline_overlap_count ?? 0}</strong></div>
+              <div className="statRow"><span>文本超时长</span><strong>{metrics.timeline_text_overrun_count ?? 0}</strong></div>
+              <div className="statRow"><span>角色名异常</span><strong>{metrics.character_abnormal_name_count ?? 0}</strong></div>
+            </>
+          ) : (
+            <>
+              <div className="statRow"><span>疑似漏段</span><strong>{metrics.coverage_missing_count ?? 0}</strong></div>
+              <div className="statRow"><span>顺序异常</span><strong>{metrics.coverage_out_of_order_count ?? 0}</strong></div>
+              <div className="statRow"><span>角色变体组</span><strong>{metrics.character_variant_group_count ?? 0}</strong></div>
+              <div className="statRow"><span>旁白/对白疑似误判</span><strong>{metrics.type_suspect_count ?? 0}</strong></div>
+              <div className="statRow"><span>超长片段</span><strong>{metrics.long_segment_count ?? 0}</strong></div>
+            </>
+          )}
           <div className="statRow"><span>重复组</span><strong>{metrics.duplicate_group_count ?? 0}</strong></div>
         </div>
       </GlassCard>

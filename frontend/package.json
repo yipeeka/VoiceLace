@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test tests/errors.test.mjs tests/api.test.mjs tests/taskChannel.test.mjs tests/taskChannelBridge.test.mjs tests/stale.test.mjs tests/segmentDraft.test.mjs tests/scriptEditorState.test.mjs tests/scriptDiff.test.mjs tests/scriptEditorDirty.test.mjs tests/scriptSidebar.test.mjs tests/projectStore.test.mjs tests/projectToolbar.test.mjs tests/scriptStore.test.mjs tests/speechText.test.mjs tests/speechRecognitionFormat.test.mjs tests/speechRecognitionStore.test.mjs tests/audioClip.test.mjs tests/musicPageData.test.mjs tests/settingsStore.test.mjs tests/uiStore.test.mjs"
+    "test": "node --test tests/errors.test.mjs tests/api.test.mjs tests/taskChannel.test.mjs tests/taskChannelBridge.test.mjs tests/stale.test.mjs tests/segmentDraft.test.mjs tests/scriptEditorState.test.mjs tests/scriptDiff.test.mjs tests/scriptEditorDirty.test.mjs tests/scriptSidebar.test.mjs tests/parseQcDisplay.test.mjs tests/projectStore.test.mjs tests/projectToolbar.test.mjs tests/scriptStore.test.mjs tests/speechText.test.mjs tests/speechRecognitionFormat.test.mjs tests/speechRecognitionStore.test.mjs tests/audioClip.test.mjs tests/musicPageData.test.mjs tests/settingsStore.test.mjs tests/uiStore.test.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

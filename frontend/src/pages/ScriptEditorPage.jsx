@@ -18,6 +18,11 @@ import { useScriptStore } from "../stores/useScriptStore";
 import { useUiStore } from "../stores/useUiStore";
 import { API_BASE_URL } from "../utils/api";
 import { formatError } from "../utils/errors";
+import {
+  buildQcDisplayBySegmentId,
+  normalizeQcSeverity,
+  qcSeverityShortLabel,
+} from "../utils/parseQcDisplay";
 import { buildProjectFilePayload, saveProjectFile } from "../utils/projectFile";
 import {
   buildSegmentEditorDraft,
@@ -37,59 +42,6 @@ import { buildSegmentTimingCheck, getSegmentDurationMismatch } from "../utils/se
 
 const QC_FOCUS_SEGMENTS_KEY = "beautyvoice.qc.focus_segments";
 const QC_FOCUS_SEGMENT_LEGACY_KEY = "beautyvoice.qc.focus_segment_id";
-
-function normalizeQcSeverity(value) {
-  if (value === "high" || value === "medium" || value === "low") {
-    return value;
-  }
-  return "";
-}
-
-function qcSeverityRank(value) {
-  if (value === "high") return 3;
-  if (value === "medium") return 2;
-  if (value === "low") return 1;
-  return 0;
-}
-
-function extractQcIssueSegmentIds(issue) {
-  const ids = [];
-  const addId = (value) => {
-    const normalized = String(value || "").trim();
-    if (normalized) {
-      ids.push(normalized);
-    }
-  };
-
-  addId(issue?.segment_id);
-  (Array.isArray(issue?.segment_ids) ? issue.segment_ids : []).forEach(addId);
-  (Array.isArray(issue?.segments) ? issue.segments : []).forEach((item) => {
-    if (typeof item === "string") {
-      addId(item);
-      return;
-    }
-    addId(item?.id || item?.segment_id);
-  });
-  (Array.isArray(issue?.evidence?.items) ? issue.evidence.items : []).forEach((item) => {
-    addId(item?.segment_id || item?.id);
-  });
-
-  return Array.from(new Set(ids));
-}
-
-function buildQcHighlightBySegmentId(issues) {
-  const next = {};
-  (Array.isArray(issues) ? issues : []).forEach((issue) => {
-    const severity = normalizeQcSeverity(issue?.severity) || "low";
-    extractQcIssueSegmentIds(issue).forEach((segmentId) => {
-      const current = normalizeQcSeverity(next[segmentId]);
-      if (!current || qcSeverityRank(severity) > qcSeverityRank(current)) {
-        next[segmentId] = severity;
-      }
-    });
-  });
-  return next;
-}
 
 function getQcHighlightStyle(severity) {
   if (severity === "high") {
@@ -204,6 +156,8 @@ function SortableSegmentCard({
   draft,
   isFocused,
   qcSeverity,
+  qcRisk,
+  qcRiskCount = 0,
   isDubbingTimelineProject = false,
   speakerOptions,
   canEdit,
@@ -236,7 +190,9 @@ function SortableSegmentCard({
 
   const charColor = getCharColor(segment.speaker);
   const qcStyle = getQcHighlightStyle(qcSeverity);
-  const qcLabel = qcSeverity === "high" ? "高风险" : qcSeverity === "medium" ? "中风险" : qcSeverity === "low" ? "低风险" : "";
+  const qcLabel = qcSeverityShortLabel(qcSeverity);
+  const qcRiskTitle = String(qcRisk?.title || qcRisk?.type || "").trim();
+  const extraRiskCount = Math.max(0, Number(qcRiskCount || 0) - 1);
   const sourceStartText = formatTimelineMs(segment?.source_start_ms);
   const sourceEndText = formatTimelineMs(segment?.source_end_ms);
   const hasSourceRange = Boolean(sourceStartText && sourceEndText);
@@ -264,7 +220,12 @@ function SortableSegmentCard({
       style={{
         ...style,
         ...(qcStyle || {}),
-        ...(isSourceActive ? { outline: "2px solid color-mix(in srgb, var(--accent-primary) 72%, transparent)", outlineOffset: "-2px" } : {}),
+        ...(isSourceActive ? {
+          outline: qcSeverity
+            ? "3px solid color-mix(in srgb, var(--accent-primary) 78%, transparent)"
+            : "2px solid color-mix(in srgb, var(--accent-primary) 72%, transparent)",
+          outlineOffset: qcSeverity ? "-3px" : "-2px",
+        } : {}),
         ...(isFocused ? { outline: "1px solid var(--accent-primary)", outlineOffset: "-1px" } : {}),
       }}
       className={`segmentCard ${isEditing ? "editing" : ""} ${isSelected ? "selected" : ""} ${durationMismatch?.isMismatch ? "durationMismatch" : ""} ${onLocateSource && hasSourceRange ? "sourceLinked" : ""} ${isInsertAnchor ? "insertAnchor" : ""} ${isSourceActive ? "sourceActive" : ""} ${qcSeverity ? `qc-${qcSeverity}` : ""}`}
@@ -369,6 +330,19 @@ function SortableSegmentCard({
                   }}
                 >
                   {qcLabel}
+                </span>
+              ) : null}
+              {qcRiskTitle ? (
+                <span
+                  className={`segmentQcRiskTitle qc-${qcSeverity || "low"}`}
+                  title={qcRisk?.description ? `${qcRiskTitle}：${qcRisk.description}` : qcRiskTitle}
+                >
+                  {qcRiskTitle}
+                </span>
+              ) : null}
+              {extraRiskCount ? (
+                <span className="segmentQcRiskMore" title={`另有 ${extraRiskCount} 条风险`}>
+                  +{extraRiskCount}
                 </span>
               ) : null}
               <span className="segmentType">{segment.type}</span>
@@ -698,16 +672,16 @@ export default function ScriptEditorPage() {
       .find((segment) => sourceAudioAbsoluteMs >= segment.startMs && sourceAudioAbsoluteMs < segment.endMs);
     return active?.id || "";
   }, [segments, sourceAudioAbsoluteMs, sourceAudioCurrentTime, sourceAudioPlaying, sourceAudioSeekSignal, sourceAudioUrl]);
-  const reportQcHighlightBySegmentId = useMemo(
-    () => buildQcHighlightBySegmentId(parseQcReport?.issues),
+  const reportQcDisplay = useMemo(
+    () => buildQcDisplayBySegmentId(parseQcReport?.issues),
     [parseQcReport?.issues]
   );
   const effectiveQcHighlightBySegmentId = useMemo(
     () => ({
-      ...reportQcHighlightBySegmentId,
+      ...reportQcDisplay.highlightBySegmentId,
       ...qcHighlightBySegmentId,
     }),
-    [reportQcHighlightBySegmentId, qcHighlightBySegmentId]
+    [reportQcDisplay.highlightBySegmentId, qcHighlightBySegmentId]
   );
   const visibleQcHighlightCount = useMemo(
     () => visibleSegments.filter((segment) => effectiveQcHighlightBySegmentId[segment.id]).length,
@@ -1550,6 +1524,8 @@ export default function ScriptEditorPage() {
                     isSourceActive={sourceActiveSegmentId === segment.id}
                     isFocused={focusSegmentId === segment.id}
                     qcSeverity={effectiveQcHighlightBySegmentId[segment.id] || ""}
+                    qcRisk={reportQcDisplay.primaryRiskBySegmentId[segment.id] || null}
+                    qcRiskCount={reportQcDisplay.riskCountBySegmentId[segment.id] || 0}
                     isDubbingTimelineProject={isDubbingTimelineProject}
                     isEditing={editingId === segment.id}
                     isInsertAnchor={insertAfterSegmentId === segment.id}

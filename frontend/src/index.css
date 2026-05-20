@@ -1257,6 +1257,7 @@ select.textInput option {
   align-items: center;
   gap: 8px;
   margin-bottom: 5px;
+  min-width: 0;
 }
 
 .segmentIndex {
@@ -1278,6 +1279,32 @@ select.textInput option {
   font-size: 11px;
   color: var(--text-muted);
   margin-left: auto;
+  flex-shrink: 0;
+}
+
+.segmentQcRiskTitle {
+  min-width: 0;
+  max-width: min(360px, 38vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.segmentQcRiskTitle.qc-high { color: var(--danger); }
+.segmentQcRiskTitle.qc-medium { color: var(--warning); }
+.segmentQcRiskTitle.qc-low { color: var(--info); }
+
+.segmentQcRiskMore {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+  padding: 1px 5px;
+  border-radius: var(--radius-full);
+  background: var(--bg-soft);
+  border: 1px solid var(--border-subtle);
 }
 
 .segmentText {

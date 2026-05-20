@@ -5,11 +5,14 @@ import re
 from difflib import SequenceMatcher
 
 from backend.persistence import load_project
+from backend.services.dubbing_timeline_service import estimate_speaking_seconds, is_dubbing_timeline_project
 
 
 _PUNCT_SPACE_RE = re.compile(r"[\s\u3000，,。！？!?；;：:\"“”'‘’（）()\[\]【】《》<>·、\-]+")
 _HAS_DIALOGUE_MARK_RE = re.compile(r"[“”\"「」『』]|：|:")
 _NON_VERBAL_TAG_RE = re.compile(r"\[[^\[\]]+\]")
+_TIMELINE_TEXT_OVERRUN_RATIO = 1.25
+_TIMELINE_TEXT_OVERRUN_MIN_EXTRA_MS = 500
 
 
 def _normalize_text(raw: str) -> str:
@@ -31,6 +34,16 @@ def _coverage_tokens(raw: str) -> list[str]:
         if candidate and candidate not in tokens:
             tokens.append(candidate)
     return tokens
+
+
+def _coerce_ms(value) -> int | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number < 0:
+        return None
+    return int(round(number))
 
 
 def _split_source_units(source_text: str) -> list[str]:
@@ -81,6 +94,14 @@ def _build_text_diff(source_text: str, segment_text: str) -> dict[str, str]:
 def _find_coverage_issues(source_text: str, segments: list) -> tuple[list[dict], dict]:
     source = (source_text or "").replace("\u3000", "").strip()
     source_normalized = _normalize_text(source)
+    if not source_normalized:
+        return [], {
+            "source_char_count": 0,
+            "covered_char_count": 0,
+            "coverage_ratio": 1.0,
+            "coverage_missing_count": 0,
+            "coverage_out_of_order_count": 0,
+        }
     cursor = 0
     missing_ids: list[str] = []
     out_of_order_ids: list[str] = []
@@ -312,18 +333,184 @@ def _find_duplicate_issues(segments: list) -> tuple[list[dict], dict]:
     return issues, {"duplicate_group_count": len(duplicate_groups)}
 
 
+def _find_empty_segment_issues(segments: list) -> tuple[list[dict], dict]:
+    empty_ids = [segment.id for segment in segments if not (segment.text or "").strip()]
+    issues: list[dict] = []
+    if empty_ids:
+        issues.append(
+            {
+                "id": f"qc_empty_{hashlib.md5(','.join(empty_ids).encode('utf-8')).hexdigest()[:8]}",
+                "type": "segment_empty",
+                "severity": "high",
+                "title": "空文本片段",
+                "description": f"有 {len(empty_ids)} 段文本为空，可能无法合成。",
+                "segment_ids": empty_ids,
+                "evidence": {"empty_count": len(empty_ids)},
+            }
+        )
+    return issues, {"empty_segment_count": len(empty_ids)}
+
+
+def _find_timeline_issues(segments: list) -> tuple[list[dict], dict]:
+    missing_ids: list[str] = []
+    invalid_ids: list[str] = []
+    overlap_ids: list[str] = []
+    overrun_items: list[dict] = []
+    previous_end_ms: int | None = None
+
+    for segment in segments:
+        start_ms = _coerce_ms(getattr(segment, "source_start_ms", None))
+        end_ms = _coerce_ms(getattr(segment, "source_end_ms", None))
+        if start_ms is None or end_ms is None:
+            missing_ids.append(segment.id)
+            continue
+        if end_ms <= start_ms:
+            invalid_ids.append(segment.id)
+            continue
+        if previous_end_ms is not None and start_ms < previous_end_ms:
+            overlap_ids.append(segment.id)
+        previous_end_ms = max(previous_end_ms or 0, end_ms)
+
+        estimated_ms = int(round(estimate_speaking_seconds(segment.text or "") * 1000))
+        source_duration_ms = end_ms - start_ms
+        extra_ms = estimated_ms - source_duration_ms
+        if estimated_ms > source_duration_ms * _TIMELINE_TEXT_OVERRUN_RATIO and extra_ms >= _TIMELINE_TEXT_OVERRUN_MIN_EXTRA_MS:
+            overrun_items.append(
+                {
+                    "segment_id": segment.id,
+                    "source_duration_ms": source_duration_ms,
+                    "estimated_speaking_ms": estimated_ms,
+                    "extra_ms": extra_ms,
+                }
+            )
+
+    issues: list[dict] = []
+    if missing_ids:
+        issues.append(
+            {
+                "id": f"qc_timeline_missing_{hashlib.md5(','.join(missing_ids).encode('utf-8')).hexdigest()[:8]}",
+                "type": "timeline_missing",
+                "severity": "medium",
+                "title": "时间轴缺失",
+                "description": f"有 {len(missing_ids)} 段缺少源开始或结束时间。",
+                "segment_ids": missing_ids,
+                "evidence": {"missing_count": len(missing_ids)},
+            }
+        )
+    if invalid_ids:
+        issues.append(
+            {
+                "id": f"qc_timeline_invalid_{hashlib.md5(','.join(invalid_ids).encode('utf-8')).hexdigest()[:8]}",
+                "type": "timeline_invalid",
+                "severity": "high",
+                "title": "时间轴非法",
+                "description": f"有 {len(invalid_ids)} 段结束时间不晚于开始时间。",
+                "segment_ids": invalid_ids,
+                "evidence": {"invalid_count": len(invalid_ids)},
+            }
+        )
+    if overlap_ids:
+        issues.append(
+            {
+                "id": f"qc_timeline_overlap_{hashlib.md5(','.join(overlap_ids).encode('utf-8')).hexdigest()[:8]}",
+                "type": "timeline_overlap",
+                "severity": "medium",
+                "title": "时间轴重叠",
+                "description": f"有 {len(overlap_ids)} 段与前序片段时间轴重叠或倒序。",
+                "segment_ids": overlap_ids,
+                "evidence": {"overlap_count": len(overlap_ids)},
+            }
+        )
+    if overrun_items:
+        overrun_ids = [item["segment_id"] for item in overrun_items]
+        issues.append(
+            {
+                "id": f"qc_timeline_overrun_{hashlib.md5(','.join(overrun_ids).encode('utf-8')).hexdigest()[:8]}",
+                "type": "timeline_text_overrun",
+                "severity": "medium",
+                "title": "文本疑似超出原时长",
+                "description": f"有 {len(overrun_ids)} 段文本预估朗读时长明显超过源时间轴。",
+                "segment_ids": overrun_ids,
+                "evidence": {
+                    "ratio": _TIMELINE_TEXT_OVERRUN_RATIO,
+                    "minimum_extra_ms": _TIMELINE_TEXT_OVERRUN_MIN_EXTRA_MS,
+                    "items": overrun_items,
+                },
+            }
+        )
+
+    metrics = {
+        "timeline_segment_count": len(segments),
+        "timeline_missing_count": len(missing_ids),
+        "timeline_invalid_count": len(invalid_ids),
+        "timeline_overlap_count": len(overlap_ids),
+        "timeline_text_overrun_count": len(overrun_items),
+    }
+    return issues, metrics
+
+
 def build_project_parse_qc_report(project_id: str, *, projects_dir) -> dict:
     project = load_project(projects_dir, project_id)
     script = project.script
     segments = list(script.segments or [])
+    is_dubbing_profile = is_dubbing_timeline_project(config=project.synthesis_config, project=project)
+    profile = "dubbing_timeline" if is_dubbing_profile else "script_parse"
 
     coverage_issues, coverage_metrics = _find_coverage_issues(script.source_text or "", segments)
     character_issues, character_metrics = _find_character_issues(segments)
-    type_issues, type_metrics = _find_type_misclass_issues(segments)
-    long_issues, long_metrics = _find_long_segment_issues(segments)
     duplicate_issues, duplicate_metrics = _find_duplicate_issues(segments)
 
-    issues = coverage_issues + character_issues + type_issues + long_issues + duplicate_issues
+    skipped_checks: list[dict] = []
+    if is_dubbing_profile:
+        empty_issues, empty_metrics = _find_empty_segment_issues(segments)
+        timeline_issues, timeline_metrics = _find_timeline_issues(segments)
+        type_metrics = {"type_suspect_count": 0}
+        long_metrics = {"long_segment_count": 0, "long_segment_limit": 35}
+        issues = empty_issues + timeline_issues + character_issues + duplicate_issues
+        enabled_checks = [
+            "segment_empty",
+            "timeline_missing",
+            "timeline_invalid",
+            "timeline_overlap",
+            "timeline_text_overrun",
+            "character_consistency",
+            "segment_duplicate",
+        ]
+        skipped_checks = [
+            {
+                "check": "coverage_missing",
+                "reason": "配音/字幕项目以时间轴片段为质检重点，不把原文覆盖率作为高危漏段告警。",
+            },
+            {
+                "check": "type_suspect",
+                "reason": "配音/字幕项目不按旁白/对白语义质检。",
+            },
+            {
+                "check": "segment_too_long",
+                "reason": "配音/字幕项目优先使用文本与源时长匹配检查。",
+            },
+        ]
+    else:
+        type_issues, type_metrics = _find_type_misclass_issues(segments)
+        long_issues, long_metrics = _find_long_segment_issues(segments)
+        empty_metrics = {"empty_segment_count": 0}
+        timeline_metrics = {
+            "timeline_segment_count": 0,
+            "timeline_missing_count": 0,
+            "timeline_invalid_count": 0,
+            "timeline_overlap_count": 0,
+            "timeline_text_overrun_count": 0,
+        }
+        issues = coverage_issues + character_issues + type_issues + long_issues + duplicate_issues
+        enabled_checks = [
+            "coverage_missing",
+            "coverage_out_of_order",
+            "character_consistency",
+            "type_suspect",
+            "segment_too_long",
+            "segment_duplicate",
+        ]
+
     severity_score = {"high": 3, "medium": 2, "low": 1}
     issues.sort(key=lambda item: severity_score.get(item.get("severity", "low"), 0), reverse=True)
 
@@ -333,6 +520,8 @@ def build_project_parse_qc_report(project_id: str, *, projects_dir) -> dict:
         **character_metrics,
         **type_metrics,
         **long_metrics,
+        **empty_metrics,
+        **timeline_metrics,
         **duplicate_metrics,
     }
     summary = {
@@ -345,6 +534,9 @@ def build_project_parse_qc_report(project_id: str, *, projects_dir) -> dict:
         "coverage_ratio": metrics.get("coverage_ratio", 1.0),
     }
     return {
+        "profile": profile,
+        "enabled_checks": enabled_checks,
+        "skipped_checks": skipped_checks,
         "summary": summary,
         "metrics": metrics,
         "issues": issues,
