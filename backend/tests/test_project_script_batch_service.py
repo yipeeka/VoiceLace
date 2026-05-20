@@ -18,6 +18,7 @@ from backend.models import (
 )
 from backend.persistence import load_project, read_project_events, save_project
 from backend.services.project_script_batch_service import (
+    _weighted_text_duration_units,
     batch_update_segments,
     merge_adjacent_segments,
     merge_character,
@@ -139,6 +140,135 @@ class ProjectScriptBatchServiceTest(unittest.TestCase):
             self.assertIn("s3", merged["removed_segment_ids"])
             merged_project = load_project(projects_dir, project.id)
             self.assertEqual(len(merged_project.script.segments), 3)
+
+    def test_split_segment_splits_timeline_with_gap_and_duration_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            projects_dir = Path(tmp_dir)
+            project = Project(
+                name="timeline-split",
+                script=Script(
+                    segments=[
+                        Segment(
+                            id="s1",
+                            index=0,
+                            speaker="旁白",
+                            text="你好。再见",
+                            source_start_ms=1000,
+                            source_end_ms=6000,
+                            source_duration_ms=5000,
+                            tts_overrides={"duration": 4.9, "speed": 1.1},
+                        ),
+                    ],
+                ),
+            )
+            saved = save_project(projects_dir, project)
+
+            split_segment(
+                saved.id,
+                SplitSegmentRequest(segment_id="s1", cursor=3),
+                projects_dir=projects_dir,
+            )
+
+            reloaded = load_project(projects_dir, saved.id)
+            self.assertEqual(len(reloaded.script.segments), 2)
+            left, right = reloaded.script.segments
+            self.assertEqual(left.text, "你好。")
+            self.assertEqual(right.text, "再见")
+            self.assertEqual(left.source_start_ms, 1000)
+            self.assertEqual(right.source_end_ms, 6000)
+            self.assertEqual(right.source_start_ms - left.source_end_ms, 200)
+            self.assertEqual(left.source_duration_ms, left.source_end_ms - left.source_start_ms)
+            self.assertEqual(right.source_duration_ms, right.source_end_ms - right.source_start_ms)
+            self.assertEqual((left.source_duration_ms or 0) + (right.source_duration_ms or 0), 4800)
+            self.assertGreater(left.source_duration_ms or 0, right.source_duration_ms or 0)
+            self.assertAlmostEqual(float(left.tts_overrides["duration"]), (left.source_duration_ms or 0) / 1000, places=3)
+            self.assertAlmostEqual(float(right.tts_overrides["duration"]), (right.source_duration_ms or 0) / 1000, places=3)
+            self.assertEqual(left.tts_overrides["speed"], 1.1)
+            self.assertEqual(right.tts_overrides["speed"], 1.1)
+
+    def test_merge_adjacent_segments_merges_timeline_and_duration_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            projects_dir = Path(tmp_dir)
+            project = Project(
+                name="timeline-merge",
+                script=Script(
+                    segments=[
+                        Segment(
+                            id="s1",
+                            index=0,
+                            speaker="旁白",
+                            text="你好。",
+                            source_start_ms=1000,
+                            source_end_ms=3100,
+                            source_duration_ms=2100,
+                            tts_overrides={"duration": 2.1, "speed": 1.05},
+                        ),
+                        Segment(
+                            id="s2",
+                            index=1,
+                            speaker="旁白",
+                            text="再见",
+                            source_start_ms=3300,
+                            source_end_ms=6000,
+                            source_duration_ms=2700,
+                            tts_overrides={"duration": 2.7, "speed": 0.95},
+                        ),
+                    ],
+                ),
+            )
+            saved = save_project(projects_dir, project)
+
+            result = merge_adjacent_segments(
+                saved.id,
+                MergeSegmentsRequest(first_segment_id="s1", second_segment_id="s2"),
+                projects_dir=projects_dir,
+            )
+
+            self.assertEqual(result["changed_segment_ids"], ["s1"])
+            self.assertEqual(result["removed_segment_ids"], ["s2"])
+            reloaded = load_project(projects_dir, saved.id)
+            self.assertEqual(len(reloaded.script.segments), 1)
+            merged = reloaded.script.segments[0]
+            self.assertEqual(merged.source_start_ms, 1000)
+            self.assertEqual(merged.source_end_ms, 6000)
+            self.assertEqual(merged.source_duration_ms, 5000)
+            self.assertAlmostEqual(float(merged.tts_overrides["duration"]), 5.0, places=3)
+            self.assertEqual(merged.tts_overrides["speed"], 1.05)
+
+    def test_merge_adjacent_segments_adds_duration_overrides_without_timeline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            projects_dir = Path(tmp_dir)
+            project = Project(
+                name="duration-merge",
+                script=Script(
+                    segments=[
+                        Segment(id="s1", index=0, speaker="旁白", text="hello", tts_overrides={"duration": 1.25, "speed": 1.1}),
+                        Segment(id="s2", index=1, speaker="旁白", text="world", tts_overrides={"duration": 2.5, "speed": 0.9}),
+                    ],
+                ),
+            )
+            saved = save_project(projects_dir, project)
+
+            merge_adjacent_segments(
+                saved.id,
+                MergeSegmentsRequest(first_segment_id="s1", second_segment_id="s2"),
+                projects_dir=projects_dir,
+            )
+
+            merged = load_project(projects_dir, saved.id).script.segments[0]
+            self.assertIsNone(merged.source_start_ms)
+            self.assertIsNone(merged.source_end_ms)
+            self.assertIsNone(merged.source_duration_ms)
+            self.assertAlmostEqual(float(merged.tts_overrides["duration"]), 3.75, places=3)
+            self.assertEqual(merged.tts_overrides["speed"], 1.1)
+
+    def test_weighted_text_duration_units_accounts_for_tokens_numbers_and_punctuation(self) -> None:
+        cjk_with_pause = _weighted_text_duration_units("你好，世界。")
+        plain_cjk = _weighted_text_duration_units("你好世界")
+        english_tokens = _weighted_text_duration_units("AI model 2026.")
+
+        self.assertGreater(cjk_with_pause, plain_cjk)
+        self.assertGreater(english_tokens, 3.0)
 
 
 if __name__ == "__main__":

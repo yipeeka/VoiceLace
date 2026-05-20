@@ -20,6 +20,27 @@ from backend.persistence import append_project_event, load_project, save_project
 from .project_script_service import sync_script_metadata
 from .project_snapshot_service import create_project_snapshot
 
+SPLIT_TIMELINE_GAP_MS = 200
+_MIN_SPLIT_TIMELINE_DURATION_MS = 100
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_LATIN_TOKEN_RE = re.compile(r"[A-Za-z]+(?:[-'][A-Za-z]+)*|\d+(?:[.,]\d+)*")
+_PAUSE_WEIGHT_BY_PUNCTUATION = {
+    ",": 0.35,
+    "，": 0.35,
+    ";": 0.5,
+    "；": 0.5,
+    ":": 0.45,
+    "：": 0.45,
+    ".": 0.7,
+    "。": 0.7,
+    "!": 0.75,
+    "！": 0.75,
+    "?": 0.75,
+    "？": 0.75,
+    "…": 0.9,
+}
+_ENDING_PAUSE_BONUS = 0.35
+
 
 def _normalize_speaker_name(name: str) -> str:
     normalized = (name or "").strip()
@@ -40,6 +61,137 @@ def _refresh_project_status(project) -> None:
         project.status = "draft"
         return
     project.status = "voices_configured" if project.voice_assignments else "parsed"
+
+
+def _weighted_text_duration_units(text: str) -> float:
+    raw = str(text or "")
+    if not raw.strip():
+        return 0.0
+
+    total = 0.0
+    latin_spans: list[tuple[int, int, str]] = []
+    for match in _LATIN_TOKEN_RE.finditer(raw):
+        token = match.group(0)
+        latin_spans.append((match.start(), match.end(), token))
+        if re.search(r"\d", token):
+            total += 1.35
+        elif token.isupper() and len(token) > 1:
+            total += 1.25
+        else:
+            total += 1.0
+
+    def inside_latin_token(index: int) -> bool:
+        return any(start <= index < end for start, end, _token in latin_spans)
+
+    for index, char in enumerate(raw):
+        if char.isspace() or inside_latin_token(index):
+            continue
+        if _CJK_RE.match(char):
+            total += 1.0
+        elif char in _PAUSE_WEIGHT_BY_PUNCTUATION:
+            total += _PAUSE_WEIGHT_BY_PUNCTUATION[char]
+        elif char.isdigit():
+            total += 1.35
+        elif char.isalpha():
+            total += 1.0
+        else:
+            total += 0.2
+
+    stripped = raw.rstrip()
+    if stripped and stripped[-1] in _PAUSE_WEIGHT_BY_PUNCTUATION:
+        total += _ENDING_PAUSE_BONUS
+    return max(0.1, total)
+
+
+def _split_tts_overrides_duration(overrides: dict, duration_ms: int | None) -> dict:
+    next_overrides = dict(overrides or {})
+    if duration_ms is not None and duration_ms > 0:
+        next_overrides["duration"] = round(duration_ms / 1000.0, 3)
+    return next_overrides
+
+
+def _coerce_positive_seconds(value) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number <= 0:
+        return None
+    return number
+
+
+def _split_timeline_fields(base: Segment, left_text: str, right_text: str) -> tuple[dict, dict]:
+    start_ms = base.source_start_ms
+    end_ms = base.source_end_ms
+    if start_ms is None or end_ms is None:
+        return {}, {}
+
+    try:
+        start = int(start_ms)
+        end = int(end_ms)
+    except (TypeError, ValueError):
+        return {}, {}
+    if end <= start:
+        return {}, {}
+
+    total_ms = end - start
+    gap_ms = SPLIT_TIMELINE_GAP_MS if total_ms > (SPLIT_TIMELINE_GAP_MS + _MIN_SPLIT_TIMELINE_DURATION_MS * 2) else 0
+    available_ms = max(0, total_ms - gap_ms)
+    left_units = _weighted_text_duration_units(left_text)
+    right_units = _weighted_text_duration_units(right_text)
+    ratio = left_units / max(0.1, left_units + right_units)
+    min_duration = min(_MIN_SPLIT_TIMELINE_DURATION_MS, max(1, available_ms // 2))
+    left_duration = int(round(available_ms * ratio))
+    left_duration = max(min_duration, min(available_ms - min_duration, left_duration))
+    right_duration = max(0, available_ms - left_duration)
+
+    left_end = start + left_duration
+    right_start = min(end, left_end + gap_ms)
+    left_duration = max(0, left_end - start)
+    right_duration = max(0, end - right_start)
+
+    return (
+        {
+            "source_start_ms": start,
+            "source_end_ms": left_end,
+            "source_duration_ms": left_duration,
+            "tts_overrides": _split_tts_overrides_duration(base.tts_overrides, left_duration),
+        },
+        {
+            "source_start_ms": right_start,
+            "source_end_ms": end,
+            "source_duration_ms": right_duration,
+            "tts_overrides": _split_tts_overrides_duration(base.tts_overrides, right_duration),
+        },
+    )
+
+
+def _merge_timeline_fields(first: Segment, second: Segment) -> dict:
+    first_start = first.source_start_ms
+    second_end = second.source_end_ms
+    if first_start is not None and second_end is not None:
+        try:
+            start = int(first_start)
+            end = int(second_end)
+        except (TypeError, ValueError):
+            start = None
+            end = None
+        if start is not None and end is not None and end > start:
+            duration_ms = end - start
+            return {
+                "source_start_ms": start,
+                "source_end_ms": end,
+                "source_duration_ms": duration_ms,
+                "tts_overrides": _split_tts_overrides_duration(first.tts_overrides, duration_ms),
+            }
+
+    first_duration = _coerce_positive_seconds((first.tts_overrides or {}).get("duration"))
+    second_duration = _coerce_positive_seconds((second.tts_overrides or {}).get("duration"))
+    if first_duration is not None and second_duration is not None:
+        next_overrides = dict(first.tts_overrides or {})
+        next_overrides["duration"] = round(first_duration + second_duration, 3)
+        return {"tts_overrides": next_overrides}
+    return {}
 
 
 def _persist_script_change(
@@ -251,12 +403,16 @@ def split_segment(project_id: str, payload: SplitSegmentRequest, *, projects_dir
     if not left or not right:
         raise HTTPException(status_code=400, detail="拆分后的片段不能为空")
 
+    left_timeline, right_timeline = _split_timeline_fields(base, left, right)
     base.text = left
+    for key, value in left_timeline.items():
+        setattr(base, key, value)
     new_segment = base.model_copy(
         update={
             "id": str(uuid4()),
             "text": right,
             "index": base.index + 1,
+            **right_timeline,
         }
     )
     project.script.segments.insert(idx + 1, new_segment)
@@ -292,6 +448,8 @@ def merge_adjacent_segments(project_id: str, payload: MergeSegmentsRequest, *, p
         first_segment.text = f"{first_text} {second_text}".strip()
     else:
         first_segment.text = first_text or second_text
+    for key, value in _merge_timeline_fields(first_segment, second_segment).items():
+        setattr(first_segment, key, value)
     project.script.segments.pop(second_idx)
 
     return _persist_script_change(
