@@ -234,13 +234,16 @@ class ModelOrchestratorTest(unittest.IsolatedAsyncioTestCase):
 
         status = await orch.get_status()
         config = status["config"]
-        self.assertEqual(config["openai_api_key"], "sk-openai")
+        self.assertEqual(config["openai_api_key"], "********")
+        self.assertTrue(config["openai_api_key_configured"])
         self.assertEqual(config["openai_base_url"], "https://api.example.test/v1")
         self.assertEqual(config["openai_model"], "gpt-test")
-        self.assertEqual(config["openai_compatible_api_key"], "sk-compatible")
+        self.assertEqual(config["openai_compatible_api_key"], "********")
+        self.assertTrue(config["openai_compatible_api_key_configured"])
         self.assertEqual(config["openai_compatible_base_url"], "http://localhost:11434/v1")
         self.assertEqual(config["openai_compatible_model"], "compatible-model")
-        self.assertEqual(config["gemini_api_key"], "gemini-key")
+        self.assertEqual(config["gemini_api_key"], "********")
+        self.assertTrue(config["gemini_api_key_configured"])
         self.assertEqual(config["gemini_base_url"], "https://generativelanguage.googleapis.com")
         self.assertEqual(config["gemini_model"], "gemini-test")
 

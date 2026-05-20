@@ -1,19 +1,11 @@
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 
 import Sidebar from "./components/layout/Sidebar";
 import StatusBar from "./components/layout/StatusBar";
 import GlobalConfirmDialog from "./components/shared/GlobalConfirmDialog";
 import ToastLayer from "./components/shared/ToastLayer";
 import { TooltipProvider } from "./components/ui/Tooltip";
-import ScriptEditorPage from "./pages/ScriptEditorPage";
-import SettingsPage from "./pages/SettingsPage";
-import SpeechRecognitionPage from "./pages/SpeechRecognitionPage";
-import SynthesisPage from "./pages/SynthesisPage";
-import ParseQcPage from "./pages/ParseQcPage";
-import TextInputPage from "./pages/TextInputPage";
-import VoiceConfigPage from "./pages/VoiceConfigPage";
-import MusicPage from "./pages/MusicPage";
 import { useProjectStore } from "./stores/useProjectStore";
 import { useScriptStore } from "./stores/useScriptStore";
 import { useSettingsStore } from "./stores/useSettingsStore";
@@ -24,14 +16,14 @@ import {
 } from "./utils/modelLifecycle.js";
 
 const PAGE_COMPONENTS = {
-  speech:   SpeechRecognitionPage,
-  text:     TextInputPage,
-  qc:       ParseQcPage,
-  script:   ScriptEditorPage,
-  voice:    VoiceConfigPage,
-  synth:    SynthesisPage,
-  music:    MusicPage,
-  settings: SettingsPage,
+  speech:   lazy(() => import("./pages/SpeechRecognitionPage")),
+  text:     lazy(() => import("./pages/TextInputPage")),
+  qc:       lazy(() => import("./pages/ParseQcPage")),
+  script:   lazy(() => import("./pages/ScriptEditorPage")),
+  voice:    lazy(() => import("./pages/VoiceConfigPage")),
+  synth:    lazy(() => import("./pages/SynthesisPage")),
+  music:    lazy(() => import("./pages/MusicPage")),
+  settings: lazy(() => import("./pages/SettingsPage")),
 };
 
 const DEFAULT_PAGE = "speech";
@@ -220,7 +212,9 @@ export default function App() {
                 {...(prefersReducedMotion ? REDUCED_PAGE_TRANSITION : PAGE_TRANSITION)}
                 style={{ flex: 1 }}
               >
-                <PageComponent onNavigate={navigateToPage} />
+                <Suspense fallback={<div className="pageLoading" aria-live="polite">正在加载…</div>}>
+                  <PageComponent onNavigate={navigateToPage} />
+                </Suspense>
               </motion.div>
             </AnimatePresence>
           </div>

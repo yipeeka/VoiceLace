@@ -5,9 +5,9 @@ import { Combine, FileDown, GripVertical, Pencil, Plus, Redo2, Save, Scissors, S
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import CharacterBadge, { getCharColor } from "../components/shared/CharacterBadge";
-import AudioPlayer from "../components/shared/AudioPlayer";
 import EmptyState from "../components/shared/EmptyState";
 import GlassCard from "../components/shared/GlassCard";
+import WaveSurferAudioPlayer from "../components/shared/WaveSurferAudioPlayer";
 import ScriptBatchToolsDrawer from "../components/script/ScriptBatchToolsDrawer";
 import ScriptDiffPreviewDialog from "../components/script/ScriptDiffPreviewDialog";
 import SegmentEditorFields from "../components/script/SegmentEditorFields";
@@ -1524,10 +1524,11 @@ export default function ScriptEditorPage() {
                 {sourceAudioEndMs > sourceAudioStartMs ? ` -> ${formatTimelineMs(sourceAudioEndMs)}` : ""}
               </span>
             </div>
-            <AudioPlayer
+            <WaveSurferAudioPlayer
               audioUrl={sourceAudioUrl}
               height={48}
               compact
+              fallbackDurationSeconds={sourceAudioDurationMs / 1000}
               autoPlaySignal={sourceAudioPlaySignal}
               pauseSignal={sourceAudioPauseSignal}
               seekToSeconds={sourceAudioSeekSeconds}

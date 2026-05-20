@@ -13,6 +13,23 @@ from typing import Awaitable, Callable
 
 from backend.config import settings
 
+CONFIG_SECRET_MASK = "********"
+SECRET_CONFIG_FIELDS = (
+    "openai_api_key",
+    "openai_compatible_api_key",
+    "gemini_api_key",
+    "pyannote_auth_token",
+)
+
+
+def public_orchestrator_config(config: "OrchestratorConfig") -> dict:
+    payload = asdict(config)
+    for field in SECRET_CONFIG_FIELDS:
+        value = str(payload.get(field) or "")
+        payload[f"{field}_configured"] = bool(value)
+        payload[field] = CONFIG_SECRET_MASK if value else ""
+    return payload
+
 
 class ModelState(str, Enum):
     IDLE = "idle"
@@ -745,5 +762,5 @@ class ModelOrchestrator:
             "llm_load_mode": llm_load_mode,
             "llm_handler_fallback_reason": llm_handler_fallback_reason,
             "gpu": self.get_gpu_info(),
-            "config": asdict(self._config),
+            "config": public_orchestrator_config(self._config),
         }

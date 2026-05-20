@@ -1,4 +1,5 @@
 import { FolderPlus, Languages } from "lucide-react";
+import { useId } from "react";
 
 import Button from "../ui/Button";
 
@@ -31,6 +32,10 @@ export default function TranslationPolishPanel({
   translationSource,
   translationTargetLanguage,
 }) {
+  const generatedId = useId();
+  const sourceSelectId = `${generatedId}-translation-source`;
+  const modeSelectId = `${generatedId}-translation-mode`;
+  const targetLanguageSelectId = `${generatedId}-translation-target-language`;
   const controlsDisabled = isLoadingTranslationEngine || isTranslating || isCreatingProject || isBuildingDubbingProject;
 
   return (
@@ -39,8 +44,8 @@ export default function TranslationPolishPanel({
       <p className="cardSubtitle speechUtilitySubtitle">从识别预览读取文本，按选定来源执行“仅润色”或“翻译+润色”。</p>
       <div className="editorGrid three">
         <div className="formGroup">
-          <label className="formLabel">来源</label>
-          <select className="textInput" value={translationSource} onChange={(event) => setTranslationSource(event.target.value)} disabled={controlsDisabled}>
+          <label className="formLabel" htmlFor={sourceSelectId}>来源</label>
+          <select id={sourceSelectId} className="textInput" value={translationSource} onChange={(event) => setTranslationSource(event.target.value)} disabled={controlsDisabled}>
             <option value="primary_local">主模型</option>
             <option value="secondary_local">小模型</option>
             <option value="openai">OpenAI API</option>
@@ -49,16 +54,16 @@ export default function TranslationPolishPanel({
           </select>
         </div>
         <div className="formGroup">
-          <label className="formLabel">模式</label>
-          <select className="textInput" value={translationMode} onChange={(event) => setTranslationMode(event.target.value)} disabled={controlsDisabled}>
+          <label className="formLabel" htmlFor={modeSelectId}>模式</label>
+          <select id={modeSelectId} className="textInput" value={translationMode} onChange={(event) => setTranslationMode(event.target.value)} disabled={controlsDisabled}>
             <option value="passthrough">直通</option>
             <option value="polish_only">仅润色</option>
             <option value="translate_polish">翻译+润色</option>
           </select>
         </div>
         <div className="formGroup">
-          <label className="formLabel">目标语言</label>
-          <select className="textInput" value={translationTargetLanguage} onChange={(event) => setTranslationTargetLanguage(event.target.value)} disabled={translationMode !== "translate_polish" || controlsDisabled}>
+          <label className="formLabel" htmlFor={targetLanguageSelectId}>目标语言</label>
+          <select id={targetLanguageSelectId} className="textInput" value={translationTargetLanguage} onChange={(event) => setTranslationTargetLanguage(event.target.value)} disabled={translationMode !== "translate_polish" || controlsDisabled}>
             <option value="中文">中文</option>
             <option value="英文">英文</option>
             <option value="日文">日文</option>

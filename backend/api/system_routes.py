@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from backend.engine import OrchestratorConfig
+from backend.engine import CONFIG_SECRET_MASK, SECRET_CONFIG_FIELDS, OrchestratorConfig, public_orchestrator_config
 from backend.models import (
     FileBrowseRequest,
     LoadLlmRequest,
@@ -53,6 +53,14 @@ def normalize_mcp_mount_path(raw: str | None) -> str:
     if value == "/":
         return "/mcp"
     return value
+
+
+def _preserve_masked_secrets(raw_config: dict, current_config: OrchestratorConfig) -> dict:
+    next_config = dict(raw_config)
+    for field in SECRET_CONFIG_FIELDS:
+        if next_config.get(field) == CONFIG_SECRET_MASK:
+            next_config[field] = getattr(current_config, field, "")
+    return next_config
 
 
 @router.get("/status")
@@ -132,7 +140,7 @@ async def update_orchestrator_config(payload: OrchestratorConfigPayload, state=D
     old_pyannote_device = getattr(state.asr_engine, "pyannote_device", "")
     old_music_model_dir = getattr(state.music_engine, "model_dir", "")
     old_music_device_mode = getattr(state.music_engine, "device_mode", "")
-    raw_config = payload.model_dump()
+    raw_config = _preserve_masked_secrets(payload.model_dump(), state.orchestrator.config)
     raw_config["mcp_mount_path"] = normalize_mcp_mount_path(raw_config.get("mcp_mount_path"))
     config = OrchestratorConfig(**raw_config)
     next_music_model_dir = state.orchestrator.get_active_music_model_dir(config)
@@ -179,7 +187,7 @@ async def update_orchestrator_config(payload: OrchestratorConfigPayload, state=D
         or old_music_device_mode != config.music_device_mode
     ):
         await state.music_engine.unload_model()
-    return saved
+    return public_orchestrator_config(config)
 
 
 @router.post("/orchestrator/config/reset")
@@ -244,7 +252,7 @@ async def reset_orchestrator_config(state=Depends(get_app_state)):
         or old_music_device_mode != config.music_device_mode
     ):
         await state.music_engine.unload_model()
-    return saved
+    return public_orchestrator_config(config)
 
 
 @router.post("/orchestrator/config/defaults/use-current")

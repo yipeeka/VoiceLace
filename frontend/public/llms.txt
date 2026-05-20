@@ -1,0 +1,8 @@
+# VoiceLace
+
+VoiceLace is a local AI audiobook workstation for speech recognition, script editing, voice setup, music generation, synthesis, and export.
+
+## Links
+
+- [VoiceLace app](/)
+- [Robots policy](/robots.txt)

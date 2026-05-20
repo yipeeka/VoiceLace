@@ -4,6 +4,17 @@ import { formatError, getErrorMessage } from "../utils/errors.js";
 import { useSpeechRecognitionStore } from "./useSpeechRecognitionStore.js";
 import { useUiStore } from "./useUiStore.js";
 
+let systemStatusRequest = null;
+
+function fetchSystemStatus() {
+  if (!systemStatusRequest) {
+    systemStatusRequest = api.get("/system/status").finally(() => {
+      systemStatusRequest = null;
+    });
+  }
+  return systemStatusRequest;
+}
+
 export function normalizeOrchestratorConfig(raw) {
   if (!raw) {
     return null;
@@ -177,7 +188,7 @@ export const useSettingsStore = create((set, get) => ({
 
   refreshSystemStatus: async () => {
     try {
-      const status = await api.get("/system/status");
+      const status = await fetchSystemStatus();
       set({ systemStatus: status, settingsError: "" });
       return status;
     } catch (error) {
@@ -189,7 +200,7 @@ export const useSettingsStore = create((set, get) => ({
 
   loadOrchestratorConfig: async () => {
     try {
-      const status = await api.get("/system/status");
+      const status = await fetchSystemStatus();
       const config = normalizeOrchestratorConfig(status?.config ?? null);
       set({ orchestratorConfig: config, settingsError: "" });
       return config;

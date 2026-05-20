@@ -1,9 +1,10 @@
 import { Mic, Square, Upload } from "lucide-react";
-import { useId, useRef } from "react";
+import { lazy, Suspense, useId, useRef } from "react";
 
-import AudioClipper from "./AudioClipper";
 import GlassCard from "../shared/GlassCard";
 import Button from "../ui/Button";
+
+const AudioClipper = lazy(() => import("./AudioClipper"));
 
 function formatRecordingElapsed(seconds) {
   const safeSeconds = Math.max(0, Math.floor(Number(seconds || 0)));
@@ -221,15 +222,17 @@ export default function AsrRecognitionCard({
       {asrUnavailableReason ? <div className="statusBadge warning">{asrUnavailableReason}</div> : null}
 
       {pendingAudio?.url ? (
-        <AudioClipper
-          audioUrl={pendingAudio.url}
-          fileName={pendingAudio.fileName}
-          disabled={isBusy}
-          clipRange={audioClipRange}
-          onClipRangeChange={onAudioClipRangeChange}
-          onDurationChange={onAudioClipDurationChange}
-          onError={onAudioClipError}
-        />
+        <Suspense fallback={<div className="statusBadge default" aria-live="polite">正在加载音频截取器…</div>}>
+          <AudioClipper
+            audioUrl={pendingAudio.url}
+            fileName={pendingAudio.fileName}
+            disabled={isBusy}
+            clipRange={audioClipRange}
+            onClipRangeChange={onAudioClipRangeChange}
+            onDurationChange={onAudioClipDurationChange}
+            onError={onAudioClipError}
+          />
+        </Suspense>
       ) : null}
 
       {isTranscribing ? <div className="statusBadge default" aria-live="polite">识别中…</div> : null}

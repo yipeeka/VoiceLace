@@ -29,13 +29,15 @@ export default function SegmentEditorFields({
   const canEditSourceTiming = draft?.sourceBoundsStartMs !== null && draft?.sourceBoundsStartMs !== undefined
     && draft?.sourceBoundsEndMs !== null && draft?.sourceBoundsEndMs !== undefined;
 
-  const resolvedSpeakerOptions = useMemo(
-    () => [
+  const resolvedSpeakerOptions = useMemo(() => {
+    if (knownSpeakerOptions.some((item) => item.value === "__new__")) {
+      return knownSpeakerOptions;
+    }
+    return [
       ...knownSpeakerOptions,
       { value: "__new__", label: "+ 添加新角色" },
-    ],
-    [knownSpeakerOptions],
-  );
+    ];
+  }, [knownSpeakerOptions]);
 
   return (
     <div className={`segmentEditorFields${compact ? " compact" : ""}`}>

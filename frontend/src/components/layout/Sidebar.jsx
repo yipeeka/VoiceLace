@@ -79,7 +79,7 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
               key={item.id}
               className={`navItem ${isActive ? "active" : ""} ${isCompleted && !isActive ? "completed" : ""}`}
               onClick={() => onNavigate(item.id)}
-              aria-label={item.label}
+              aria-label={collapsed ? item.label : undefined}
               aria-current={isActive ? "page" : undefined}
             >
               <Icon className="navItemIcon" aria-hidden="true" focusable="false" size={18} />

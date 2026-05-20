@@ -16,6 +16,8 @@ import {
 } from "../utils/projectLifecycle.js";
 import { useUiStore } from "./useUiStore.js";
 
+let loadProjectsPromise = null;
+
 export const useProjectStore = create((set, get) => ({
   currentProject: null,
   projects: [],
@@ -88,24 +90,32 @@ export const useProjectStore = create((set, get) => ({
       };
     }),
   loadProjects: async () => {
-    set({ isLoading: true });
-    try {
-      const projects = await api.get("/projects");
-      set((state) => ({
-        projects: sortProjectSummaries(projects, state.lastOpenedProjectId),
-        projectSources: (() => {
-          const nextSources = mergeProjectSourcesFromSummaries(state.projectSources, projects);
-          safeWriteProjectSources(nextSources);
-          return nextSources;
-        })(),
-        isLoading: false,
-      }));
-      return projects;
-    } catch (error) {
-      set({ isLoading: false });
-      useUiStore.getState().pushToast({ title: formatError("项目列表加载失败", error), tone: "error" });
-      throw error;
+    if (loadProjectsPromise) {
+      return loadProjectsPromise;
     }
+    set({ isLoading: true });
+    loadProjectsPromise = (async () => {
+      try {
+        const projects = await api.get("/projects");
+        set((state) => ({
+          projects: sortProjectSummaries(projects, state.lastOpenedProjectId),
+          projectSources: (() => {
+            const nextSources = mergeProjectSourcesFromSummaries(state.projectSources, projects);
+            safeWriteProjectSources(nextSources);
+            return nextSources;
+          })(),
+          isLoading: false,
+        }));
+        return projects;
+      } catch (error) {
+        set({ isLoading: false });
+        useUiStore.getState().pushToast({ title: formatError("项目列表加载失败", error), tone: "error" });
+        throw error;
+      } finally {
+        loadProjectsPromise = null;
+      }
+    })();
+    return loadProjectsPromise;
   },
   createProject: async (name) => {
     const project = await api.post("/projects", { name });
