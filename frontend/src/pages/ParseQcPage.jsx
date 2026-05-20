@@ -81,6 +81,23 @@ export default function ParseQcPage({ onNavigate }) {
   const summary = parseQcReport?.summary || {};
   const metrics = parseQcReport?.metrics || {};
   const issues = useMemo(() => (Array.isArray(parseQcReport?.issues) ? parseQcReport.issues : []), [parseQcReport?.issues]);
+  const affectedSummary = useMemo(() => {
+    const bySeverity = { high: new Set(), medium: new Set(), low: new Set() };
+    const all = new Set();
+    issues.forEach((issue) => {
+      const severity = normalizeSeverity(issue?.severity);
+      extractIssueSegmentIds(issue).forEach((segmentId) => {
+        bySeverity[severity].add(segmentId);
+        all.add(segmentId);
+      });
+    });
+    return {
+      all: all.size,
+      high: bySeverity.high.size,
+      medium: bySeverity.medium.size,
+      low: bySeverity.low.size,
+    };
+  }, [issues]);
   const segmentNumberById = useMemo(() => {
     const next = new Map();
     (scriptSegments || []).forEach((segment, idx) => {
@@ -163,10 +180,11 @@ export default function ParseQcPage({ onNavigate }) {
           <EmptyState title="请先选择项目" description="回到文本输入页解析后再查看质检结果。" />
         ) : (
           <div className="controlRow" style={{ gap: 8, flexWrap: "wrap" }}>
-            <span className="statusBadge default">问题 {summary.issue_count ?? 0}</span>
-            <span className="statusBadge error">高 {summary.high_count ?? 0}</span>
-            <span className="statusBadge warning">中 {summary.medium_count ?? 0}</span>
-            <span className="statusBadge default">低 {summary.low_count ?? 0}</span>
+            <span className="statusBadge default">告警类型 {summary.issue_count ?? 0}</span>
+            <span className="statusBadge default">影响片段 {affectedSummary.all}</span>
+            <span className="statusBadge error">高 {affectedSummary.high}</span>
+            <span className="statusBadge warning">中 {affectedSummary.medium}</span>
+            <span className="statusBadge default">低 {affectedSummary.low}</span>
             <span className="statusBadge default">覆盖率 {(Number(summary.coverage_ratio ?? 0) * 100).toFixed(1)}%</span>
           </div>
         )}

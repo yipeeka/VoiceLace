@@ -177,7 +177,8 @@ def save_project_source_audio_mp3(
     except ValueError:
         window_end_ms = 0
     start_ms = 0
-    end_ms = _probe_audio_duration_ms(Path(input_path)) or window_end_ms
+    probed_end_ms = _probe_audio_duration_ms(Path(input_path))
+    end_ms = max(probed_end_ms or 0, window_end_ms)
     if end_ms <= start_ms:
         raise ValueError("无法确定原音频时长，不能保存 source audio。")
     source_dir = project_source_audio_dir(output_dir=output_dir, project_id=project.id)

@@ -231,7 +231,9 @@ class ASREngine:
             end = seg.get("end")
             start_ms = int(round(float(start) * 1000)) if isinstance(start, (int, float)) else 0
             end_ms = int(round(float(end) * 1000)) if isinstance(end, (int, float)) else start_ms
-            if end_ms < start_ms:
+            if isinstance(start, (int, float)) and isinstance(end, (int, float)) and end_ms <= start_ms:
+                end_ms = start_ms + 1
+            elif end_ms < start_ms:
                 end_ms = start_ms
             alignments.append(
                 {
@@ -438,7 +440,6 @@ class ASREngine:
             text = cls._join_tokens_for_language(text, str(word.get("text", "")).strip())
         return text.strip()
 
-    @classmethod
     @staticmethod
     def _normalize_silence_ranges(silence_ranges: Any) -> list[dict[str, float]]:
         if not isinstance(silence_ranges, list):
@@ -1181,7 +1182,7 @@ class ASREngine:
         candidate_current = cjk_prefix_match.group(0)
         candidate = f"{tail}{candidate_current}"
         try:
-            tokens = [str(token or "").strip() for token in jieba.lcut(candidate, HMM=False) if str(token or "").strip()]
+            tokens = [str(token or "").strip() for token in jieba.lcut(candidate, HMM=True) if str(token or "").strip()]
         except Exception:
             return 0
         if not tokens:

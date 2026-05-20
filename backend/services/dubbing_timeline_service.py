@@ -126,13 +126,13 @@ def apply_reasonable_dubbing_timeline(
         previous_end = None
         for prev_index in range(index - 1, -1, -1):
             previous_timing = _row_timing(adjusted_rows[prev_index])
-            if previous_timing is not None:
+            if previous_timing is not None and previous_timing[1] <= start_ms:
                 previous_end = previous_timing[1]
                 break
         next_start = None
         for next_index in range(index + 1, len(adjusted_rows)):
             next_timing = _row_timing(adjusted_rows[next_index])
-            if next_timing is not None:
+            if next_timing is not None and next_timing[0] >= end_ms:
                 next_start = next_timing[0]
                 break
 
@@ -142,7 +142,7 @@ def apply_reasonable_dubbing_timeline(
             max_end = min(max_end, audio_end) if max_end is not None else audio_end
         if max_end is None:
             max_end = start_ms + estimated_ms
-        max_end = max(max_end, start_ms)
+        max_end = max(max_end, end_ms)
 
         desired_ms = min(estimated_ms, max(1, max_end - min_start))
         extra_ms = max(0, desired_ms - current_ms)

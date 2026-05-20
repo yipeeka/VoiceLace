@@ -49,6 +49,12 @@ export function splitSpeakerText(value, fallbackSpeaker = "narrator") {
   return { speaker, text };
 }
 
+function normalizePositiveEndMs(startMs, endMs) {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return null;
+  if (endMs < startMs) return null;
+  return endMs === startMs ? startMs + 1 : endMs;
+}
+
 export function validateEditedSubtitleSrt(value) {
   const text = String(value || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
   if (!text) {
@@ -110,14 +116,19 @@ export function canBuildDubbingProjectFromAlignments({ translationMode, isTransl
 
 export function buildDubbingSegmentsFromPreview({ alignments, previewText }) {
   const usableTimeline = (Array.isArray(alignments) ? alignments : [])
-    .map((item, index) => ({
-      id: String(item?.id || `asr-seg-${index + 1}`),
-      speaker: String(item?.speaker || "narrator").trim() || "narrator",
-      text: String(item?.text || "").trim(),
-      start_ms: Number.isFinite(Number(item?.start_ms)) ? Number(item.start_ms) : null,
-      end_ms: Number.isFinite(Number(item?.end_ms)) ? Number(item.end_ms) : null,
-    }))
-    .filter((item) => item.text && item.start_ms !== null && item.end_ms !== null && item.end_ms > item.start_ms);
+    .map((item, index) => {
+      const startMs = Number.isFinite(Number(item?.start_ms)) ? Number(item.start_ms) : null;
+      const rawEndMs = Number.isFinite(Number(item?.end_ms)) ? Number(item.end_ms) : null;
+      const endMs = normalizePositiveEndMs(startMs, rawEndMs);
+      return {
+        id: String(item?.id || `asr-seg-${index + 1}`),
+        speaker: String(item?.speaker || "narrator").trim() || "narrator",
+        text: String(item?.text || "").trim(),
+        start_ms: startMs,
+        end_ms: endMs,
+      };
+    })
+    .filter((item) => item.text && item.start_ms !== null && item.end_ms !== null);
   if (!usableTimeline.length) {
     throw new Error("请先完成 ASR 识别并拿到可用时间轴片段。");
   }
@@ -134,8 +145,9 @@ export function buildDubbingSegmentsFromPreview({ alignments, previewText }) {
         throw new Error(`第 ${index + 1} 行不是有效时间轴格式。`);
       }
       const startMs = parseTimestampMs(match[1]);
-      const endMs = parseTimestampMs(match[2]);
-      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+      const rawEndMs = parseTimestampMs(match[2]);
+      const endMs = normalizePositiveEndMs(startMs, rawEndMs);
+      if (!Number.isFinite(startMs) || endMs === null) {
         throw new Error(`第 ${index + 1} 行时间轴无效，需满足 start < end。`);
       }
       const base = usableTimeline[index] || {};
@@ -197,6 +209,32 @@ function stripTimingOverrides(overrides) {
 
 export function expandDubbingTimelineByDuration(translatedSegments) {
   return (Array.isArray(translatedSegments) ? translatedSegments : []).map((segment) => ({ ...segment }));
+}
+
+export function reconcileTranslatedDubbingSegments(sourceSegments, translatedSegments) {
+  const translatedById = new Map(
+    (Array.isArray(translatedSegments) ? translatedSegments : [])
+      .map((segment) => [String(segment?.id || ""), segment])
+      .filter(([id]) => id),
+  );
+  return (Array.isArray(sourceSegments) ? sourceSegments : [])
+    .map((source, index) => {
+      const id = String(source?.id || `asr-seg-${index + 1}`);
+      const translated = translatedById.get(id) || {};
+      const text = String(translated?.text || "").trim() || String(source?.text || "").trim();
+      if (!text) return null;
+      return {
+        ...source,
+        ...translated,
+        id,
+        speaker: String(translated?.speaker || source?.speaker || "narrator"),
+        source_text: String(translated?.source_text || source?.text || "").trim(),
+        text,
+        start_ms: Number.isFinite(Number(translated?.start_ms)) ? Number(translated.start_ms) : source?.start_ms,
+        end_ms: Number.isFinite(Number(translated?.end_ms)) ? Number(translated.end_ms) : source?.end_ms,
+      };
+    })
+    .filter(Boolean);
 }
 
 export function buildTranslatedDubbingScriptPayload({

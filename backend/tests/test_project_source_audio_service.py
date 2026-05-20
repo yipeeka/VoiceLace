@@ -90,6 +90,55 @@ class ProjectSourceAudioServiceTest(unittest.TestCase):
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
+    def test_save_project_source_audio_window_covers_script_tail_beyond_probe(self) -> None:
+        root = TEST_OUTPUT_ROOT / f"source-audio-tail-{uuid.uuid4().hex[:8]}"
+        shutil.rmtree(root, ignore_errors=True)
+        try:
+            output_dir = root / "output"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            input_audio = root / "input.wav"
+            input_audio.write_bytes(b"RIFFdemo")
+            project = Project(name="tail")
+            project.script.segments = [
+                Segment(id="prev", index=0, text="是合理的吗？", source_start_ms=149000, source_end_ms=149960),
+                Segment(id="last", index=1, text="评论区聊聊。", source_start_ms=150001, source_end_ms=151168),
+            ]
+
+            calls = []
+            original_runner = service._run_ffmpeg_trim_to_mp3
+            original_wav_runner = service._run_ffmpeg_trim_to_wav
+            original_probe = service._probe_audio_duration_ms
+
+            def fake_runner(input_path: Path, output_path: Path, *, start_ms: int, end_ms: int) -> None:
+                calls.append((input_path, output_path, start_ms, end_ms))
+                output_path.write_bytes(b"ID3demo")
+
+            def fake_wav_runner(input_path: Path, output_path: Path, *, start_ms: int, end_ms: int) -> None:
+                calls.append((input_path, output_path, start_ms, end_ms))
+                output_path.write_bytes(b"RIFFdemo")
+
+            service._run_ffmpeg_trim_to_mp3 = fake_runner  # type: ignore[assignment]
+            service._run_ffmpeg_trim_to_wav = fake_wav_runner  # type: ignore[assignment]
+            service._probe_audio_duration_ms = lambda _path: 150001  # type: ignore[assignment]
+            try:
+                saved = service.save_project_source_audio_mp3(
+                    project=project,
+                    input_path=input_audio,
+                    audio_name="input.wav",
+                    output_dir=output_dir,
+                )
+            finally:
+                service._run_ffmpeg_trim_to_mp3 = original_runner  # type: ignore[assignment]
+                service._run_ffmpeg_trim_to_wav = original_wav_runner  # type: ignore[assignment]
+                service._probe_audio_duration_ms = original_probe  # type: ignore[assignment]
+
+            self.assertEqual(calls[0][2:], (0, 151168))
+            self.assertEqual(calls[1][2:], (0, 151168))
+            self.assertEqual(saved.audio_assets.source_audio_end_ms, 151168)
+            self.assertEqual(saved.audio_assets.source_audio_duration_ms, 151168)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_old_project_audio_assets_are_compatible(self) -> None:
         project = Project.model_validate({"name": "legacy", "audio_assets": {}})
         self.assertIsNone(project.audio_assets.source_audio_wav_relpath)

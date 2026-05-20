@@ -105,6 +105,21 @@ class DubbingTranslationServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["segments"][0]["tts_overrides"], {})
         self.assertAlmostEqual(float(result["segments"][0]["target_duration_sec"]), 1.9, places=3)
 
+    async def test_passthrough_mode_keeps_zero_length_source_with_minimal_duration(self) -> None:
+        state = _build_state()
+        state.translation_llm_engine.is_loaded = False
+        result = await translate_dubbing_segments_for_state(
+            state=state,
+            source="secondary_local",
+            mode="passthrough",
+            target_language="中文",
+            segments=[{"id": "last", "speaker": "narrator", "text": "评论区聊聊。", "start_ms": 150001, "end_ms": 150001}],
+        )
+
+        self.assertEqual(len(result["segments"]), 1)
+        self.assertEqual(result["segments"][0]["text"], "评论区聊聊。")
+        self.assertGreater(result["segments"][0]["end_ms"], result["segments"][0]["start_ms"])
+
     async def test_legacy_speed_window_does_not_emit_speed_override(self) -> None:
         state = _build_state()
         result = await translate_dubbing_segments_for_state(
@@ -142,6 +157,69 @@ class DubbingTranslationServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["chunk_count"], 1)
         self.assertEqual(result["fallback_chunk_count"], 0)
         self.assertEqual([row["text"] for row in result["segments"]], ["hello译", "world译"])
+
+    async def test_batch_json_empty_text_falls_back_to_source_segment(self) -> None:
+        class BlankTailBatchEngine(_FakeTranslationEngine):
+            async def generate_text(self, *, text, system_prompt, llm_options):
+                prompt = str(system_prompt or "")
+                if "配音预处理助手" in prompt:
+                    return "术语"
+                if "JSON 数组" in prompt:
+                    rows = json.loads(text)
+                    return json.dumps(
+                        [
+                            {
+                                "id": row["id"],
+                                "text": "" if row["id"] == "last" else f"{row['text']}译",
+                            }
+                            for row in rows
+                        ],
+                        ensure_ascii=False,
+                    )
+                return f"{text}译"
+
+        state = _build_state()
+        state.translation_llm_engine = BlankTailBatchEngine()
+        result = await translate_dubbing_segments_for_state(
+            state=state,
+            source="secondary_local",
+            target_language="中文",
+            segments=[
+                {"id": "prev", "speaker": "narrator", "text": "是合理的吗？", "start_ms": 149000, "end_ms": 149960},
+                {"id": "last", "speaker": "narrator", "text": "评论区聊聊。", "start_ms": 150001, "end_ms": 150002},
+            ],
+        )
+
+        self.assertEqual([row["id"] for row in result["segments"]], ["prev", "last"])
+        self.assertEqual(result["segments"][1]["text"], "评论区聊聊。")
+        self.assertGreater(result["segments"][1]["end_ms"], result["segments"][1]["start_ms"])
+
+    async def test_batch_json_missing_tail_id_falls_back_to_source_segment(self) -> None:
+        class MissingTailBatchEngine(_FakeTranslationEngine):
+            async def generate_text(self, *, text, system_prompt, llm_options):
+                prompt = str(system_prompt or "")
+                if "配音预处理助手" in prompt:
+                    return "术语"
+                if "JSON 数组" in prompt:
+                    rows = json.loads(text)
+                    return json.dumps([{"id": rows[0]["id"], "text": f"{rows[0]['text']}译"}], ensure_ascii=False)
+                return f"{text}译"
+
+        state = _build_state()
+        state.translation_llm_engine = MissingTailBatchEngine()
+        result = await translate_dubbing_segments_for_state(
+            state=state,
+            source="secondary_local",
+            target_language="中文",
+            segments=[
+                {"id": "prev", "speaker": "narrator", "text": "是合理的吗？", "start_ms": 149000, "end_ms": 149960},
+                {"id": "last", "speaker": "narrator", "text": "评论区聊聊。", "start_ms": 150001, "end_ms": 150002},
+            ],
+        )
+
+        self.assertEqual([row["id"] for row in result["segments"]], ["prev", "last"])
+        self.assertEqual(result["segments"][1]["text"], "评论区聊聊。")
+        self.assertGreater(result["segments"][1]["end_ms"], result["segments"][1]["start_ms"])
 
     async def test_batch_parse_failure_falls_back_to_per_segment(self) -> None:
         class BrokenBatchEngine(_FakeTranslationEngine):

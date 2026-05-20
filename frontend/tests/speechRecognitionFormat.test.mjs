@@ -11,6 +11,7 @@ import {
   formatTimestamp,
   getDubbingTaskLabel,
   parseTimestampMs,
+  reconcileTranslatedDubbingSegments,
   renderCuesAsSrt,
   resolveAsrTimestampRequest,
   splitSpeakerText,
@@ -72,6 +73,56 @@ test("buildDubbingSegmentsFromPreview maps timeline edits back to ASR segments",
   });
   assert.deepEqual(result, [
     { id: "a", speaker: "角色A", text: "新文本", start_ms: 0, end_ms: 1200 },
+  ]);
+});
+
+test("buildDubbingSegmentsFromPreview keeps zero-length final cues with minimal duration", () => {
+  const result = buildDubbingSegmentsFromPreview({
+    alignments: [
+      { id: "prev", speaker: "narrator", text: "是合理的吗？", start_ms: 149000, end_ms: 149960 },
+      { id: "last", speaker: "narrator", text: "评论区聊聊。", start_ms: 150001, end_ms: 150001 },
+    ],
+    previewText: [
+      "[00:02:29.000 --> 00:02:29.960] 是合理的吗？",
+      "[00:02:30.001 --> 00:02:30.001] 评论区聊聊。",
+    ].join("\n"),
+  });
+  assert.deepEqual(result, [
+    { id: "prev", speaker: "narrator", text: "是合理的吗？", start_ms: 149000, end_ms: 149960 },
+    { id: "last", speaker: "narrator", text: "评论区聊聊。", start_ms: 150001, end_ms: 150002 },
+  ]);
+});
+
+test("buildDubbingSegmentsFromPreview keeps overlapping positive-duration cues", () => {
+  const result = buildDubbingSegmentsFromPreview({
+    alignments: [
+      { id: "prev", speaker: "narrator", text: "是合理的吗？", start_ms: 149000, end_ms: 149960 },
+      { id: "last", speaker: "narrator", text: "评论区聊聊", start_ms: 148740, end_ms: 149660 },
+    ],
+    previewText: [
+      "[00:02:29.000 --> 00:02:29.960] 是合理的吗？",
+      "[00:02:28.740 --> 00:02:29.660] 评论区聊聊",
+    ].join("\n"),
+  });
+  assert.deepEqual(result, [
+    { id: "prev", speaker: "narrator", text: "是合理的吗？", start_ms: 149000, end_ms: 149960 },
+    { id: "last", speaker: "narrator", text: "评论区聊聊", start_ms: 148740, end_ms: 149660 },
+  ]);
+});
+
+test("reconcileTranslatedDubbingSegments restores missing qwen3 tail segment from source timeline", () => {
+  const result = reconcileTranslatedDubbingSegments(
+    [
+      { id: "prev", speaker: "narrator", text: "是合理的吗？", start_ms: 149000, end_ms: 149960 },
+      { id: "last", speaker: "narrator", text: "评论区聊聊。", start_ms: 150001, end_ms: 150002 },
+    ],
+    [
+      { id: "prev", speaker: "narrator", source_text: "是合理的吗？", text: "Is that reasonable?", start_ms: 149000, end_ms: 149960 },
+    ],
+  );
+  assert.deepEqual(result, [
+    { id: "prev", speaker: "narrator", source_text: "是合理的吗？", text: "Is that reasonable?", start_ms: 149000, end_ms: 149960 },
+    { id: "last", speaker: "narrator", source_text: "评论区聊聊。", text: "评论区聊聊。", start_ms: 150001, end_ms: 150002 },
   ]);
 });
 

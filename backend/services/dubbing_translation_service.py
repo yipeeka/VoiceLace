@@ -158,8 +158,8 @@ def _normalize_input_segments(segments: list[Any]) -> tuple[list[dict[str, Any]]
         raw_end = getter("end_ms", None)
         start_ms = int(raw_start) if raw_start is not None else None
         end_ms = int(raw_end) if raw_end is not None else None
-        if start_ms is not None and end_ms is not None and end_ms < start_ms:
-            end_ms = start_ms
+        if start_ms is not None and end_ms is not None and end_ms <= start_ms:
+            end_ms = start_ms + 1
         normalized_rows.append(
             {
                 "id": seg_id,
@@ -275,7 +275,7 @@ def _json_array_from_model_output(raw: str) -> list[dict[str, Any]]:
             continue
         item_id = str(item.get("id") or "").strip()
         item_text = str(item.get("text") or "").strip()
-        if item_id and item_text:
+        if item_id:
             rows.append({"id": item_id, "text": item_text})
     if not rows:
         raise ValueError("model output contains no usable rows")
@@ -679,13 +679,10 @@ async def translate_dubbing_segments_for_state(
         )
         parsed = _json_array_from_model_output(output)
         by_id = {str(item["id"]): str(item["text"]) for item in parsed}
-        missing = [row for row in chunk if str(row.get("id") or "") not in by_id]
-        if missing:
-            raise ValueError(f"batch output missing ids: {[row.get('id') for row in missing[:4]]}")
         return [
             _build_result_row(
                 row=row,
-                translated_text=by_id[str(row.get("id") or "")],
+                translated_text=by_id.get(str(row.get("id") or ""), "").strip() or str(row.get("source_text") or "").strip(),
                 min_speed=min_speed,
                 max_speed=max_speed,
             )
@@ -830,7 +827,16 @@ async def translate_dubbing_segments_for_state(
 
             await asyncio.gather(*(run_and_store(idx, chunk) for idx, chunk in enumerate(chunks)))
 
-    translated_rows = [rows_by_id[str(row["id"])] for row in normalized_segments if str(row["id"]) in rows_by_id]
+    translated_rows = [
+        rows_by_id.get(str(row["id"]))
+        or _build_result_row(
+            row=row,
+            translated_text=str(row.get("source_text") or "").strip(),
+            min_speed=min_speed,
+            max_speed=max_speed,
+        )
+        for row in normalized_segments
+    ]
     over_time_rows = [
         row
         for row in translated_rows

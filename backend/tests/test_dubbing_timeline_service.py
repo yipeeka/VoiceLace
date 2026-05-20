@@ -33,6 +33,21 @@ class DubbingTimelineServiceTest(unittest.TestCase):
         self.assertLessEqual(adjusted[1]["end_ms"], adjusted[2]["start_ms"] - 20)
         self.assertIn("timeline_adjustment", adjusted[1]["timing_check"])
 
+    def test_preserves_overlapping_short_segments_instead_of_collapsing_them(self) -> None:
+        rows = [
+            {"id": "a", "text": "是合理的吗？", "start_ms": 229000, "end_ms": 229960},
+            {"id": "b", "text": "评论区聊聊", "start_ms": 228740, "end_ms": 229660},
+        ]
+
+        adjusted = apply_reasonable_dubbing_timeline(rows)
+
+        self.assertEqual([row["id"] for row in adjusted], ["a", "b"])
+        self.assertEqual(adjusted[0]["text"], "是合理的吗？")
+        self.assertGreater(adjusted[0]["end_ms"], adjusted[0]["start_ms"])
+        self.assertEqual(adjusted[1]["text"], "评论区聊聊")
+        self.assertGreaterEqual(adjusted[1]["end_ms"], 229660)
+        self.assertGreater(adjusted[1]["end_ms"], adjusted[1]["start_ms"])
+
     def test_filters_timing_overrides_only_for_dubbing_timeline(self) -> None:
         overrides = {"duration": 1.2, "speed": 0.9, "denoise": True, "num_step": 20}
 

@@ -28,6 +28,7 @@ import {
   buildTranslatedDubbingScriptPayload,
   collapseWhisperSegments,
   formatTimestamp,
+  reconcileTranslatedDubbingSegments,
   resolveAsrTimestampRequest,
   renderCuesAsSrt,
   stripTimelineText,
@@ -994,7 +995,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           originalFileName: file.name || "",
         };
       });
-      setVocalSeparationEnabled(true);
+      setVocalSeparationEnabled(false);
       if (videoUpload) {
         useUiStore.getState().pushToast({ title: "已从视频提取音频", tone: "success" });
       }
@@ -1347,7 +1348,10 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           }
         },
       });
-      const translatedSegments = Array.isArray(payload?.segments) ? payload.segments : [];
+      const translatedSegments = reconcileTranslatedDubbingSegments(
+        normalizedAlignments,
+        Array.isArray(payload?.segments) ? payload.segments : [],
+      );
       if (!translatedSegments.length) {
         throw new Error("未返回可用分段翻译结果。");
       }
