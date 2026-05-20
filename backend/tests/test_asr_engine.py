@@ -82,6 +82,29 @@ class AsrEngineTest(unittest.TestCase):
             self.assertTrue(any(isinstance(cmd, list) and "-m" in cmd and str(model_path) in cmd for cmd in calls))
             self.assertTrue(any(isinstance(cmd, list) and "-f" in cmd for cmd in calls))
             self.assertTrue(any(isinstance(cmd, list) and "-am" in cmd and str(aligner_path) in cmd for cmd in calls))
+            self.assertTrue(any(isinstance(cmd, list) and "-osrt" in cmd and "-ml" in cmd and "1" in cmd for cmd in calls))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_qwen3_crispasr_timestamps_require_forced_aligner(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-qwen3-missing-aligner"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            exe_path = temp_dir / "crispasr.exe"
+            exe_path.write_bytes(b"exe")
+            model_path = temp_dir / "qwen3.gguf"
+            model_path.write_bytes(b"gguf")
+
+            engine = ASREngine()
+            engine.crispasr_exe = str(exe_path)
+            engine.qwen3_model_path = str(model_path)
+            engine.qwen3_enable_timestamps = True
+
+            with self.assertRaisesRegex(RuntimeError, "ForcedAligner"):
+                asyncio.run(engine.transcribe(str(wav_path), backend="qwen3_crispasr", speaker_labels=False))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -100,7 +123,7 @@ class AsrEngineTest(unittest.TestCase):
             engine = ASREngine()
             engine.crispasr_exe = str(exe_path)
             engine.qwen3_model_path = str(model_path)
-            engine.qwen3_enable_timestamps = True
+            engine.qwen3_enable_timestamps = False
 
             class _Proc:
                 def __init__(self, returncode=0, stdout="", stderr=""):
@@ -128,6 +151,588 @@ class AsrEngineTest(unittest.TestCase):
             self.assertNotIn("[00:00:00", result["text"])
             first = result["alignments"][0]
             self.assertGreaterEqual(first.get("end_ms", 0), first.get("start_ms", 0))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_qwen3_crispasr_parses_srt_timestamps_into_alignments(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-qwen3-srt-ts"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            exe_path = temp_dir / "crispasr.exe"
+            exe_path.write_bytes(b"exe")
+            model_path = temp_dir / "qwen3.gguf"
+            model_path.write_bytes(b"gguf")
+            aligner_path = temp_dir / "qwen3-forced-aligner.gguf"
+            aligner_path.write_bytes(b"gguf")
+
+            engine = ASREngine()
+            engine.crispasr_exe = str(exe_path)
+            engine.qwen3_model_path = str(model_path)
+            engine.qwen3_forced_aligner_model_path = str(aligner_path)
+            engine.qwen3_enable_timestamps = True
+
+            class _Proc:
+                def __init__(self, returncode=0, stdout="", stderr=""):
+                    self.returncode = returncode
+                    self.stdout = stdout
+                    self.stderr = stderr
+
+            srt_text = "1\n00:00:00,320 --> 00:00:00,560\nAnd\n\n2\n00:00:00,960 --> 00:00:01,280\nmy\n"
+
+            def fake_run(cmd, *args, **kwargs):
+                if isinstance(cmd, list) and cmd and cmd[0] == "ffmpeg":
+                    return _Proc(returncode=0, stdout="", stderr="")
+                return _Proc(returncode=0, stdout=srt_text, stderr="")
+
+            with patch("backend.engine.asr_engine.subprocess.run", side_effect=fake_run):
+                result = asyncio.run(engine.transcribe(str(wav_path), backend="qwen3_crispasr", speaker_labels=False))
+
+            self.assertEqual(result["text"], "And\nmy")
+            self.assertEqual(len(result["alignments"]), 2)
+            self.assertEqual(result["alignments"][0]["start_ms"], 320)
+            self.assertEqual(result["alignments"][1]["end_ms"], 1280)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_qwen3_crispasr_merges_trailing_punctuation_fragments_without_extending_time(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-qwen3-tail-fragments"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            exe_path = temp_dir / "crispasr.exe"
+            exe_path.write_bytes(b"exe")
+            model_path = temp_dir / "qwen3.gguf"
+            model_path.write_bytes(b"gguf")
+            aligner_path = temp_dir / "qwen3-forced-aligner.gguf"
+            aligner_path.write_bytes(b"gguf")
+
+            engine = ASREngine()
+            engine.crispasr_exe = str(exe_path)
+            engine.qwen3_model_path = str(model_path)
+            engine.qwen3_forced_aligner_model_path = str(aligner_path)
+            engine.qwen3_enable_timestamps = True
+
+            class _Proc:
+                def __init__(self, returncode=0, stdout="", stderr=""):
+                    self.returncode = returncode
+                    self.stdout = stdout
+                    self.stderr = stderr
+
+            srt_text = (
+                "1\n00:00:10,800 --> 00:00:11,680\n叫“老人遗骸\n\n"
+                "2\n00:00:16,000 --> 00:00:16,480\n”\n\n"
+                "3\n00:00:16,960 --> 00:00:17,040\n吧。\n\n"
+                "4\n00:00:17,040 --> 00:00:18,320\n好，新建，\n\n"
+                "5\n00:00:19,120 --> 00:00:19,920\n然后把\n\n"
+                "6\n00:00:20,720 --> 00:00:22,480\n要生成的文本\n\n"
+                "7\n00:00:24,880 --> 00:00:25,680\n贴进来。\n"
+            )
+
+            def fake_run(cmd, *args, **kwargs):
+                if isinstance(cmd, list) and cmd and cmd[0] == "ffmpeg":
+                    return _Proc(returncode=0, stdout="", stderr="")
+                return _Proc(returncode=0, stdout=srt_text, stderr="")
+
+            with patch("backend.engine.asr_engine.subprocess.run", side_effect=fake_run):
+                result = asyncio.run(engine.transcribe(str(wav_path), backend="qwen3_crispasr", speaker_labels=False))
+
+            self.assertEqual(result["alignments"][0]["text"], "叫“老人遗骸”吧。")
+            self.assertEqual(result["alignments"][0]["start_ms"], 10800)
+            self.assertEqual(result["alignments"][0]["end_ms"], 11680)
+            self.assertEqual(result["alignments"][1]["text"], "好，新建，")
+            self.assertTrue(any("尾随短片段" in warning for warning in result["warnings"]))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_qwen3_crispasr_merges_single_punctuation_after_complete_phrase(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-qwen3-single-punctuation"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            exe_path = temp_dir / "crispasr.exe"
+            exe_path.write_bytes(b"exe")
+            model_path = temp_dir / "qwen3.gguf"
+            model_path.write_bytes(b"gguf")
+            aligner_path = temp_dir / "qwen3-forced-aligner.gguf"
+            aligner_path.write_bytes(b"gguf")
+
+            engine = ASREngine()
+            engine.crispasr_exe = str(exe_path)
+            engine.qwen3_model_path = str(model_path)
+            engine.qwen3_forced_aligner_model_path = str(aligner_path)
+            engine.qwen3_enable_timestamps = True
+
+            class _Proc:
+                def __init__(self, returncode=0, stdout="", stderr=""):
+                    self.returncode = returncode
+                    self.stdout = stdout
+                    self.stderr = stderr
+
+            srt_text = (
+                "1\n00:01:23,180 --> 00:01:24,220\n设为背景音乐\n\n"
+                "2\n00:01:24,860 --> 00:01:25,100\n。\n"
+            )
+
+            def fake_run(cmd, *args, **kwargs):
+                if isinstance(cmd, list) and cmd and cmd[0] == "ffmpeg":
+                    return _Proc(returncode=0, stdout="", stderr="")
+                return _Proc(returncode=0, stdout=srt_text, stderr="")
+
+            with patch("backend.engine.asr_engine.subprocess.run", side_effect=fake_run):
+                result = asyncio.run(engine.transcribe(str(wav_path), backend="qwen3_crispasr", speaker_labels=False))
+
+            self.assertEqual(len(result["alignments"]), 1)
+            self.assertEqual(result["alignments"][0]["text"], "设为背景音乐。")
+            self.assertEqual(result["alignments"][0]["start_ms"], 83180)
+            self.assertEqual(result["alignments"][0]["end_ms"], 84220)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_qwen3_crispasr_moves_leading_punctuation_to_previous_segment(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-qwen3-leading-punctuation"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            exe_path = temp_dir / "crispasr.exe"
+            exe_path.write_bytes(b"exe")
+            model_path = temp_dir / "qwen3.gguf"
+            model_path.write_bytes(b"gguf")
+            aligner_path = temp_dir / "qwen3-forced-aligner.gguf"
+            aligner_path.write_bytes(b"gguf")
+
+            engine = ASREngine()
+            engine.crispasr_exe = str(exe_path)
+            engine.qwen3_model_path = str(model_path)
+            engine.qwen3_forced_aligner_model_path = str(aligner_path)
+            engine.qwen3_enable_timestamps = True
+
+            class _Proc:
+                def __init__(self, returncode=0, stdout="", stderr=""):
+                    self.returncode = returncode
+                    self.stdout = stdout
+                    self.stderr = stderr
+
+            srt_text = (
+                "1\n00:00:15,360 --> 00:00:16,880\n他的双手常用绳索拉\n\n"
+                "2\n00:00:18,480 --> 00:00:19,040\n大鱼，\n\n"
+                "3\n00:00:20,560 --> 00:00:20,720\n留下了刻得很深的伤疤。\n\n"
+                "4\n00:00:20,720 --> 00:00:23,120\n但是这些伤疤中没有一块是新的\n\n"
+                "5\n00:00:24,000 --> 00:00:25,920\n，它们像无鱼可打的沙漠中。\n"
+            )
+
+            def fake_run(cmd, *args, **kwargs):
+                if isinstance(cmd, list) and cmd and cmd[0] == "ffmpeg":
+                    return _Proc(returncode=0, stdout="", stderr="")
+                return _Proc(returncode=0, stdout=srt_text, stderr="")
+
+            with patch("backend.engine.asr_engine.subprocess.run", side_effect=fake_run):
+                result = asyncio.run(engine.transcribe(str(wav_path), backend="qwen3_crispasr", speaker_labels=False))
+
+            self.assertEqual(result["alignments"][0]["text"], "他的双手常用绳索拉大鱼，")
+            self.assertEqual(result["alignments"][0]["end_ms"], 16880)
+            self.assertEqual(result["alignments"][2]["text"], "但是这些伤疤中没有一块是新的，")
+            self.assertEqual(result["alignments"][2]["end_ms"], 23120)
+            self.assertEqual(result["alignments"][3]["text"], "它们像无鱼可打的沙漠中。")
+            self.assertEqual(result["alignments"][3]["start_ms"], 24000)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_qwen3_crispasr_moves_short_leading_phrase_through_comma(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-qwen3-leading-phrase"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            exe_path = temp_dir / "crispasr.exe"
+            exe_path.write_bytes(b"exe")
+            model_path = temp_dir / "qwen3.gguf"
+            model_path.write_bytes(b"gguf")
+            aligner_path = temp_dir / "qwen3-forced-aligner.gguf"
+            aligner_path.write_bytes(b"gguf")
+
+            engine = ASREngine()
+            engine.crispasr_exe = str(exe_path)
+            engine.qwen3_model_path = str(model_path)
+            engine.qwen3_forced_aligner_model_path = str(aligner_path)
+            engine.qwen3_enable_timestamps = True
+
+            class _Proc:
+                def __init__(self, returncode=0, stdout="", stderr=""):
+                    self.returncode = returncode
+                    self.stdout = stdout
+                    self.stderr = stderr
+
+            srt_text = (
+                "1\n00:00:15,360 --> 00:00:16,880\n他的双手常用绳索拉\n\n"
+                "2\n00:00:18,480 --> 00:00:19,040\n大鱼，\n\n"
+                "3\n00:00:58,160 --> 00:00:58,720\n跟着有三个礼\n\n"
+                "4\n00:00:59,360 --> 00:01:00,400\n拜，我们每天都逮住了大鱼。\n"
+            )
+
+            def fake_run(cmd, *args, **kwargs):
+                if isinstance(cmd, list) and cmd and cmd[0] == "ffmpeg":
+                    return _Proc(returncode=0, stdout="", stderr="")
+                return _Proc(returncode=0, stdout=srt_text, stderr="")
+
+            with patch("backend.engine.asr_engine.subprocess.run", side_effect=fake_run):
+                result = asyncio.run(engine.transcribe(str(wav_path), backend="qwen3_crispasr", speaker_labels=False))
+
+            self.assertEqual(result["alignments"][0]["text"], "他的双手常用绳索拉大鱼，")
+            self.assertEqual(result["alignments"][0]["end_ms"], 16880)
+            self.assertEqual(result["alignments"][1]["text"], "跟着有三个礼拜，")
+            self.assertEqual(result["alignments"][1]["end_ms"], 58720)
+            self.assertEqual(result["alignments"][2]["text"], "我们每天都逮住了大鱼。")
+            self.assertEqual(result["alignments"][2]["start_ms"], 59360)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_qwen3_crispasr_keeps_discourse_starter_as_own_segment(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-qwen3-discourse-starter"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            exe_path = temp_dir / "crispasr.exe"
+            exe_path.write_bytes(b"exe")
+            model_path = temp_dir / "qwen3.gguf"
+            model_path.write_bytes(b"gguf")
+            aligner_path = temp_dir / "qwen3-forced-aligner.gguf"
+            aligner_path.write_bytes(b"gguf")
+
+            engine = ASREngine()
+            engine.crispasr_exe = str(exe_path)
+            engine.qwen3_model_path = str(model_path)
+            engine.qwen3_forced_aligner_model_path = str(aligner_path)
+            engine.qwen3_enable_timestamps = True
+
+            class _Proc:
+                def __init__(self, returncode=0, stdout="", stderr=""):
+                    self.returncode = returncode
+                    self.stdout = stdout
+                    self.stderr = stderr
+
+            srt_text = (
+                "1\n00:00:15,120 --> 00:00:16,000\n首先，先加载模型\n\n"
+                "2\n00:00:16,200 --> 00:00:16,400\n然后，\n\n"
+                "3\n00:00:16,600 --> 00:00:18,000\n进入下一步。\n"
+            )
+
+            def fake_run(cmd, *args, **kwargs):
+                if isinstance(cmd, list) and cmd and cmd[0] == "ffmpeg":
+                    return _Proc(returncode=0, stdout="", stderr="")
+                return _Proc(returncode=0, stdout=srt_text, stderr="")
+
+            with patch("backend.engine.asr_engine.subprocess.run", side_effect=fake_run):
+                result = asyncio.run(engine.transcribe(str(wav_path), backend="qwen3_crispasr", speaker_labels=False))
+
+            self.assertEqual(result["alignments"][0]["text"], "首先，先加载模型")
+            self.assertEqual(result["alignments"][1]["text"], "然后，")
+            self.assertEqual(result["alignments"][1]["start_ms"], 16200)
+            self.assertEqual(result["alignments"][1]["end_ms"], 16400)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_qwen3_crispasr_merges_known_split_compound_boundaries(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-qwen3-compound-boundaries"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            exe_path = temp_dir / "crispasr.exe"
+            exe_path.write_bytes(b"exe")
+            model_path = temp_dir / "qwen3.gguf"
+            model_path.write_bytes(b"gguf")
+            aligner_path = temp_dir / "qwen3-forced-aligner.gguf"
+            aligner_path.write_bytes(b"gguf")
+
+            engine = ASREngine()
+            engine.crispasr_exe = str(exe_path)
+            engine.qwen3_model_path = str(model_path)
+            engine.qwen3_forced_aligner_model_path = str(aligner_path)
+            engine.qwen3_enable_timestamps = True
+
+            class _Proc:
+                def __init__(self, returncode=0, stdout="", stderr=""):
+                    self.returncode = returncode
+                    self.stdout = stdout
+                    self.stderr = stderr
+
+            srt_text = (
+                "1\n00:00:01,040 --> 00:00:01,920\n今天介绍一\n\n"
+                "2\n00:00:02,800 --> 00:00:03,760\n下Voice Lens的\n\n"
+                "3\n00:00:07,680 --> 00:00:10,160\n现在我们先建立一个新的项目，就\n\n"
+                "4\n00:00:10,800 --> 00:00:11,680\n叫“老人遗海”吧。\n"
+            )
+
+            def fake_run(cmd, *args, **kwargs):
+                if isinstance(cmd, list) and cmd and cmd[0] == "ffmpeg":
+                    return _Proc(returncode=0, stdout="", stderr="")
+                return _Proc(returncode=0, stdout=srt_text, stderr="")
+
+            with patch("backend.engine.asr_engine.subprocess.run", side_effect=fake_run):
+                result = asyncio.run(engine.transcribe(str(wav_path), backend="qwen3_crispasr", speaker_labels=False))
+
+            self.assertEqual(result["alignments"][0]["text"], "今天介绍一下")
+            self.assertEqual(result["alignments"][0]["start_ms"], 1040)
+            self.assertEqual(result["alignments"][0]["end_ms"], 1920)
+            self.assertEqual(result["alignments"][1]["text"], "Voice Lens的")
+            self.assertEqual(result["alignments"][1]["start_ms"], 2800)
+            self.assertEqual(result["alignments"][1]["end_ms"], 3760)
+            self.assertEqual(result["alignments"][2]["text"], "现在我们先建立一个新的项目，就叫")
+            self.assertEqual(result["alignments"][2]["start_ms"], 7680)
+            self.assertEqual(result["alignments"][2]["end_ms"], 10160)
+            self.assertEqual(result["alignments"][3]["text"], "“老人遗海”吧。")
+            self.assertEqual(result["alignments"][3]["start_ms"], 10800)
+            self.assertEqual(result["alignments"][3]["end_ms"], 11680)
+            compound_repairs = [item for item in result["timeline_repairs"] if item.get("kind") == "compound_boundary"]
+            self.assertEqual([item.get("moved_text") for item in compound_repairs], ["下", "叫"])
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_qwen3_crispasr_uses_boundary_word_dictionary(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-qwen3-boundary-dict"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            exe_path = temp_dir / "crispasr.exe"
+            exe_path.write_bytes(b"exe")
+            model_path = temp_dir / "qwen3.gguf"
+            model_path.write_bytes(b"gguf")
+            aligner_path = temp_dir / "qwen3-forced-aligner.gguf"
+            aligner_path.write_bytes(b"gguf")
+
+            engine = ASREngine()
+            engine.crispasr_exe = str(exe_path)
+            engine.qwen3_model_path = str(model_path)
+            engine.qwen3_forced_aligner_model_path = str(aligner_path)
+            engine.qwen3_enable_timestamps = True
+
+            class _Proc:
+                def __init__(self, returncode=0, stdout="", stderr=""):
+                    self.returncode = returncode
+                    self.stdout = stdout
+                    self.stderr = stderr
+
+            srt_text = (
+                "1\n00:00:01,000 --> 00:00:02,000\n先加\n\n"
+                "2\n00:00:02,400 --> 00:00:03,000\n载模型\n\n"
+                "3\n00:00:04,000 --> 00:00:05,000\n进入配\n\n"
+                "4\n00:00:05,400 --> 00:00:06,000\n置页面\n"
+            )
+
+            def fake_run(cmd, *args, **kwargs):
+                if isinstance(cmd, list) and cmd and cmd[0] == "ffmpeg":
+                    return _Proc(returncode=0, stdout="", stderr="")
+                return _Proc(returncode=0, stdout=srt_text, stderr="")
+
+            with patch("backend.engine.asr_engine.subprocess.run", side_effect=fake_run):
+                result = asyncio.run(engine.transcribe(str(wav_path), backend="qwen3_crispasr", speaker_labels=False))
+
+            self.assertEqual(result["alignments"][0]["text"], "先加载")
+            self.assertEqual(result["alignments"][1]["text"], "模型")
+            self.assertEqual(result["alignments"][2]["text"], "进入配置")
+            self.assertEqual(result["alignments"][3]["text"], "页面")
+            compound_repairs = [item for item in result["timeline_repairs"] if item.get("kind") == "compound_boundary"]
+            self.assertEqual([item.get("moved_text") for item in compound_repairs], ["载", "置"])
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_qwen3_crispasr_uses_jieba_for_unknown_boundary_word(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-qwen3-jieba-boundary"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            exe_path = temp_dir / "crispasr.exe"
+            exe_path.write_bytes(b"exe")
+            model_path = temp_dir / "qwen3.gguf"
+            model_path.write_bytes(b"gguf")
+            aligner_path = temp_dir / "qwen3-forced-aligner.gguf"
+            aligner_path.write_bytes(b"gguf")
+
+            engine = ASREngine()
+            engine.crispasr_exe = str(exe_path)
+            engine.qwen3_model_path = str(model_path)
+            engine.qwen3_forced_aligner_model_path = str(aligner_path)
+            engine.qwen3_enable_timestamps = True
+
+            class _Proc:
+                def __init__(self, returncode=0, stdout="", stderr=""):
+                    self.returncode = returncode
+                    self.stdout = stdout
+                    self.stderr = stderr
+
+            srt_text = (
+                "1\n00:00:01,000 --> 00:00:02,000\n打开用\n\n"
+                "2\n00:00:02,400 --> 00:00:03,000\n户设置\n"
+            )
+
+            def fake_run(cmd, *args, **kwargs):
+                if isinstance(cmd, list) and cmd and cmd[0] == "ffmpeg":
+                    return _Proc(returncode=0, stdout="", stderr="")
+                return _Proc(returncode=0, stdout=srt_text, stderr="")
+
+            with patch("backend.engine.asr_engine.subprocess.run", side_effect=fake_run):
+                result = asyncio.run(engine.transcribe(str(wav_path), backend="qwen3_crispasr", speaker_labels=False))
+
+            self.assertEqual(result["alignments"][0]["text"], "打开用户")
+            self.assertEqual(result["alignments"][1]["text"], "设置")
+            compound_repairs = [item for item in result["timeline_repairs"] if item.get("kind") == "compound_boundary"]
+            self.assertIn("户", [item.get("moved_text") for item in compound_repairs])
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_qwen3_crispasr_moves_trailing_open_quote_to_next_segment(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-qwen3-trailing-opener"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            exe_path = temp_dir / "crispasr.exe"
+            exe_path.write_bytes(b"exe")
+            model_path = temp_dir / "qwen3.gguf"
+            model_path.write_bytes(b"gguf")
+            aligner_path = temp_dir / "qwen3-forced-aligner.gguf"
+            aligner_path.write_bytes(b"gguf")
+
+            engine = ASREngine()
+            engine.crispasr_exe = str(exe_path)
+            engine.qwen3_model_path = str(model_path)
+            engine.qwen3_forced_aligner_model_path = str(aligner_path)
+            engine.qwen3_enable_timestamps = True
+
+            class _Proc:
+                def __init__(self, returncode=0, stdout="", stderr=""):
+                    self.returncode = returncode
+                    self.stdout = stdout
+                    self.stderr = stderr
+
+            srt_text = (
+                "1\n00:00:21,120 --> 00:00:22,960\n然后，比如说我们刚才生成的“\n\n"
+                "2\n00:00:23,680 --> 00:00:26,080\n老人遗海”的项目，我们就可以。\n"
+            )
+
+            def fake_run(cmd, *args, **kwargs):
+                if isinstance(cmd, list) and cmd and cmd[0] == "ffmpeg":
+                    return _Proc(returncode=0, stdout="", stderr="")
+                return _Proc(returncode=0, stdout=srt_text, stderr="")
+
+            with patch("backend.engine.asr_engine.subprocess.run", side_effect=fake_run):
+                result = asyncio.run(engine.transcribe(str(wav_path), backend="qwen3_crispasr", speaker_labels=False))
+
+            self.assertEqual(result["alignments"][0]["text"], "然后，比如说我们刚才生成的")
+            self.assertEqual(result["alignments"][1]["text"], "“老人遗海”的项目，我们就可以。")
+            self.assertTrue(any(item.get("kind") == "trailing_opener" for item in result["timeline_repairs"]))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_qwen3_crispasr_repairs_need_split_boundary_only(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-qwen3-need-boundary"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            exe_path = temp_dir / "crispasr.exe"
+            exe_path.write_bytes(b"exe")
+            model_path = temp_dir / "qwen3.gguf"
+            model_path.write_bytes(b"gguf")
+            aligner_path = temp_dir / "qwen3-forced-aligner.gguf"
+            aligner_path.write_bytes(b"gguf")
+
+            engine = ASREngine()
+            engine.crispasr_exe = str(exe_path)
+            engine.qwen3_model_path = str(model_path)
+            engine.qwen3_forced_aligner_model_path = str(aligner_path)
+            engine.qwen3_enable_timestamps = True
+
+            class _Proc:
+                def __init__(self, returncode=0, stdout="", stderr=""):
+                    self.returncode = returncode
+                    self.stdout = stdout
+                    self.stderr = stderr
+
+            srt_text = (
+                "1\n00:00:32,820 --> 00:00:33,620\n他说：“我只需\n\n"
+                "2\n00:00:33,820 --> 00:00:38,187\n要音乐。”再输入，不需要人声。\n"
+            )
+
+            def fake_run(cmd, *args, **kwargs):
+                if isinstance(cmd, list) and cmd and cmd[0] == "ffmpeg":
+                    return _Proc(returncode=0, stdout="", stderr="")
+                return _Proc(returncode=0, stdout=srt_text, stderr="")
+
+            with patch("backend.engine.asr_engine.subprocess.run", side_effect=fake_run):
+                result = asyncio.run(engine.transcribe(str(wav_path), backend="qwen3_crispasr", speaker_labels=False))
+
+            self.assertEqual(result["alignments"][0]["text"], "他说：“我只需要")
+            self.assertEqual(result["alignments"][1]["text"], "音乐。”再输入，不需要人声。")
+            compound_repairs = [item for item in result["timeline_repairs"] if item.get("kind") == "compound_boundary"]
+            self.assertIn("要", [item.get("moved_text") for item in compound_repairs])
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_qwen3_crispasr_repairs_long_text_with_too_short_timing(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-qwen3-short-timing"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            exe_path = temp_dir / "crispasr.exe"
+            exe_path.write_bytes(b"exe")
+            model_path = temp_dir / "qwen3.gguf"
+            model_path.write_bytes(b"gguf")
+            aligner_path = temp_dir / "qwen3-forced-aligner.gguf"
+            aligner_path.write_bytes(b"gguf")
+
+            engine = ASREngine()
+            engine.crispasr_exe = str(exe_path)
+            engine.qwen3_model_path = str(model_path)
+            engine.qwen3_forced_aligner_model_path = str(aligner_path)
+            engine.qwen3_enable_timestamps = True
+
+            class _Proc:
+                def __init__(self, returncode=0, stdout="", stderr=""):
+                    self.returncode = returncode
+                    self.stdout = stdout
+                    self.stderr = stderr
+
+            srt_text = (
+                "1\n00:00:15,360 --> 00:00:16,880\n他的双手常用绳索拉大鱼，\n\n"
+                "2\n00:00:20,560 --> 00:00:20,720\n留下了刻得很深的伤疤。\n\n"
+                "3\n00:00:20,720 --> 00:00:23,120\n但是这些伤疤中没有一块是新的。\n"
+            )
+
+            def fake_run(cmd, *args, **kwargs):
+                if isinstance(cmd, list) and cmd and cmd[0] == "ffmpeg":
+                    return _Proc(returncode=0, stdout="", stderr="")
+                return _Proc(returncode=0, stdout=srt_text, stderr="")
+
+            with patch("backend.engine.asr_engine.subprocess.run", side_effect=fake_run):
+                result = asyncio.run(engine.transcribe(str(wav_path), backend="qwen3_crispasr", speaker_labels=False))
+
+            self.assertEqual(result["alignments"][1]["text"], "留下了刻得很深的伤疤。")
+            self.assertEqual(result["alignments"][1]["start_ms"], 17080)
+            self.assertEqual(result["alignments"][1]["end_ms"], 20520)
+            self.assertTrue(any("过短时间轴" in warning for warning in result["warnings"]))
+            self.assertTrue(any(item.get("kind") == "short_timing" for item in result["timeline_repairs"]))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 

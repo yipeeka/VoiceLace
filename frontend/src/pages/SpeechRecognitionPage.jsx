@@ -23,10 +23,12 @@ import {
 } from "../utils/projectToolbar";
 import {
   buildDubbingProjectName,
+  canBuildDubbingProjectFromAlignments,
   buildDubbingSegmentsFromPreview,
   buildTranslatedDubbingScriptPayload,
   collapseWhisperSegments,
   formatTimestamp,
+  resolveAsrTimestampRequest,
   renderCuesAsSrt,
   stripTimelineText,
   getDubbingTaskLabel,
@@ -266,7 +268,13 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     return "Qwen3-ASR (CrispASR) 未就绪，请在系统设置补全可执行文件与 GGUF 模型路径。";
   }, [asrBackendConfigured, qwen3Ready]);
   const showTimestampToggle = asrBackendConfigured === "qwen3_crispasr";
-  const effectiveAsrEnableTimestamps = !isQwen3Backend && Boolean(asrEnableTimestamps);
+  const qwen3DefaultTimestamps = Boolean(systemStatus?.qwen3_asr_enable_timestamps);
+  const qwen3AlignerConfigured = Boolean(systemStatus?.qwen3_asr_forced_aligner_model_exists);
+  const effectiveAsrEnableTimestamps = resolveAsrTimestampRequest({
+    backend: asrBackendConfigured,
+    requested: asrEnableTimestamps,
+    qwen3Default: qwen3DefaultTimestamps,
+  });
   const vocalSeparationStatus = systemStatus?.asr_vocal_separation || {};
   const vocalSeparationRepoConfigured = Boolean(vocalSeparationStatus?.repo_dir);
   const vocalSeparationAvailable = Boolean(vocalSeparationStatus?.available);
@@ -276,13 +284,17 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const speakerLabelHint = useMemo(() => {
     if (!speakerLabels) return "";
     if (asrBackendConfigured === "qwen3_crispasr") {
-      return "已为 Qwen3-ASR 自动开启时间戳，用于说话人标签对齐。";
+      return "Qwen3-ASR 当前暂不支持说话人标签。";
     }
     return "Whisper + pyannote 会自动使用时间轴进行说话人标签对齐。";
   }, [speakerLabels, asrBackendConfigured]);
   const canBuildDubbingProject = useMemo(
-    () => Boolean((translationMode === "passthrough" || isTranslationEngineLoaded) && remappedAlignments.length && !isQwen3Backend),
-    [isTranslationEngineLoaded, remappedAlignments.length, isQwen3Backend, translationMode],
+    () => canBuildDubbingProjectFromAlignments({
+      translationMode,
+      isTranslationEngineLoaded,
+      alignmentCount: remappedAlignments.length,
+    }),
+    [isTranslationEngineLoaded, remappedAlignments.length, translationMode],
   );
   const subtitleTranslationReady = useMemo(
     () => subtitleMode !== "translated" || (isTranslationEngineLoaded && translationEngineStatus?.source === translationSource),
@@ -340,14 +352,12 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   useEffect(() => {
     if (isQwen3Backend) {
       if (speakerLabels) setSpeakerLabels(false);
-      if (showTimeline) setShowTimeline(false);
-      if (asrEnableTimestamps) setAsrEnableTimestamps(false);
       return;
     }
     if (asrBackendConfigured === "whisper" && asrEnableTimestamps) {
       setAsrEnableTimestamps(false);
     }
-  }, [isQwen3Backend, speakerLabels, showTimeline, asrBackendConfigured, asrEnableTimestamps, setAsrEnableTimestamps, setSpeakerLabels, setShowTimeline]);
+  }, [isQwen3Backend, speakerLabels, asrBackendConfigured, asrEnableTimestamps, setAsrEnableTimestamps, setSpeakerLabels]);
 
   useEffect(() => {
     setEditedPreviewText(derivedPreviewText || "");
@@ -1210,10 +1220,6 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       setTranslationError("请先加载翻译引擎。");
       return;
     }
-    if (isQwen3Backend) {
-      setTranslationError("Qwen3-ASR (CrispASR) 当前不提供可用时间轴，无法创建时间轴匹配配音项目。");
-      return;
-    }
     let normalizedAlignments = [];
     try {
       normalizedAlignments = parseEditedPreviewDubbingSegments();
@@ -1866,6 +1872,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           onAudioClipError={handleAudioClipError}
           onAudioClipRangeChange={setAudioClipRange}
           onAsrBackendChange={setAsrBackend}
+          onAsrEnableTimestampsChange={setAsrEnableTimestamps}
           onAsrLanguageChange={setAsrLanguage}
           onRecognize={handleRecognize}
           onSpeakerLabelsChange={setSpeakerLabels}
@@ -1879,6 +1886,9 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           audioClipRange={audioClipRange}
           pendingAudio={pendingAudio}
           projectTask={projectTask}
+          qwen3AlignerConfigured={qwen3AlignerConfigured}
+          qwen3DefaultTimestamps={qwen3DefaultTimestamps}
+          qwen3TimestampsRequested={asrEnableTimestamps}
           showTimestampToggle={showTimestampToggle}
           silenceAwareSplit={silenceAwareSplit}
           speakerLabelHint={speakerLabelHint}
@@ -1895,7 +1905,6 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           alignments={remappedAlignments}
           canInsert={canInsert}
           isBusy={isTranscribing || isRecording || isExtractingAudio || isCreatingProject}
-          isQwen3Backend={isQwen3Backend}
           onAppendToText={handleAppendToText}
           onClearResult={handleClearResult}
           onPreviewTextChange={setEditedPreviewText}

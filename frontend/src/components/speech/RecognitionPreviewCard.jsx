@@ -7,7 +7,6 @@ export default function RecognitionPreviewCard({
   alignments,
   canInsert,
   isBusy,
-  isQwen3Backend,
   onAppendToText,
   onClearResult,
   onReplaceText,
@@ -30,17 +29,15 @@ export default function RecognitionPreviewCard({
           <WandSparkles size={16} />
           识别预览
         </h2>
-        {!isQwen3Backend ? (
-          <label className="controlRow inlineCheckRow">
-            <input
-              type="checkbox"
-              checked={showTimeline}
-              onChange={(event) => onShowTimelineChange(event.target.checked)}
-              disabled={isBusy || !alignments.length}
-            />
-            <span>显示时间轴</span>
-          </label>
-        ) : null}
+        <label className="controlRow inlineCheckRow">
+          <input
+            type="checkbox"
+            checked={showTimeline}
+            onChange={(event) => onShowTimelineChange(event.target.checked)}
+            disabled={isBusy || !alignments.length}
+          />
+          <span>显示时间轴</span>
+        </label>
       </div>
       <textarea
         className="textArea speechPreviewTextArea"

@@ -210,11 +210,11 @@ async def transcribe_file(
     if normalized_backend not in {"whisper", "qwen3_crispasr"}:
         raise HTTPException(status_code=400, detail=f"Unsupported ASR backend: {backend}")
     effective_speaker_labels = _parse_bool_form(speaker_labels, default=False)
-    effective_timestamps = _parse_bool_form(enable_timestamps, default=False)
+    timestamp_default = bool(getattr(state.orchestrator.config, "qwen3_asr_enable_timestamps", False)) if normalized_backend == "qwen3_crispasr" else False
+    effective_timestamps = _parse_bool_form(enable_timestamps, default=timestamp_default)
     effective_silence_aware_split = _parse_bool_form(silence_aware_split, default=True)
     if normalized_backend == "qwen3_crispasr":
         effective_speaker_labels = False
-        effective_timestamps = False
         effective_silence_aware_split = False
 
     suffix = Path(file.filename or "upload.wav").suffix or ".wav"
@@ -310,10 +310,11 @@ async def project_from_audio(
         if chosen_backend not in {"whisper", "qwen3_crispasr"}:
             raise ValueError(f"Unsupported ASR backend: {backend}")
         vocal_options = _get_vocal_separation_options(state, enabled_form=vocal_separation, model_form=vocal_separation_model)
+        timestamp_default = bool(getattr(state.orchestrator.config, "qwen3_asr_enable_timestamps", False)) if chosen_backend == "qwen3_crispasr" else False
         task_input = {
             "asr_backend": chosen_backend,
             "language": language,
-            "enable_timestamps": _parse_bool_form(enable_timestamps, default=False),
+            "enable_timestamps": _parse_bool_form(enable_timestamps, default=timestamp_default),
             "silence_aware_split": _parse_bool_form(silence_aware_split, default=True),
             "vocal_separation": bool(vocal_options["enabled"]),
             "vocal_separation_model": str(vocal_options["model"]),
@@ -329,7 +330,6 @@ async def project_from_audio(
         }
         if chosen_backend == "qwen3_crispasr":
             task_input["speaker_labels"] = False
-            task_input["enable_timestamps"] = False
             task_input["silence_aware_split"] = False
         handle = asyncio.create_task(_run_project_from_audio_task(task_id, task_input, state))
         state.asr_task_handles[task_id] = handle

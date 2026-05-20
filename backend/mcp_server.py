@@ -170,7 +170,7 @@ def build_mcp_server(state_getter: StateGetter):
             raise RuntimeError(f"Unsupported ASR backend: {backend}")
         if normalized_backend == "qwen3_crispasr":
             speaker_labels = False
-            enable_timestamps = False
+            enable_timestamps = bool(enable_timestamps or getattr(state.asr_engine, "qwen3_enable_timestamps", False))
         try:
             await state.orchestrator.ensure_asr_ready(backend=normalized_backend)
             return _jsonable(

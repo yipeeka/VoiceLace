@@ -19,5 +19,6 @@ librosa
 openai-whisper
 faster-whisper
 pydub
+jieba>=0.42,<1.0
 voxcpm
 demucs>=4.0,<5.0

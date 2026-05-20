@@ -20,6 +20,7 @@ TIMELINE_MAX_CORRECTED_TEXT_RATIO = 1.35
 TIMELINE_WORD_SPLIT_GAP_SEC = 0.7
 TIMELINE_WORD_SPLIT_PUNCTUATION_GAP_SEC = 0.7
 TIMELINE_MIN_SPLIT_SEGMENT_SEC = 0.7
+QWEN3_SHORT_TIMING_EDGE_PAD_SEC = 0.2
 SILENCE_AWARE_MIN_SILENCE_MS = 1000
 SILENCE_AWARE_SEEK_STEP_MS = 20
 SILENCE_AWARE_THRESHOLD_DBFS = -45
@@ -126,6 +127,7 @@ class ASREngine:
         requested_backend = backend if str(backend or "").strip() else self.default_backend
         target_backend = self._normalize_backend(requested_backend)
         requested_language = str(language or "auto").strip().lower() or "auto"
+        requested_speaker_labels = bool(speaker_labels)
         if target_backend == "whisper":
             try:
                 raw_text, segments, backend_used = await self._transcribe_whisper_segments(target, language=requested_language)
@@ -134,10 +136,7 @@ class ASREngine:
                     raise
                 raw_text, segments, backend_used = await self._transcribe_whisper_segments(target)
         elif target_backend == "qwen3_crispasr":
-            # Qwen3-ASR (CrispASR) is treated as text-only in this project for stability.
-            # We explicitly disable speaker labeling and timeline behavior on this backend.
             speaker_labels = False
-            enable_timestamps = False
             raw_text, segments, backend_used = await self._transcribe_crispasr_segments(
                 target, enable_timestamps_override=enable_timestamps, language_override=requested_language
             )
@@ -147,9 +146,10 @@ class ASREngine:
             raise RuntimeError("ASR returned empty transcript")
 
         warnings: list[str] = []
+        timeline_repairs: list[dict[str, Any]] = []
         aligned_segments = [dict(segment or {}) for segment in (segments or [])]
-        if target_backend == "qwen3_crispasr":
-            warnings.append("Qwen3-ASR (CrispASR) 当前仅支持识别文本，已禁用时间轴与说话人标签。")
+        if target_backend == "qwen3_crispasr" and requested_speaker_labels:
+            warnings.append("Qwen3-ASR (CrispASR) 当前暂不支持说话人标签，已跳过说话人分离。")
         # Final safety net: if backend returned inline timestamp tokens as plain text,
         # parse and merge them here so downstream alignment/speaker labeling can work.
         if aligned_segments:
@@ -164,6 +164,15 @@ class ASREngine:
                         continue
                 recovered_segments.append(seg)
             aligned_segments = recovered_segments
+            if target_backend == "qwen3_crispasr":
+                aligned_segments, tail_merge_count, tail_repairs = self._merge_qwen3_trailing_fragments(aligned_segments)
+                timeline_repairs.extend(tail_repairs)
+                if tail_merge_count:
+                    warnings.append(f"已合并 {tail_merge_count} 个 Qwen3 时间轴尾随短片段。")
+                aligned_segments, short_timing_count, short_timing_repairs = self._repair_qwen3_short_timings(aligned_segments)
+                timeline_repairs.extend(short_timing_repairs)
+                if short_timing_count:
+                    warnings.append(f"已修复 {short_timing_count} 个 Qwen3 过短时间轴片段。")
             if aligned_segments:
                 rebuilt_text = "\n".join(str(seg.get("text", "")).strip() for seg in aligned_segments if str(seg.get("text", "")).strip()).strip()
                 if rebuilt_text:
@@ -239,6 +248,7 @@ class ASREngine:
             "alignments": alignments,
             "speaker_map": speaker_map,
             "warnings": warnings,
+            "timeline_repairs": timeline_repairs,
             "model_files": self._build_model_files(backend_used),
         }
 
@@ -903,6 +913,328 @@ class ASREngine:
             merged.append(current)
         return merged
 
+    @classmethod
+    def _merge_qwen3_trailing_fragments(cls, segments: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]]]:
+        merged: list[dict[str, Any]] = []
+        merge_count = 0
+        repairs: list[dict[str, Any]] = []
+        sentence_end = set("。！？!?；;")
+        punctuation_or_closer = set("，,。.!！？?；;：:“”\"'‘’（）()[]{}《》【】、")
+        closers = set("”\"'’）)]}》】")
+        openers = set("“\"'‘（([{《【")
+        leading_punctuation = set("，,。.!！？?；;：:、")
+        discourse_starters = {
+            "然后",
+            "但是",
+            "不过",
+            "所以",
+            "因此",
+            "接着",
+            "随后",
+            "另外",
+            "同时",
+            "最后",
+            "首先",
+            "其次",
+            "此外",
+            "而且",
+            "那么",
+            "于是",
+        }
+        boundary_words = {
+            "一下",
+            "就叫",
+            "进入",
+            "编辑",
+            "配置",
+            "解析",
+            "保存",
+            "加载",
+            "模型",
+            "项目",
+            "文本",
+            "声音",
+            "音乐",
+            "背景",
+            "合成",
+            "导出",
+            "开始",
+            "点击",
+            "选择",
+            "生成",
+            "完成",
+            "页面",
+            "基础",
+            "角色",
+            "旁白",
+            "对话",
+            "工作",
+            "方法",
+            "使用",
+            "建立",
+            "新建",
+            "设置",
+            "系统",
+            "时间",
+            "片段",
+            "语音",
+            "识别",
+            "翻译",
+            "润色",
+            "导入",
+            "导出",
+            "预览",
+            "创建",
+            "替换",
+            "追加",
+            "打开",
+            "关闭",
+            "停止",
+            "录音",
+            "上传",
+            "下载",
+            "需要",
+        }
+
+        def compact_len(value: str) -> int:
+            return len(re.sub(r"\s+", "", value))
+
+        def ends_sentence(value: str) -> bool:
+            return bool(str(value or "").rstrip()[-1:] in sentence_end)
+
+        def is_tail_fragment(value: str, previous: str) -> bool:
+            text = str(value or "").strip()
+            prev = str(previous or "").strip()
+            if not text or not prev:
+                return False
+            compact = re.sub(r"\s+", "", text)
+            if not compact:
+                return False
+            if all(ch in punctuation_or_closer for ch in compact):
+                return True
+            if compact[0] in closers:
+                return True
+            return compact_len(compact) <= 3 and any(ch in sentence_end for ch in compact) and not ends_sentence(prev)
+
+        def split_trailing_openers(value: str) -> tuple[str, str]:
+            text = str(value or "").rstrip()
+            idx = len(text)
+            while idx > 0 and text[idx - 1] in openers:
+                idx -= 1
+            if idx == len(text):
+                return text, ""
+            return text[:idx].rstrip(), text[idx:]
+
+        def split_leading_attachment(value: str, previous: str) -> tuple[str, str]:
+            text = str(value or "").strip()
+            prev = str(previous or "").strip()
+            if not text or not prev or ends_sentence(prev):
+                return "", text
+            idx = 0
+            while idx < len(text) and text[idx] in leading_punctuation:
+                idx += 1
+            if idx > 0:
+                return text[:idx], text[idx:].lstrip()
+            comma_idx = -1
+            for mark in ("，", ","):
+                pos = text.find(mark)
+                if pos >= 0 and (comma_idx < 0 or pos < comma_idx):
+                    comma_idx = pos
+            if 0 <= comma_idx <= 2:
+                prefix = text[: comma_idx + 1]
+                remainder = text[comma_idx + 1 :].lstrip()
+                prefix_word = re.sub(r"[，,\s]+", "", prefix)
+                if prefix_word in discourse_starters:
+                    return "", text
+                return prefix, remainder
+            return "", text
+
+        def split_compound_boundary(previous: str, current: str) -> tuple[str, str]:
+            prev = str(previous or "").strip()
+            text = str(current or "").strip()
+            if not prev or not text or ends_sentence(prev):
+                return "", text
+            prev_tail = re.sub(r"\s+", "", prev)[-1:]
+            compact = re.sub(r"\s+", "", text)
+            current_head = compact[:1]
+            if not prev_tail or not current_head:
+                return "", text
+            if f"{prev_tail}{current_head}" in boundary_words:
+                return text[:1], text[1:].lstrip()
+            moved_len = cls._qwen3_jieba_boundary_prefix_len(prev_tail, text, discourse_starters)
+            if moved_len <= 0:
+                return "", text
+            return text[:moved_len], text[moved_len:].lstrip()
+
+        def record_repair(kind: str, *, before: str, moved: str, after: str, target_before: str) -> None:
+            repairs.append(
+                {
+                    "kind": kind,
+                    "target_before": target_before,
+                    "moved_text": moved,
+                    "source_before": before,
+                    "source_after": after,
+                }
+            )
+
+        for segment in segments:
+            item = dict(segment or {})
+            text = str(item.get("text", "") or "").strip()
+            if not text:
+                continue
+            compound_split = False
+            if merged:
+                prev_text = str(merged[-1].get("text", "") or "")
+                prev_body, trailing_openers = split_trailing_openers(prev_text)
+                if trailing_openers:
+                    merged[-1]["text"] = prev_body
+                    item["text"] = cls._join_tokens_for_language(trailing_openers, text)
+                    text = str(item["text"])
+                    merge_count += 1
+                    repairs.append(
+                        {
+                            "kind": "trailing_opener",
+                            "target_before": prev_text,
+                            "moved_text": trailing_openers,
+                            "source_before": str(segment.get("text", "") or ""),
+                            "source_after": text,
+                        }
+                    )
+                    if not str(merged[-1].get("text", "") or "").strip():
+                        merged.pop()
+            if merged and is_tail_fragment(text, str(merged[-1].get("text", "") or "")):
+                target_before = str(merged[-1].get("text", "") or "")
+                merged[-1]["text"] = cls._join_tokens_for_language(str(merged[-1].get("text", "") or ""), text)
+                merge_count += 1
+                record_repair("trailing_fragment", before=str(segment.get("text", "") or ""), moved=text, after="", target_before=target_before)
+                continue
+            if merged:
+                leading, remainder = split_leading_attachment(text, str(merged[-1].get("text", "") or ""))
+                if leading and remainder:
+                    target_before = str(merged[-1].get("text", "") or "")
+                    merged[-1]["text"] = cls._join_tokens_for_language(str(merged[-1].get("text", "") or ""), leading)
+                    item["text"] = remainder
+                    text = remainder
+                    merge_count += 1
+                    record_repair("leading_punctuation_or_prefix", before=str(segment.get("text", "") or ""), moved=leading, after=remainder, target_before=target_before)
+                elif leading:
+                    target_before = str(merged[-1].get("text", "") or "")
+                    merged[-1]["text"] = cls._join_tokens_for_language(str(merged[-1].get("text", "") or ""), leading)
+                    merge_count += 1
+                    record_repair("leading_punctuation_or_prefix", before=str(segment.get("text", "") or ""), moved=leading, after="", target_before=target_before)
+                    continue
+                else:
+                    compound_prefix, compound_remainder = split_compound_boundary(str(merged[-1].get("text", "") or ""), text)
+                    if compound_prefix and compound_remainder:
+                        target_before = str(merged[-1].get("text", "") or "")
+                        merged[-1]["text"] = cls._join_tokens_for_language(str(merged[-1].get("text", "") or ""), compound_prefix)
+                        item["text"] = compound_remainder
+                        text = compound_remainder
+                        merge_count += 1
+                        compound_split = True
+                        record_repair("compound_boundary", before=str(segment.get("text", "") or ""), moved=compound_prefix, after=compound_remainder, target_before=target_before)
+                    elif compound_prefix:
+                        target_before = str(merged[-1].get("text", "") or "")
+                        merged[-1]["text"] = cls._join_tokens_for_language(str(merged[-1].get("text", "") or ""), compound_prefix)
+                        merge_count += 1
+                        record_repair("compound_boundary", before=str(segment.get("text", "") or ""), moved=compound_prefix, after="", target_before=target_before)
+                        continue
+            if not compound_split and merged and is_tail_fragment(text, str(merged[-1].get("text", "") or "")):
+                target_before = str(merged[-1].get("text", "") or "")
+                merged[-1]["text"] = cls._join_tokens_for_language(str(merged[-1].get("text", "") or ""), text)
+                merge_count += 1
+                record_repair("trailing_fragment", before=str(segment.get("text", "") or ""), moved=text, after="", target_before=target_before)
+                continue
+            merged.append(item)
+        return merged, merge_count, repairs
+
+    @classmethod
+    def _qwen3_jieba_boundary_prefix_len(cls, previous_tail: str, current: str, discourse_starters: set[str]) -> int:
+        tail = str(previous_tail or "").strip()
+        text = str(current or "").strip()
+        if not tail or not text or not re.match(r"[\u4e00-\u9fff]", tail) or not re.match(r"[\u4e00-\u9fff]", text[:1]):
+            return 0
+        if any(text.startswith(starter) for starter in discourse_starters):
+            return 0
+        try:
+            import jieba  # type: ignore
+        except Exception:
+            return 0
+
+        cjk_prefix_match = re.match(r"^[\u4e00-\u9fff]{1,4}", text)
+        if not cjk_prefix_match:
+            return 0
+        candidate_current = cjk_prefix_match.group(0)
+        candidate = f"{tail}{candidate_current}"
+        try:
+            tokens = [str(token or "").strip() for token in jieba.lcut(candidate, HMM=False) if str(token or "").strip()]
+        except Exception:
+            return 0
+        if not tokens:
+            return 0
+        first = tokens[0]
+        if not first.startswith(tail) or len(first) <= len(tail):
+            return 0
+        moved = first[len(tail) :]
+        if not candidate_current.startswith(moved):
+            return 0
+        return min(len(moved), len(text))
+
+    @classmethod
+    def _repair_qwen3_short_timings(cls, segments: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]]]:
+        repaired = [dict(segment or {}) for segment in segments]
+        repair_count = 0
+        repairs: list[dict[str, Any]] = []
+
+        for index, item in enumerate(repaired):
+            text = str(item.get("text", "") or "").strip()
+            start = cls._coerce_finite_seconds(item.get("start"))
+            end = cls._coerce_finite_seconds(item.get("end"))
+            if not text or start is None or end is None or end <= start:
+                continue
+
+            duration = end - start
+            estimated = cls._estimate_speaking_seconds(text)
+            if estimated < 1.2 or duration >= 0.45 or duration >= estimated * 0.28:
+                continue
+
+            previous_end = None
+            if index > 0:
+                previous_end = cls._coerce_finite_seconds(repaired[index - 1].get("end"))
+            next_start = None
+            if index + 1 < len(repaired):
+                next_start = cls._coerce_finite_seconds(repaired[index + 1].get("start"))
+
+            new_start = start
+            new_end = end
+            if previous_end is not None and previous_end < start and start - previous_end >= 0.3:
+                new_start = min(start, previous_end + QWEN3_SHORT_TIMING_EDGE_PAD_SEC)
+            if next_start is not None and next_start > new_start and next_start - end <= 0.3:
+                new_end = next_start - QWEN3_SHORT_TIMING_EDGE_PAD_SEC
+            elif next_start is not None and next_start > end:
+                new_end = min(next_start - QWEN3_SHORT_TIMING_EDGE_PAD_SEC, new_start + max(estimated * 1.15, duration))
+            else:
+                new_end = max(end, new_start + estimated)
+
+            if new_end <= new_start:
+                continue
+            if abs(new_start - start) > 0.05 or abs(new_end - end) > 0.05:
+                item["start"] = new_start
+                item["end"] = new_end
+                repair_count += 1
+                repairs.append(
+                    {
+                        "kind": "short_timing",
+                        "text": text,
+                        "start_before": start,
+                        "end_before": end,
+                        "start_after": new_start,
+                        "end_after": new_end,
+                    }
+                )
+
+        return repaired, repair_count, repairs
+
     async def _transcribe_crispasr_segments(
         self,
         target: Path,
@@ -923,6 +1255,8 @@ class ASREngine:
         else:
             use_timestamps = bool(enable_timestamps_override)
         forced_aligner = str(self.qwen3_forced_aligner_model_path or "").strip()
+        if use_timestamps and not forced_aligner:
+            raise RuntimeError("启用 Qwen3-ASR 时间轴需要配置 Qwen3-ForcedAligner GGUF 模型路径（qwen3_asr_forced_aligner_model_path）。")
 
         work_dir = Path(tempfile.mkdtemp(prefix="qwen3_asr_", dir=settings.output_dir))
         normalized_wav = work_dir / "input_16k.wav"
@@ -965,15 +1299,14 @@ class ASREngine:
                 cmd.extend(["-t", str(threads)])
             if language:
                 cmd.extend(["-l", language])
-            if forced_aligner:
+            if use_timestamps and forced_aligner:
                 forced_aligner_path = Path(forced_aligner).expanduser()
                 if not forced_aligner_path.exists() or not forced_aligner_path.is_file():
                     raise RuntimeError(f"Qwen3-ForcedAligner GGUF 模型不存在: {forced_aligner_path}")
                 cmd.extend(["-am", str(forced_aligner_path)])
             if use_timestamps:
                 cmd.extend(["-osrt"])
-                if forced_aligner:
-                    cmd.extend(["-ml", "1"])
+                cmd.extend(["-ml", "1"])
 
             try:
                 proc = await asyncio.to_thread(

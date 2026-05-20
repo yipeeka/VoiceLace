@@ -28,6 +28,7 @@ export default function AsrRecognitionCard({
   modelFiles,
   onAbortRecognize,
   onAsrBackendChange,
+  onAsrEnableTimestampsChange,
   onAudioClipDurationChange,
   onAudioClipError,
   onAudioClipRangeChange,
@@ -43,6 +44,9 @@ export default function AsrRecognitionCard({
   onVocalSeparationModelChange,
   pendingAudio,
   projectTask,
+  qwen3AlignerConfigured,
+  qwen3DefaultTimestamps,
+  qwen3TimestampsRequested,
   audioClipRange,
   showTimestampToggle,
   silenceAwareSplit,
@@ -102,8 +106,25 @@ export default function AsrRecognitionCard({
           </select>
         </div>
         {showTimestampToggle ? (
+          <label className="controlRow inlineCheckRow">
+            <input
+              type="checkbox"
+              checked={Boolean(qwen3TimestampsRequested || qwen3DefaultTimestamps)}
+              onChange={(event) => onAsrEnableTimestampsChange(event.target.checked)}
+              disabled={isBusy || Boolean(qwen3DefaultTimestamps)}
+            />
+            <span>输出 Qwen3 时间轴</span>
+          </label>
+        ) : null}
+        {showTimestampToggle ? (
           <div className="muted speechAsrHint">
-            Qwen3-ASR 当前为纯识别模式（不提供时间轴/说话人标签）
+            {qwen3DefaultTimestamps
+              ? "系统设置已默认启用 Qwen3 时间轴。"
+              : "启用时间轴需要在系统设置配置 Qwen3-ForcedAligner GGUF。"}
+            {" "}
+            {qwen3AlignerConfigured ? "ForcedAligner 已配置。" : "ForcedAligner 未就绪。"}
+            {" "}
+            Qwen3 说话人标签暂不支持。
           </div>
         ) : null}
       </div>

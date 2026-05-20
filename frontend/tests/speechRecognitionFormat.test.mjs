@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildDubbingProjectName,
+  canBuildDubbingProjectFromAlignments,
   buildDubbingSegmentsFromPreview,
   buildTranslatedDubbingScriptPayload,
   collapseWhisperSegments,
@@ -10,6 +11,7 @@ import {
   getDubbingTaskLabel,
   parseTimestampMs,
   renderCuesAsSrt,
+  resolveAsrTimestampRequest,
   splitSpeakerText,
   stripTimelineText,
   validateEditedSubtitleSrt,
@@ -70,6 +72,30 @@ test("buildDubbingSegmentsFromPreview maps timeline edits back to ASR segments",
   assert.deepEqual(result, [
     { id: "a", speaker: "角色A", text: "新文本", start_ms: 0, end_ms: 1200 },
   ]);
+});
+
+test("resolveAsrTimestampRequest only enables Qwen3 timestamp requests", () => {
+  assert.equal(resolveAsrTimestampRequest({ backend: "qwen3_crispasr", requested: true, qwen3Default: false }), true);
+  assert.equal(resolveAsrTimestampRequest({ backend: "qwen3_crispasr", requested: false, qwen3Default: true }), true);
+  assert.equal(resolveAsrTimestampRequest({ backend: "whisper", requested: true, qwen3Default: true }), false);
+});
+
+test("canBuildDubbingProjectFromAlignments allows any backend with usable timeline", () => {
+  assert.equal(canBuildDubbingProjectFromAlignments({
+    translationMode: "passthrough",
+    isTranslationEngineLoaded: false,
+    alignmentCount: 1,
+  }), true);
+  assert.equal(canBuildDubbingProjectFromAlignments({
+    translationMode: "translate_polish",
+    isTranslationEngineLoaded: true,
+    alignmentCount: 2,
+  }), true);
+  assert.equal(canBuildDubbingProjectFromAlignments({
+    translationMode: "translate_polish",
+    isTranslationEngineLoaded: true,
+    alignmentCount: 0,
+  }), false);
 });
 
 test("buildDubbingSegmentsFromPreview validates plain text line counts", () => {

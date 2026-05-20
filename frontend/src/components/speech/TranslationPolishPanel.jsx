@@ -80,9 +80,9 @@ export default function TranslationPolishPanel({
       </div>
       <div className="muted">引擎状态：{translationEngineStatus?.loaded ? "已加载" : "未加载"} · 来源：{translationEngineStatus?.source || "未选择"} · 后端：{translationEngineStatus?.backend || "unknown"}</div>
       {translationEngineStatus?.model_name ? <div className="muted">模型：{translationEngineStatus.model_name}</div> : null}
-      {!isQwen3Backend && translationMode === "passthrough" ? <div className="muted">直通配音会按 Whisper 时间轴分段，并自动写入每段 speed/duration，不调用翻译引擎。</div> : null}
-      {!isQwen3Backend && translationMode !== "passthrough" ? <div className="muted">配音项目会按 Whisper 时间轴分段，并自动写入每段 speed/duration。</div> : null}
-      {isQwen3Backend ? <div className="muted">Qwen3-ASR 当前为纯识别模式，不支持时间轴匹配配音项目创建。</div> : null}
+      {translationMode === "passthrough" ? <div className="muted">直通配音会按 ASR 时间轴分段，并自动写入每段 speed/duration，不调用翻译引擎。</div> : null}
+      {translationMode !== "passthrough" ? <div className="muted">配音项目会按 ASR 时间轴分段，并自动写入每段 speed/duration。</div> : null}
+      {isQwen3Backend ? <div className="muted">Qwen3-ASR 需要配置 ForcedAligner 并启用时间轴后才能创建时间轴匹配配音项目。</div> : null}
       {translationEngineStatus?.error ? <div className="errorText">{translationEngineStatus.error}</div> : null}
       {translationError ? <div className="errorText">{translationError}</div> : null}
       {isBuildingDubbingProject || dubbingTask.stageLabel ? (

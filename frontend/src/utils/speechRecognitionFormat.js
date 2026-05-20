@@ -95,6 +95,19 @@ export function stripTimelineText(text) {
     .trim();
 }
 
+export function resolveAsrTimestampRequest({ backend, requested, qwen3Default }) {
+  return String(backend || "").trim() === "qwen3_crispasr"
+    ? Boolean(requested || qwen3Default)
+    : false;
+}
+
+export function canBuildDubbingProjectFromAlignments({ translationMode, isTranslationEngineLoaded, alignmentCount }) {
+  return Boolean(
+    (translationMode === "passthrough" || isTranslationEngineLoaded) &&
+    Number(alignmentCount || 0) > 0,
+  );
+}
+
 export function buildDubbingSegmentsFromPreview({ alignments, previewText }) {
   const usableTimeline = (Array.isArray(alignments) ? alignments : [])
     .map((item, index) => ({
@@ -106,7 +119,7 @@ export function buildDubbingSegmentsFromPreview({ alignments, previewText }) {
     }))
     .filter((item) => item.text && item.start_ms !== null && item.end_ms !== null && item.end_ms > item.start_ms);
   if (!usableTimeline.length) {
-    throw new Error("请先完成 Whisper 识别并拿到可用时间轴片段。");
+    throw new Error("请先完成 ASR 识别并拿到可用时间轴片段。");
   }
   const lines = String(previewText || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   if (!lines.length) {
