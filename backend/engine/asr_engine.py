@@ -136,9 +136,14 @@ class ASREngine:
                     raise
                 raw_text, segments, backend_used = await self._transcribe_whisper_segments(target)
         elif target_backend == "qwen3_crispasr":
-            speaker_labels = False
+            qwen3_enable_timestamps = bool(enable_timestamps) if enable_timestamps is not None else None
+            if requested_speaker_labels:
+                self._validate_qwen3_speaker_label_requirements()
+                qwen3_enable_timestamps = True
             raw_text, segments, backend_used = await self._transcribe_crispasr_segments(
-                target, enable_timestamps_override=enable_timestamps, language_override=requested_language
+                target,
+                enable_timestamps_override=qwen3_enable_timestamps,
+                language_override=requested_language,
             )
         else:
             raise ValueError(f"Unsupported ASR backend: {backend}")
@@ -148,8 +153,6 @@ class ASREngine:
         warnings: list[str] = []
         timeline_repairs: list[dict[str, Any]] = []
         aligned_segments = [dict(segment or {}) for segment in (segments or [])]
-        if target_backend == "qwen3_crispasr" and requested_speaker_labels:
-            warnings.append("Qwen3-ASR (CrispASR) 当前暂不支持说话人标签，已跳过说话人分离。")
         # Final safety net: if backend returned inline timestamp tokens as plain text,
         # parse and merge them here so downstream alignment/speaker labeling can work.
         if aligned_segments:
@@ -265,6 +268,17 @@ class ASREngine:
         return {
             "main_model_path": str(self.model_path or ""),
         }
+
+    def _validate_qwen3_speaker_label_requirements(self) -> None:
+        forced_aligner = str(self.qwen3_forced_aligner_model_path or "").strip()
+        if not forced_aligner:
+            raise RuntimeError(
+                "启用 Qwen3-ASR 说话人标签需要配置 Qwen3-ForcedAligner GGUF 模型路径"
+                "（qwen3_asr_forced_aligner_model_path）。"
+            )
+        forced_aligner_path = Path(forced_aligner).expanduser()
+        if not forced_aligner_path.exists() or not forced_aligner_path.is_file():
+            raise RuntimeError(f"Qwen3-ForcedAligner GGUF 模型不存在，无法进行说话人标签对齐: {forced_aligner_path}")
 
     async def _load_whisper_like_model(self) -> None:
         errors: list[str] = []

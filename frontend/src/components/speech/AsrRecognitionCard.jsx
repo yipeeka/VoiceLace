@@ -64,6 +64,7 @@ export default function AsrRecognitionCard({
   const demucsSelectId = `${generatedId}-demucs-model`;
   const isBusy = isTranscribing || isRecording || isExtractingAudio || isCreatingProject;
   const uploadDisabled = isTranscribing || isExtractingAudio || isCreatingProject;
+  const speakerLabelsDisabled = isTranscribing || isRecording || isCreatingProject || (isQwen3Backend && !qwen3AlignerConfigured);
 
   return (
     <GlassCard>
@@ -116,17 +117,6 @@ export default function AsrRecognitionCard({
             <span>输出 Qwen3 时间轴</span>
           </label>
         ) : null}
-        {showTimestampToggle ? (
-          <div className="muted speechAsrHint">
-            {qwen3DefaultTimestamps
-              ? "系统设置已默认启用 Qwen3 时间轴。"
-              : "启用时间轴需要在系统设置配置 Qwen3-ForcedAligner GGUF。"}
-            {" "}
-            {qwen3AlignerConfigured ? "ForcedAligner 已配置。" : "ForcedAligner 未就绪。"}
-            {" "}
-            Qwen3 说话人标签暂不支持。
-          </div>
-        ) : null}
       </div>
 
       <div className="editorGrid three speechAsrGrid">
@@ -158,29 +148,33 @@ export default function AsrRecognitionCard({
         ) : null}
       </div>
 
+      <label className="controlRow inlineCheckRow">
+        <input
+          type="checkbox"
+          checked={speakerLabels}
+          onChange={(event) => {
+            const checked = event.target.checked;
+            onSpeakerLabelsChange(checked);
+            if (checked && isQwen3Backend && !qwen3DefaultTimestamps) {
+              onAsrEnableTimestampsChange(true);
+            }
+          }}
+          disabled={speakerLabelsDisabled}
+        />
+        <span>输出说话人标签（说话人1：文本）</span>
+      </label>
       {!isQwen3Backend ? (
-        <>
-          <label className="controlRow inlineCheckRow">
-            <input
-              type="checkbox"
-              checked={speakerLabels}
-              onChange={(event) => onSpeakerLabelsChange(event.target.checked)}
-              disabled={isTranscribing || isRecording || isCreatingProject}
-            />
-            <span>输出说话人标签（说话人1：文本）</span>
-          </label>
-          <label className="controlRow inlineCheckRow">
-            <input
-              type="checkbox"
-              checked={Boolean(silenceAwareSplit)}
-              onChange={(event) => onSilenceAwareSplitChange(event.target.checked)}
-              disabled={isTranscribing || isRecording || isCreatingProject}
-            />
-            <span>避开长静音切分片段</span>
-          </label>
-          {speakerLabelHint ? <div className="muted">{speakerLabelHint}</div> : null}
-        </>
+        <label className="controlRow inlineCheckRow">
+          <input
+            type="checkbox"
+            checked={Boolean(silenceAwareSplit)}
+            onChange={(event) => onSilenceAwareSplitChange(event.target.checked)}
+            disabled={isTranscribing || isRecording || isCreatingProject}
+          />
+          <span>避开长静音切分片段</span>
+        </label>
       ) : null}
+      {speakerLabelHint ? <div className="muted">{speakerLabelHint}</div> : null}
 
       <div className="controlRow">
         <Button

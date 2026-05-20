@@ -187,6 +187,64 @@ export function buildDubbingProjectName({ projectName, audioFileName, mode }) {
   return `${baseName}-${getDubbingProjectSuffix(mode)}`;
 }
 
+const DUBBING_TIMELINE_PADDING_MS = 300;
+
+function normalizeTimelineMs(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.round(number) : null;
+}
+
+function getOverrideDurationMs(segment) {
+  const overrides = segment?.tts_overrides && typeof segment.tts_overrides === "object" ? segment.tts_overrides : {};
+  const durationSec = Number(overrides.duration);
+  if (!Number.isFinite(durationSec) || durationSec <= 0) {
+    return null;
+  }
+  return Math.round(durationSec * 1000);
+}
+
+export function expandDubbingTimelineByDuration(translatedSegments, paddingMs = DUBBING_TIMELINE_PADDING_MS) {
+  const rows = (Array.isArray(translatedSegments) ? translatedSegments : []).map((segment) => ({ ...segment }));
+  const pad = Math.max(0, Math.round(Number(paddingMs) || 0));
+  for (let index = 0; index < rows.length; index += 1) {
+    const segment = rows[index];
+    const startMs = normalizeTimelineMs(segment?.start_ms);
+    const endMs = normalizeTimelineMs(segment?.end_ms);
+    const durationMs = getOverrideDurationMs(segment);
+    if (startMs === null || endMs === null || endMs <= startMs || durationMs === null) {
+      continue;
+    }
+    const desiredMs = durationMs + pad;
+    const currentMs = endMs - startMs;
+    if (currentMs >= desiredMs) {
+      continue;
+    }
+
+    const prevEndMs = index > 0 ? normalizeTimelineMs(rows[index - 1]?.end_ms) : null;
+    const nextStartMs = index + 1 < rows.length ? normalizeTimelineMs(rows[index + 1]?.start_ms) : null;
+    const minStartMs = prevEndMs !== null ? Math.max(0, prevEndMs) : 0;
+    const maxEndMs = nextStartMs !== null && nextStartMs > startMs ? nextStartMs : null;
+
+    let nextStart = startMs;
+    let nextEnd = endMs;
+    if (maxEndMs !== null) {
+      nextEnd = Math.min(maxEndMs, nextStart + desiredMs);
+    } else {
+      nextEnd = nextStart + desiredMs;
+    }
+    const remainingMs = desiredMs - (nextEnd - nextStart);
+    if (remainingMs > 0 && minStartMs < nextStart) {
+      nextStart = Math.max(minStartMs, nextStart - remainingMs);
+    }
+    if (nextEnd > nextStart && nextEnd - nextStart > currentMs) {
+      segment.start_ms = nextStart;
+      segment.end_ms = nextEnd;
+      segment.duration_ms = nextEnd - nextStart;
+    }
+  }
+  return rows;
+}
+
 export function buildTranslatedDubbingScriptPayload({
   payload,
   title,
@@ -195,6 +253,7 @@ export function buildTranslatedDubbingScriptPayload({
   translationTargetLanguage,
   translatedSegments,
 }) {
+  const timelineSegments = expandDubbingTimelineByDuration(translatedSegments);
   return {
     title,
     source_text: String(payload?.translated_text || "").trim(),
@@ -204,10 +263,10 @@ export function buildTranslatedDubbingScriptPayload({
       dubbing_mode: String(payload?.mode || translationMode),
       dubbing_target_language: String(translationTargetLanguage || "中文"),
       dubbing_source_backend: String(translationSource || ""),
-      dubbing_segment_count: Number(translatedSegments.length),
+      dubbing_segment_count: Number(timelineSegments.length),
     },
     characters: [],
-    segments: translatedSegments.map((segment, index) => {
+    segments: timelineSegments.map((segment, index) => {
       const segText = String(segment?.text || "").trim();
       const sourceText = String(segment?.source_text || "").trim();
       const startMs = Number.isFinite(Number(segment?.start_ms)) ? Number(segment.start_ms) : null;

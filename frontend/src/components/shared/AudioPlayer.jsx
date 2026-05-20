@@ -136,6 +136,7 @@ export default function AudioPlayer({
   const canvasRef = useRef(null);
   const pendingAutoPlayRef = useRef(false);
   const pendingSeekSecondsRef = useRef(null);
+  const isDraggingSeekRef = useRef(false);
   const durationRef = useRef(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -380,6 +381,23 @@ export default function AudioPlayer({
     ctx.fillStyle = "rgba(161, 161, 170, 0.16)";
     ctx.fillRect(0, 0, cssWidth, cssHeight);
 
+    const progressRatio = duration > 0 ? Math.max(0, Math.min(1, currentTime / duration)) : 0;
+    const progressX = cssWidth * progressRatio;
+    const drawPlayhead = () => {
+      if (duration <= 0) return;
+      const x = Math.max(0, Math.min(cssWidth, progressX));
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, cssHeight);
+      ctx.stroke();
+      ctx.fillStyle = "rgba(92, 211, 255, 0.95)";
+      ctx.beginPath();
+      ctx.arc(x, cssHeight / 2, compact ? 3 : 4, 0, Math.PI * 2);
+      ctx.fill();
+    };
+
     const bars = normalizePeaksData(resolvedPeaks);
     if (!bars.length) {
       ctx.strokeStyle = "rgba(161, 161, 170, 0.55)";
@@ -388,11 +406,10 @@ export default function AudioPlayer({
       ctx.moveTo(0, cssHeight / 2);
       ctx.lineTo(cssWidth, cssHeight / 2);
       ctx.stroke();
+      drawPlayhead();
       return;
     }
 
-    const progressRatio = duration > 0 ? Math.max(0, Math.min(1, currentTime / duration)) : 0;
-    const progressX = cssWidth * progressRatio;
     const mid = cssHeight / 2;
     const barWidth = compact ? 2 : 2.5;
     const barGap = compact ? 1 : 1.5;
@@ -422,6 +439,7 @@ export default function AudioPlayer({
       ctx.fillRect(x, top, Math.min(barWidth, cssWidth - x), h);
       x += step;
     }
+    drawPlayhead();
   }, [resolvedPeaks, currentTime, duration, height, compact]);
 
   const togglePlay = async () => {
@@ -446,6 +464,13 @@ export default function AudioPlayer({
     audio.currentTime = Math.max(0, Math.min(duration, duration * ratio));
     setCurrentTime(audio.currentTime || 0);
     onTimeUpdateProp?.(audio.currentTime || 0);
+  };
+
+  const seekToClientX = (clientX, target) => {
+    if (!duration || !target) return;
+    const rect = target.getBoundingClientRect();
+    const ratio = rect.width > 0 ? (clientX - rect.left) / rect.width : 0;
+    seekToRatio(ratio);
   };
 
   const seekBySeconds = (deltaSeconds) => {
@@ -520,6 +545,29 @@ export default function AudioPlayer({
             const rect = event.currentTarget.getBoundingClientRect();
             const ratio = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
             seekToRatio(ratio);
+          }}
+          onPointerDown={(event) => {
+            if (!duration || !isReady || !event.ctrlKey) return;
+            event.preventDefault();
+            isDraggingSeekRef.current = true;
+            event.currentTarget.setPointerCapture?.(event.pointerId);
+            seekToClientX(event.clientX, event.currentTarget);
+          }}
+          onPointerMove={(event) => {
+            if (!isDraggingSeekRef.current) return;
+            event.preventDefault();
+            seekToClientX(event.clientX, event.currentTarget);
+          }}
+          onPointerUp={(event) => {
+            if (!isDraggingSeekRef.current) return;
+            event.preventDefault();
+            isDraggingSeekRef.current = false;
+            event.currentTarget.releasePointerCapture?.(event.pointerId);
+            seekToClientX(event.clientX, event.currentTarget);
+          }}
+          onPointerCancel={(event) => {
+            isDraggingSeekRef.current = false;
+            event.currentTarget.releasePointerCapture?.(event.pointerId);
           }}
           onKeyDown={(event) => {
             if (!duration || !isReady) return;

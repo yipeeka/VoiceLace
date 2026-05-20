@@ -7,6 +7,7 @@ import {
   buildDubbingSegmentsFromPreview,
   buildTranslatedDubbingScriptPayload,
   collapseWhisperSegments,
+  expandDubbingTimelineByDuration,
   formatTimestamp,
   getDubbingTaskLabel,
   parseTimestampMs,
@@ -128,4 +129,26 @@ test("dubbing project helpers build labels names and script payloads", () => {
   assert.equal(payload.metadata.dubbing_segment_count, 1);
   assert.equal(payload.segments[0].source_duration_ms, 800);
   assert.equal(payload.segments[0].type, "dialogue");
+});
+
+test("expandDubbingTimelineByDuration extends short target timeline from tts duration", () => {
+  const rows = expandDubbingTimelineByDuration([
+    { id: "prev", start_ms: 46520, end_ms: 48280, tts_overrides: { duration: 1.66 } },
+    { id: "short", start_ms: 51880, end_ms: 51960, tts_overrides: { duration: 0.3 } },
+    { id: "next", start_ms: 52680, end_ms: 54120, tts_overrides: { duration: 1.34 } },
+  ]);
+  assert.equal(rows[1].start_ms, 51880);
+  assert.equal(rows[1].end_ms, 52480);
+  assert.equal(rows[1].duration_ms, 600);
+});
+
+test("expandDubbingTimelineByDuration borrows previous gap when next gap is not enough", () => {
+  const rows = expandDubbingTimelineByDuration([
+    { id: "prev", start_ms: 0, end_ms: 1000, tts_overrides: {} },
+    { id: "short", start_ms: 1500, end_ms: 1580, tts_overrides: { duration: 0.6 } },
+    { id: "next", start_ms: 1800, end_ms: 2600, tts_overrides: { duration: 0.8 } },
+  ]);
+  assert.equal(rows[1].start_ms, 1000);
+  assert.equal(rows[1].end_ms, 1800);
+  assert.equal(rows[1].duration_ms, 800);
 });

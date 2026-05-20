@@ -197,6 +197,87 @@ class AsrEngineTest(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_qwen3_crispasr_speaker_labels_force_timestamps_and_use_diarization(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-qwen3-diar"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            exe_path = temp_dir / "crispasr.exe"
+            exe_path.write_bytes(b"exe")
+            model_path = temp_dir / "qwen3.gguf"
+            model_path.write_bytes(b"gguf")
+            aligner_path = temp_dir / "qwen3-forced-aligner.gguf"
+            aligner_path.write_bytes(b"gguf")
+
+            engine = ASREngine()
+            engine.crispasr_exe = str(exe_path)
+            engine.qwen3_model_path = str(model_path)
+            engine.qwen3_forced_aligner_model_path = str(aligner_path)
+            engine.qwen3_enable_timestamps = False
+
+            calls = []
+
+            class _Proc:
+                def __init__(self, returncode=0, stdout="", stderr=""):
+                    self.returncode = returncode
+                    self.stdout = stdout
+                    self.stderr = stderr
+
+            srt_text = (
+                "1\n00:00:00,000 --> 00:00:01,000\n你好\n\n"
+                "2\n00:00:01,000 --> 00:00:02,000\n谢谢\n"
+            )
+
+            def fake_run(cmd, *args, **kwargs):
+                calls.append(cmd)
+                if isinstance(cmd, list) and cmd and cmd[0] == "ffmpeg":
+                    return _Proc(returncode=0, stdout="", stderr="")
+                return _Proc(returncode=0, stdout=srt_text, stderr="")
+
+            async def fake_diar(_: object):
+                return [
+                    {"start": 0.0, "end": 1.0, "speaker": "SPEAKER_00"},
+                    {"start": 1.0, "end": 2.0, "speaker": "SPEAKER_01"},
+                ]
+
+            engine._run_diarization = fake_diar  # type: ignore[assignment]
+            with patch("backend.engine.asr_engine.subprocess.run", side_effect=fake_run):
+                result = asyncio.run(engine.transcribe(str(wav_path), backend="qwen3_crispasr", speaker_labels=True))
+
+            self.assertTrue(any(isinstance(cmd, list) and "-osrt" in cmd and "-am" in cmd for cmd in calls))
+            self.assertTrue(result["speaker_labels"])
+            self.assertIn("说话人1：你好", result["labeled_text"])
+            self.assertIn("说话人2：谢谢", result["labeled_text"])
+            self.assertEqual(result["alignments"][0]["speaker"], "说话人1")
+            self.assertEqual(result["alignments"][1]["speaker"], "说话人2")
+            self.assertEqual(result["speaker_map"], {"说话人1": "说话人1", "说话人2": "说话人2"})
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_qwen3_crispasr_speaker_labels_require_forced_aligner(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-qwen3-diar-missing-aligner"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            exe_path = temp_dir / "crispasr.exe"
+            exe_path.write_bytes(b"exe")
+            model_path = temp_dir / "qwen3.gguf"
+            model_path.write_bytes(b"gguf")
+
+            engine = ASREngine()
+            engine.crispasr_exe = str(exe_path)
+            engine.qwen3_model_path = str(model_path)
+            engine.qwen3_enable_timestamps = False
+
+            with self.assertRaisesRegex(RuntimeError, "Qwen3-ForcedAligner"):
+                asyncio.run(engine.transcribe(str(wav_path), backend="qwen3_crispasr", speaker_labels=True))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
     def test_qwen3_crispasr_merges_trailing_punctuation_fragments_without_extending_time(self) -> None:
         temp_dir = settings.data_dir / "tmp-tests" / "asr-qwen3-tail-fragments"
         shutil.rmtree(temp_dir, ignore_errors=True)

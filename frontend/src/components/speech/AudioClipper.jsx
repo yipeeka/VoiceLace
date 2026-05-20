@@ -108,6 +108,23 @@ export default function AudioClipper({
       color: "rgba(59, 130, 246, 0.22)",
     });
 
+    const seekToSeconds = (seconds) => {
+      const nextDuration = waveSurfer.getDuration();
+      if (!nextDuration) return;
+      const nextTime = clamp(Number(seconds || 0), 0, nextDuration);
+      waveSurfer.setTime(nextTime);
+      setCurrentTime(nextTime);
+    };
+
+    const seekRegionPointer = (region, event) => {
+      if (!region || !event || disabledRef.current) return;
+      const element = region.element || event.currentTarget || event.target;
+      const rect = element?.getBoundingClientRect?.();
+      if (!rect?.width) return;
+      const ratio = clamp((event.clientX - rect.left) / rect.width, 0, 1);
+      seekToSeconds(region.start + (region.end - region.start) * ratio);
+    };
+
     const emitRegion = (region) => {
       if (applyingRangeRef.current || disabledRef.current || !region) return;
       const nextDuration = waveSurfer.getDuration();
@@ -150,7 +167,7 @@ export default function AudioClipper({
     regionsPlugin.on("region-updated", emitRegion);
     regionsPlugin.on("region-clicked", (region, event) => {
       event.stopPropagation();
-      waveSurfer.setTime(region.start);
+      seekRegionPointer(region, event);
     });
 
     return () => {
@@ -203,7 +220,9 @@ export default function AudioClipper({
     if (!isReady || !waveSurferRef.current || disabled) return;
     try {
       if (hasClip && !isPlaying) {
-        await waveSurferRef.current.play(displayedRange.startSec, displayedRange.endSec);
+        const current = waveSurferRef.current.getCurrentTime();
+        const isCurrentInClip = current >= displayedRange.startSec && current < displayedRange.endSec;
+        await waveSurferRef.current.play(isCurrentInClip ? current : displayedRange.startSec, displayedRange.endSec);
         return;
       }
       await waveSurferRef.current.playPause();

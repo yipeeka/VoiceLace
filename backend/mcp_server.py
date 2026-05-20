@@ -169,8 +169,7 @@ def build_mcp_server(state_getter: StateGetter):
         if normalized_backend not in {"whisper", "qwen3_crispasr"}:
             raise RuntimeError(f"Unsupported ASR backend: {backend}")
         if normalized_backend == "qwen3_crispasr":
-            speaker_labels = False
-            enable_timestamps = bool(enable_timestamps or getattr(state.asr_engine, "qwen3_enable_timestamps", False))
+            enable_timestamps = bool(speaker_labels or enable_timestamps or getattr(state.asr_engine, "qwen3_enable_timestamps", False))
         try:
             await state.orchestrator.ensure_asr_ready(backend=normalized_backend)
             return _jsonable(
@@ -181,6 +180,7 @@ def build_mcp_server(state_getter: StateGetter):
                     language=language,
                     speaker_labels=speaker_labels,
                     enable_timestamps=enable_timestamps,
+                    silence_aware_split=normalized_backend != "qwen3_crispasr",
                 )
             )
         except Exception as exc:

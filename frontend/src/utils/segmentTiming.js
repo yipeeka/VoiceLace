@@ -28,7 +28,7 @@ const DEFAULT_DURATION_MISMATCH_THRESHOLDS = {
     minRatio: 0.45,
   },
   targetShorter: {
-    minDiffSec: 0.6,
+    minDiffSec: 0.2,
     minRatio: 0.15,
   },
 };

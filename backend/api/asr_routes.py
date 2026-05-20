@@ -214,7 +214,8 @@ async def transcribe_file(
     effective_timestamps = _parse_bool_form(enable_timestamps, default=timestamp_default)
     effective_silence_aware_split = _parse_bool_form(silence_aware_split, default=True)
     if normalized_backend == "qwen3_crispasr":
-        effective_speaker_labels = False
+        if effective_speaker_labels:
+            effective_timestamps = True
         effective_silence_aware_split = False
 
     suffix = Path(file.filename or "upload.wav").suffix or ".wav"
@@ -329,7 +330,8 @@ async def project_from_audio(
             "speaker_map": parse_speaker_map_form(speaker_map),
         }
         if chosen_backend == "qwen3_crispasr":
-            task_input["speaker_labels"] = False
+            if bool(task_input["speaker_labels"]):
+                task_input["enable_timestamps"] = True
             task_input["silence_aware_split"] = False
         handle = asyncio.create_task(_run_project_from_audio_task(task_id, task_input, state))
         state.asr_task_handles[task_id] = handle

@@ -106,6 +106,7 @@ export default function SynthesisPage() {
   const [systemRuntimeStatus, setSystemRuntimeStatus] = useState(null);
   const [exportWizardOpen, setExportWizardOpen] = useState(false);
   const updatedRowTimerRef = useRef(null);
+  const synthesisConfigProjectIdRef = useRef(null);
   const { saveScript, isSaving: isScriptSaving, error: scriptError, script, sourceText } = useScriptStore();
   const setProjectSaveAction = useUiStore((state) => state.setProjectSaveAction);
   const clearProjectSaveAction = useUiStore((state) => state.clearProjectSaveAction);
@@ -163,10 +164,23 @@ export default function SynthesisPage() {
     useSynthesisStore.setState((s) => ({ config: { ...(s.config ?? {}), ...updater } }));
 
   useEffect(() => {
-    if (currentProject?.synthesis_config) {
-      setConfig(currentProject.synthesis_config);
+    if (!currentProject?.synthesis_config) {
+      return;
     }
-  }, [currentProject]);
+    const projectId = currentProject.id || null;
+    const isSameProject = synthesisConfigProjectIdRef.current === projectId;
+    synthesisConfigProjectIdRef.current = projectId;
+    const hasSourceTimeline = Boolean(currentProject?.script?.metadata?.dubbing_source);
+    useSynthesisStore.setState((state) => ({
+      config: {
+        ...(state.config ?? {}),
+        ...currentProject.synthesis_config,
+        timeline_lock_enabled: hasSourceTimeline
+          ? (isSameProject ? Boolean(state.config?.timeline_lock_enabled ?? true) : true)
+          : Boolean(currentProject.synthesis_config.timeline_lock_enabled ?? false),
+      },
+    }));
+  }, [currentProject?.id, currentProject?.script?.metadata?.dubbing_source, currentProject?.synthesis_config]);
 
   const isDubbingSourceProject = useMemo(
     () => Boolean(currentProject?.script?.metadata?.dubbing_source),

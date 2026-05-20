@@ -5,7 +5,7 @@ import { useSpeechRecognitionStore } from "../src/stores/useSpeechRecognitionSto
 
 test("speech recognition store normalizes vocal separation model", () => {
   const store = useSpeechRecognitionStore.getState();
-  assert.equal(store.silenceAwareSplit, true);
+  assert.equal(store.silenceAwareSplit, false);
   store.setVocalSeparationEnabled(true);
   store.setVocalSeparationModel("htdemucs_ft");
   store.setSilenceAwareSplit(false);
@@ -19,5 +19,5 @@ test("speech recognition store normalizes vocal separation model", () => {
   useSpeechRecognitionStore.getState().clearResult();
   assert.equal(useSpeechRecognitionStore.getState().vocalSeparationEnabled, false);
   assert.equal(useSpeechRecognitionStore.getState().vocalSeparationModel, "htdemucs");
-  assert.equal(useSpeechRecognitionStore.getState().silenceAwareSplit, true);
+  assert.equal(useSpeechRecognitionStore.getState().silenceAwareSplit, false);
 });

@@ -28,15 +28,28 @@ class _FakeAsrEngine:
         self._fail_all = fail_all
         self._segment_text = segment_text
         self._speaker_name = speaker_name
+        self.calls: list[dict] = []
 
     async def transcribe(
         self,
         audio_path: str,
         *,
         backend: str = "whisper",
+        language: str = "auto",
         speaker_labels: bool = False,
         enable_timestamps: bool | None = None,
+        silence_aware_split: bool = True,
     ):
+        self.calls.append(
+            {
+                "audio_path": audio_path,
+                "backend": backend,
+                "language": language,
+                "speaker_labels": speaker_labels,
+                "enable_timestamps": enable_timestamps,
+                "silence_aware_split": silence_aware_split,
+            }
+        )
         if self._fail_all:
             raise RuntimeError("chunk failed")
         if self._fail_chunk_name and Path(audio_path).stem == self._fail_chunk_name:
@@ -89,6 +102,50 @@ class AsrProjectServiceTest(unittest.TestCase):
             payload = asyncio.run(run())
             self.assertEqual(payload["segments"][0]["text"], "这病,每发都在夏天。")
             self.assertEqual(payload["labeled_text"].splitlines()[0], "旁白：这病,每发都在夏天。")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_qwen3_project_from_audio_preserves_speaker_labels_and_forces_timestamps(self) -> None:
+        root = TEST_OUTPUT_ROOT / f"asr-project-qwen3-diar-{uuid.uuid4().hex[:8]}"
+        shutil.rmtree(root, ignore_errors=True)
+        try:
+            projects_dir = root / "projects"
+            output_dir = root / "output"
+            projects_dir.mkdir(parents=True, exist_ok=True)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            fake_engine = _FakeAsrEngine(speaker_name="说话人2")
+            state = SimpleNamespace(
+                settings=SimpleNamespace(projects_dir=projects_dir, output_dir=output_dir),
+                asr_engine=fake_engine,
+            )
+            audio = output_dir / "sample.wav"
+            audio.write_bytes(b"RIFFdemo")
+
+            async def run() -> dict:
+                return await create_project_from_audio(
+                    state=state,
+                    audio_path=audio,
+                    audio_name="sample.wav",
+                    project_name="",
+                    speaker_labels=True,
+                    asr_backend="qwen3_crispasr",
+                    enable_timestamps=True,
+                    silence_aware_split=False,
+                    parse_mode="verified_five_step_pipeline",
+                    auto_parse=False,
+                    speaker_map={"说话人2": "嘉宾"},
+                    enqueue_parse_task=None,
+                )
+
+            payload = asyncio.run(run())
+
+            self.assertEqual(fake_engine.calls[0]["backend"], "qwen3_crispasr")
+            self.assertTrue(fake_engine.calls[0]["speaker_labels"])
+            self.assertTrue(fake_engine.calls[0]["enable_timestamps"])
+            self.assertFalse(fake_engine.calls[0]["silence_aware_split"])
+            self.assertEqual(payload["segments"][0]["speaker"], "嘉宾")
+            self.assertEqual(payload["labeled_text"].splitlines()[0], "嘉宾：你好")
+            self.assertEqual(payload["speaker_map"], {"嘉宾": "嘉宾"})
         finally:
             shutil.rmtree(root, ignore_errors=True)
 

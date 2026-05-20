@@ -96,6 +96,14 @@ test("getSegmentDurationMismatch flags large target and duration gaps only", () 
   assert.equal(targetShorter.isMismatch, true);
   assert.equal(targetShorter.direction, "target_shorter");
 
+  const veryShortTarget = getSegmentDurationMismatch({
+    source_start_ms: 51_880,
+    source_end_ms: 51_960,
+    tts_overrides: { duration: 0.3 },
+  });
+  assert.equal(veryShortTarget.isMismatch, true);
+  assert.equal(veryShortTarget.direction, "target_shorter");
+
   const targetLongerSimilarGap = getSegmentDurationMismatch({
     source_start_ms: 0,
     source_end_ms: 5000,

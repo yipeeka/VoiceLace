@@ -272,7 +272,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const qwen3AlignerConfigured = Boolean(systemStatus?.qwen3_asr_forced_aligner_model_exists);
   const effectiveAsrEnableTimestamps = resolveAsrTimestampRequest({
     backend: asrBackendConfigured,
-    requested: asrEnableTimestamps,
+    requested: asrEnableTimestamps || (isQwen3Backend && speakerLabels),
     qwen3Default: qwen3DefaultTimestamps,
   });
   const vocalSeparationStatus = systemStatus?.asr_vocal_separation || {};
@@ -282,12 +282,17 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     ? (vocalSeparationRepoConfigured ? "Demucs 模型目录不可用，识别时会回退原音频。" : "请在系统设置配置 Demucs 本地模型目录。")
     : "";
   const speakerLabelHint = useMemo(() => {
-    if (!speakerLabels) return "";
     if (asrBackendConfigured === "qwen3_crispasr") {
-      return "Qwen3-ASR 当前暂不支持说话人标签。";
+      if (!qwen3AlignerConfigured) {
+        return "Qwen3-ASR 说话人标签需要先在系统设置配置 Qwen3-ForcedAligner GGUF。";
+      }
+      return speakerLabels
+        ? "Qwen3-ASR 会自动启用时间轴，并用 pyannote 对齐说话人标签。"
+        : "Qwen3-ASR 可使用 ForcedAligner 时间轴配合 pyannote 输出说话人标签。";
     }
+    if (!speakerLabels) return "";
     return "Whisper + pyannote 会自动使用时间轴进行说话人标签对齐。";
-  }, [speakerLabels, asrBackendConfigured]);
+  }, [speakerLabels, asrBackendConfigured, qwen3AlignerConfigured]);
   const canBuildDubbingProject = useMemo(
     () => canBuildDubbingProjectFromAlignments({
       translationMode,
@@ -351,13 +356,28 @@ export default function SpeechRecognitionPage({ onNavigate }) {
 
   useEffect(() => {
     if (isQwen3Backend) {
-      if (speakerLabels) setSpeakerLabels(false);
+      if (speakerLabels && !qwen3AlignerConfigured) {
+        setSpeakerLabels(false);
+        return;
+      }
+      if (speakerLabels && !asrEnableTimestamps && !qwen3DefaultTimestamps) {
+        setAsrEnableTimestamps(true);
+      }
       return;
     }
     if (asrBackendConfigured === "whisper" && asrEnableTimestamps) {
       setAsrEnableTimestamps(false);
     }
-  }, [isQwen3Backend, speakerLabels, asrBackendConfigured, asrEnableTimestamps, setAsrEnableTimestamps, setSpeakerLabels]);
+  }, [
+    isQwen3Backend,
+    speakerLabels,
+    qwen3AlignerConfigured,
+    qwen3DefaultTimestamps,
+    asrBackendConfigured,
+    asrEnableTimestamps,
+    setAsrEnableTimestamps,
+    setSpeakerLabels,
+  ]);
 
   useEffect(() => {
     setEditedPreviewText(derivedPreviewText || "");
@@ -801,7 +821,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       formData.append("file", blob, fileName);
       formData.append("backend", asrBackendConfigured || "whisper");
       formData.append("language", asrLanguage || "auto");
-      formData.append("speaker_labels", String(!isQwen3Backend && Boolean(speakerLabels)));
+      formData.append("speaker_labels", String(Boolean(speakerLabels)));
       formData.append("enable_timestamps", String(Boolean(effectiveAsrEnableTimestamps)));
       formData.append("silence_aware_split", String(!isQwen3Backend && Boolean(silenceAwareSplit)));
       formData.append("vocal_separation", String(Boolean(vocalSeparationEnabled)));
@@ -1416,7 +1436,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       const formData = new FormData();
       formData.append("file", audio.blob, audio.fileName);
       formData.append("project_name", projectName.trim());
-      formData.append("speaker_labels", String(!isQwen3Backend && Boolean(speakerLabels)));
+      formData.append("speaker_labels", String(Boolean(speakerLabels)));
       formData.append("backend", asrBackendConfigured || "whisper");
       formData.append("language", asrLanguage || "auto");
       formData.append("enable_timestamps", String(Boolean(effectiveAsrEnableTimestamps)));
