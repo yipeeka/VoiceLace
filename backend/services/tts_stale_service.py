@@ -3,11 +3,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
+from .dubbing_timeline_service import (
+    filter_model_tts_overrides,
+    fingerprint_tts_overrides,
+    is_source_timeline_lock_enabled,
+    source_target_duration_ms,
+)
 from .tts_task_service import (
     config_payload_for_segment_cache,
     legacy_segment_cache_key_default_postprocess_config,
     legacy_segment_cache_key_full_config,
 )
+
+TIMELINE_TARGET_DURATION_TOLERANCE_MS = 30
 
 
 def _preset_payload_for_backend(*, preset, tts_backend: str) -> dict:
@@ -86,9 +94,16 @@ def build_stale_report(
     if config is not None:
         config_payload = config_payload_for_segment_cache(config)
     current_config_hash = hash_payload(config_payload)
+    source_timeline_lock = is_source_timeline_lock_enabled(config=config, project=project)
 
     for segment in project.script.segments:
         normalized_overrides = normalize_segment_tts_overrides(segment, strict=False)
+        model_overrides = filter_model_tts_overrides(normalized_overrides, dubbing_timeline=source_timeline_lock)
+        expected_overrides = fingerprint_tts_overrides(
+            model_overrides=model_overrides,
+            segment=segment,
+            dubbing_timeline=source_timeline_lock,
+        )
         preset_id = project.voice_assignments.get(segment.speaker)
         preset = presets_by_id.get(preset_id) if preset_id else None
         preset_payload = _preset_payload_for_backend(preset=preset, tts_backend=tts_backend)
@@ -99,7 +114,7 @@ def build_stale_report(
             config=config,
             tts_backend=tts_backend,
             tts_model_path=tts_model_path,
-            tts_overrides=normalized_overrides,
+            tts_overrides=expected_overrides,
         )
         legacy_expected_fingerprint = legacy_segment_cache_key_full_config(
             text=segment.text,
@@ -155,8 +170,15 @@ def build_stale_report(
                         reasons.append("type_changed")
                     if (asset.source_emotion or "") != (segment.emotion or ""):
                         reasons.append("emotion_changed")
-                    if (asset.source_tts_overrides or {}) != normalized_overrides:
+                    if (asset.source_tts_overrides or {}) != model_overrides:
                         reasons.append("tts_overrides_changed")
+                    target_duration_ms = source_target_duration_ms(segment) if source_timeline_lock else None
+                    if (
+                        target_duration_ms is not None
+                        and abs(int(getattr(asset, "duration_ms", 0) or 0) - int(target_duration_ms))
+                        > TIMELINE_TARGET_DURATION_TOLERANCE_MS
+                    ):
+                        reasons.append("timeline_target_changed")
                     if (asset.source_voice_preset_id or None) != (preset_id or None):
                         reasons.append("voice_assignment_changed")
                     if asset.source_preset_hash and asset.source_preset_hash != current_preset_hash:
@@ -173,11 +195,10 @@ def build_stale_report(
                         reasons.append("fingerprint_mismatch")
 
                     raw_reasons = list(reasons)
-                    fingerprint_matches = bool(
-                        current_fingerprint
-                        and current_fingerprint
-                        in {expected_fingerprint, legacy_expected_fingerprint, legacy_default_postprocess_fingerprint}
-                    )
+                    fingerprint_candidates = {expected_fingerprint}
+                    if not source_timeline_lock:
+                        fingerprint_candidates.update({legacy_expected_fingerprint, legacy_default_postprocess_fingerprint})
+                    fingerprint_matches = bool(current_fingerprint and current_fingerprint in fingerprint_candidates)
                     if fingerprint_matches:
                         reasons = [reason for reason in reasons if reason not in fingerprint_covered_reasons]
                         if raw_reasons and not reasons and debug_stale_report and logger:

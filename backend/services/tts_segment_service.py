@@ -4,9 +4,11 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import shutil
+import subprocess
 import wave
 
 from backend.engine.waveform_peaks import build_peaks_payload, compute_file_sha256
+from backend.services.dubbing_timeline_service import TIMELINE_STRETCH_POLICY_VERSION
 from backend.models import SegmentAsset
 from backend.services.tts_path_service import to_output_relpath
 
@@ -28,6 +30,61 @@ def _read_wav_info(path: Path) -> dict:
 
 def _allows_silent_output(tts_backend: str) -> bool:
     return (tts_backend or "").strip().lower() == "mock"
+
+
+def _build_atempo_chain(tempo: float) -> str:
+    factors: list[float] = []
+    remaining = max(0.01, float(tempo))
+    while remaining < 0.5:
+        factors.append(0.5)
+        remaining /= 0.5
+    while remaining > 2.0:
+        factors.append(2.0)
+        remaining /= 2.0
+    factors.append(max(0.5, min(2.0, remaining)))
+    return ",".join(f"atempo={factor:.6f}" for factor in factors)
+
+
+def _stretch_wav_to_duration(path: Path, *, target_duration_ms: int, frame_rate: int) -> None:
+    target_ms = int(target_duration_ms)
+    if target_ms <= 0:
+        return
+    current = _read_wav_info(path)
+    current_ms = int(current["duration_ms"])
+    if current_ms <= 0 or abs(current_ms - target_ms) <= 20:
+        return
+    tempo = current_ms / max(1, target_ms)
+    target_sec = f"{target_ms / 1000:.3f}"
+    tmp_path = path.with_name(f"{path.stem}.stretch.tmp{path.suffix}")
+    filter_chain = f"{_build_atempo_chain(tempo)},apad,atrim=0:{target_sec},asetpts=N/SR/TB"
+    cmd = [
+        "ffmpeg",
+        "-v",
+        "error",
+        "-nostdin",
+        "-y",
+        "-i",
+        str(path),
+        "-af",
+        filter_chain,
+        "-ac",
+        "1",
+        "-ar",
+        str(int(frame_rate) if int(frame_rate or 0) > 0 else 24000),
+        "-c:a",
+        "pcm_s16le",
+        str(tmp_path),
+    ]
+    try:
+        subprocess.run(cmd, capture_output=True, check=True)
+    except FileNotFoundError as exc:
+        raise RuntimeError("未找到 ffmpeg，请先安装并加入 PATH。") from exc
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or b"").decode("utf-8", errors="ignore").strip()
+        raise RuntimeError(f"ffmpeg 拉伸片段音频失败：{stderr or exc}") from exc
+    if not tmp_path.exists() or tmp_path.stat().st_size <= 0:
+        raise RuntimeError("ffmpeg 未生成有效的拉伸片段音频。")
+    shutil.move(str(tmp_path), str(path))
 
 
 async def _generate_segment_audio(
@@ -92,6 +149,7 @@ async def process_synthesis_segment(
     tts_model_path: str,
     task_id: str,
     gap_duration_ms: int,
+    time_stretch_target_ms: int | None = None,
 ) -> dict:
     reused = False
     generated = 0
@@ -178,6 +236,20 @@ async def process_synthesis_segment(
         )
 
     frame_rate = int(wav_info["frame_rate"])
+    raw_duration_ms = int(wav_info["duration_ms"])
+    time_stretched = False
+    time_stretch_ratio = 1.0
+    if time_stretch_target_ms is not None and int(time_stretch_target_ms) > 0:
+        target_ms = int(time_stretch_target_ms)
+        if raw_duration_ms > 0:
+            time_stretch_ratio = target_ms / raw_duration_ms
+        _stretch_wav_to_duration(segment_path, target_duration_ms=target_ms, frame_rate=frame_rate)
+        stretched_info = _read_wav_info(segment_path)
+        if int(stretched_info["duration_ms"]) != raw_duration_ms:
+            time_stretched = True
+        wav_info = stretched_info
+        frame_rate = int(wav_info["frame_rate"])
+
     frame_count = int(wav_info["frame_count"])
     duration_ms = int(wav_info["duration_ms"])
     combined_frames.extend(wav_info["frames"])
@@ -228,6 +300,11 @@ async def process_synthesis_segment(
         "source_start_ms": getattr(segment, "source_start_ms", None),
         "source_end_ms": getattr(segment, "source_end_ms", None),
         "source_duration_ms": getattr(segment, "source_duration_ms", None),
+        "target_duration_ms": int(time_stretch_target_ms) if time_stretch_target_ms is not None else None,
+        "raw_duration_ms": raw_duration_ms,
+        "time_stretched": time_stretched,
+        "time_stretch_ratio": round(float(time_stretch_ratio), 6),
+        "time_stretch_policy_version": TIMELINE_STRETCH_POLICY_VERSION if time_stretch_target_ms is not None else None,
         "audio_url": f"/api/v1/tts/synthesize/{task_id}/audio/{segment.id}",
         "status": "done",
         "duration_ms": duration_ms,

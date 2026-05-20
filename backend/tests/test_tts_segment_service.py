@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+import shutil
 import wave
 
 from backend.models import Project, Segment
@@ -205,6 +206,63 @@ class TtsSegmentServiceTest(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(result["segment_result"]["cached"])
             self.assertFalse(result["segment_result"]["silent_audio"])
             self.assertTrue(any(byte != 0 for byte in combined))
+
+    async def test_process_segment_stretches_to_source_target_duration(self) -> None:
+        if shutil.which("ffmpeg") is None:
+            self.skipTest("ffmpeg is not available")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "output"
+            cache_dir = Path(tmp_dir) / "cache"
+            temp_dir = Path(tmp_dir) / "temp"
+            project_segments_dir = output_dir / "projects" / "p1" / "segments"
+            project_segment_waveforms_dir = output_dir / "projects" / "p1" / "waveforms" / "segments"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            project_segments_dir.mkdir(parents=True, exist_ok=True)
+            project_segment_waveforms_dir.mkdir(parents=True, exist_ok=True)
+
+            segment = Segment(id="seg-4", index=0, type="narration", speaker="narrator", text="stretch", source_start_ms=0, source_end_ms=500)
+            segment_path = temp_dir / "seg-4.wav"
+            cached_path = cache_dir / "cache-key-4.wav"
+            engine = _FakeTTSEngine()
+            combined = bytearray()
+            project = Project(name="segment-test")
+
+            result = await process_synthesis_segment(
+                tts_engine=engine,
+                segment=segment,
+                segment_path=segment_path,
+                preset=None,
+                config=project.synthesis_config,
+                normalized_overrides={},
+                cached_path=cached_path,
+                cache_hit=False,
+                can_reuse=False,
+                project_asset_path=None,
+                rebuild_full=False,
+                index=0,
+                total=1,
+                combined_frames=combined,
+                sample_rate=24000,
+                project_segments_dir=project_segments_dir,
+                project_segment_waveforms_dir=project_segment_waveforms_dir,
+                output_dir=output_dir,
+                fingerprint="fp-4",
+                preset_id=None,
+                preset_hash="",
+                config_hash="cfg",
+                tts_backend="mock",
+                tts_model_path="",
+                task_id="task-1",
+                gap_duration_ms=500,
+                time_stretch_target_ms=500,
+            )
+
+            self.assertTrue(cached_path.exists())
+            self.assertEqual(result["segment_result"]["raw_duration_ms"], 100)
+            self.assertAlmostEqual(result["segment_result"]["duration_ms"], 500, delta=25)
+            self.assertTrue(result["segment_result"]["time_stretched"])
 
 
 if __name__ == "__main__":

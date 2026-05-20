@@ -8,12 +8,16 @@ from copy import deepcopy
 from typing import Any, Awaitable, Callable
 
 from fastapi import HTTPException
+from backend.services.dubbing_timeline_service import (
+    TARGET_DURATION_MAX_SEC,
+    TARGET_DURATION_MIN_SEC,
+    apply_reasonable_dubbing_timeline,
+    estimate_speaking_seconds,
+    resolve_target_duration_sec,
+)
 
 ALLOWED_TRANSLATION_SOURCES = {"primary_local", "secondary_local", "openai", "openai_compatible", "gemini"}
 PROMPT_VERSION = "dubbing-batch-v2"
-TIMELINE_DURATION_BUFFER_SEC = 0.1
-TARGET_DURATION_MIN_SEC = 0.3
-TARGET_DURATION_MAX_SEC = 60.0
 DEFAULT_MIN_SPEED = 0.8
 DEFAULT_MAX_SPEED = 1.2
 LOCAL_BATCH_SEGMENT_LIMIT = 12
@@ -47,32 +51,6 @@ def safe_duration_from_ms(start_ms: int | None, end_ms: int | None) -> float | N
     if delta <= 0:
         return None
     return max(TARGET_DURATION_MIN_SEC, min(TARGET_DURATION_MAX_SEC, delta / 1000.0))
-
-
-def resolve_target_duration_sec(start_ms: int | None, end_ms: int | None) -> float | None:
-    raw = safe_duration_from_ms(start_ms, end_ms)
-    if raw is None:
-        return None
-    return clamp_float(
-        float(raw) - TIMELINE_DURATION_BUFFER_SEC,
-        TARGET_DURATION_MIN_SEC,
-        TARGET_DURATION_MAX_SEC,
-    )
-
-
-def estimate_speaking_seconds(text: str) -> float:
-    raw = str(text or "").strip()
-    if not raw:
-        return 0.4
-    cjk_count = len(re.findall(r"[\u4e00-\u9fff]", raw))
-    latin_tokens = re.findall(r"[A-Za-z0-9']+", raw)
-    punctuation = re.findall(r"[，。！？；,.!?;:]", raw)
-    if cjk_count > 0:
-        base = cjk_count / 4.6
-    else:
-        base = max(1, len(latin_tokens)) / 2.8
-    pause = len(punctuation) * 0.08
-    return max(0.4, min(TARGET_DURATION_MAX_SEC, base + pause))
 
 
 def build_dubbing_translate_prompt(
@@ -330,8 +308,6 @@ def _build_result_row(
 ) -> dict[str, Any]:
     target_duration_sec = _target_duration_for_row(row)
     estimated_target_sec = estimate_speaking_seconds(translated_text)
-    suggested_speed = 1.0 if target_duration_sec <= 0 else estimated_target_sec / target_duration_sec
-    suggested_speed = clamp_float(float(suggested_speed), float(min_speed), float(max_speed))
     return {
         "id": str(row.get("id") or ""),
         "index": int(row.get("index") or 0),
@@ -343,11 +319,27 @@ def _build_result_row(
         "duration_ms": _duration_ms_for_row(row),
         "target_duration_sec": round(float(target_duration_sec), 3),
         "estimated_duration_sec": round(float(estimated_target_sec), 3),
-        "tts_overrides": {
-            "duration": round(float(target_duration_sec), 3),
-            "speed": round(float(suggested_speed), 3),
-        },
+        "tts_overrides": {},
     }
+
+
+def _refresh_timing_fields(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    refreshed: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        start_ms = int(item["start_ms"]) if item.get("start_ms") is not None else None
+        end_ms = int(item["end_ms"]) if item.get("end_ms") is not None else None
+        duration_ms = _duration_ms_for_row(item)
+        target_duration_sec = _target_duration_for_row(item)
+        estimated_sec = estimate_speaking_seconds(str(item.get("text") or ""))
+        item["duration_ms"] = duration_ms
+        item["target_duration_sec"] = round(float(target_duration_sec), 3)
+        item["estimated_duration_sec"] = round(float(estimated_sec), 3)
+        item["start_ms"] = start_ms
+        item["end_ms"] = end_ms
+        item["tts_overrides"] = dict(item.get("tts_overrides") or {})
+        refreshed.append(item)
+    return refreshed
 
 
 def _segment_cache_key(
@@ -607,6 +599,7 @@ async def translate_dubbing_segments_for_state(
             )
             for row in normalized_segments
         ]
+        translated_rows = _refresh_timing_fields(apply_reasonable_dubbing_timeline(translated_rows))
         combined_source = []
         for row in translated_rows:
             speaker = str(row.get("speaker") or "").strip()
@@ -862,6 +855,8 @@ async def translate_dubbing_segments_for_state(
             source_row = next((item for item in normalized_segments if str(item.get("id")) == str(row.get("id"))), None)
             if source_row and source_row.get("_cache_key"):
                 _SEGMENT_TRANSLATION_CACHE[str(source_row["_cache_key"])] = deepcopy(row)
+
+    translated_rows = _refresh_timing_fields(apply_reasonable_dubbing_timeline(translated_rows))
 
     combined_source: list[str] = []
     combined_target: list[str] = []

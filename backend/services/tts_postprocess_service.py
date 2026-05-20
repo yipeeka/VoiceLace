@@ -206,13 +206,18 @@ def _merge_optional_track(audio, *, output_dir: Path, track_config, track_name: 
         gain_db = float(getattr(track_config, "gain_db", 0.0) or 0.0)
         if gain_db:
             layer = layer + gain_db
-        if bool(getattr(track_config, "ducking_enabled", False)) and track_name == "背景音乐":
+        if bool(getattr(track_config, "ducking_enabled", False)):
             ducking_db = abs(float(getattr(track_config, "ducking_db", 8.0) or 8.0))
             layer = _apply_dynamic_ducking(
                 voice=audio,
                 music=layer,
                 ducking_db=ducking_db,
             )
+        offset_ms = int(getattr(track_config, "offset_ms", 0) or 0)
+        if offset_ms > 0:
+            layer = AudioSegment.silent(duration=offset_ms, frame_rate=audio.frame_rate) + layer
+        elif offset_ms < 0:
+            layer = layer[abs(offset_ms):]
         if bool(getattr(track_config, "loop", True)) and len(layer) > 0:
             repeats = (len(audio) // len(layer)) + 1
             layer = layer * max(1, repeats)

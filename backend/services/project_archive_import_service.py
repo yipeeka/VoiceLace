@@ -324,6 +324,7 @@ def import_project_archive_bytes(raw_bytes: bytes, *, settings, voice_manager) -
         imported_project.audio_assets.segments = {}
         imported_project.audio_assets.full_wav_relpath = None
         imported_project.audio_assets.full_mp3_relpath = None
+        imported_project.audio_assets.source_audio_wav_relpath = None
         imported_project.audio_assets.source_audio_mp3_relpath = None
         imported_project.audio_assets.source_audio_name = None
         imported_project.audio_assets.source_audio_start_ms = None

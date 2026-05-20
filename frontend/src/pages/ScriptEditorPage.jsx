@@ -204,6 +204,7 @@ function SortableSegmentCard({
   draft,
   isFocused,
   qcSeverity,
+  isDubbingTimelineProject = false,
   speakerOptions,
   canEdit,
   canReorder,
@@ -244,14 +245,17 @@ function SortableSegmentCard({
       ? (Number(segment.source_duration_ms) / 1000).toFixed(2)
       : "";
   const speedValue =
-    segment?.tts_overrides && Number.isFinite(Number(segment.tts_overrides.speed))
+    !isDubbingTimelineProject && segment?.tts_overrides && Number.isFinite(Number(segment.tts_overrides.speed))
       ? Number(segment.tts_overrides.speed).toFixed(2)
       : "";
   const durationValue =
-    segment?.tts_overrides && Number.isFinite(Number(segment.tts_overrides.duration))
+    !isDubbingTimelineProject && segment?.tts_overrides && Number.isFinite(Number(segment.tts_overrides.duration))
       ? Number(segment.tts_overrides.duration).toFixed(2)
       : "";
-  const durationMismatch = getSegmentDurationMismatch(segment);
+  const durationMismatch = isDubbingTimelineProject ? null : getSegmentDurationMismatch(segment);
+  const timelineAdjustment = segment?.timing_check?.timeline_adjustment && typeof segment.timing_check.timeline_adjustment === "object"
+    ? segment.timing_check.timeline_adjustment
+    : null;
 
   return (
     <div
@@ -386,6 +390,14 @@ function SortableSegmentCard({
             {durationMismatch?.isMismatch ? (
               <div className="segmentTimingWarning">
                 目标时长 {durationMismatch.targetSec.toFixed(2)}s 与 duration {durationMismatch.expectedSec.toFixed(2)}s 差距较大
+              </div>
+            ) : null}
+            {isDubbingTimelineProject && timelineAdjustment?.adjusted ? (
+              <div className="segmentTimingWarning">
+                时间轴已扩展 {((Number(timelineAdjustment.expanded_before_ms || 0) + Number(timelineAdjustment.expanded_after_ms || 0)) / 1000).toFixed(2)}s
+                {Number(timelineAdjustment.insufficient_ms || 0) > 0
+                  ? `，仍短 ${(Number(timelineAdjustment.insufficient_ms || 0) / 1000).toFixed(2)}s`
+                  : ""}
               </div>
             ) : null}
           </>
@@ -632,6 +644,12 @@ export default function ScriptEditorPage() {
     [segments, selectedSegmentIds]
   );
   const selectedCount = selectionMeta.count;
+  const hasSourceTimeline = (segments || []).some((segment) => {
+    const startMs = Number(segment?.source_start_ms);
+    const endMs = Number(segment?.source_end_ms);
+    return Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs;
+  });
+  const isDubbingTimelineProject = Boolean(currentProject?.synthesis_config?.timeline_lock_enabled && hasSourceTimeline);
   const canMergeSelection = selectedCount >= 2 && selectionMeta.isContiguous;
   const selectionHint = selectedCount <= 1
     ? "选择多个连续片段后可拖拽移动或合并"
@@ -1531,6 +1549,7 @@ export default function ScriptEditorPage() {
                     isSourceActive={sourceActiveSegmentId === segment.id}
                     isFocused={focusSegmentId === segment.id}
                     qcSeverity={effectiveQcHighlightBySegmentId[segment.id] || ""}
+                    isDubbingTimelineProject={isDubbingTimelineProject}
                     isEditing={editingId === segment.id}
                     isInsertAnchor={insertAfterSegmentId === segment.id}
                     draft={segmentDraft?.id === segment.id ? segmentDraft : null}

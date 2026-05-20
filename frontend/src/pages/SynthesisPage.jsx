@@ -80,7 +80,7 @@ export default function SynthesisPage() {
     segmentResults, fullAudioUrl, rawAudioUrl, processedAudioUrl,
     chapterExports, audioVariant, isRunning, error,
     subtitleSrtUrl, subtitleLrcUrl,
-    startSynthesis, startPartialSynthesis, startPostprocess, startRetryFailed, startResumeSynthesis, startRebuildFullAudio, fetchQueueSnapshot,
+    startSynthesis, startPartialSynthesis, startPostprocess, startBackgroundExtraction, startRetryFailed, startResumeSynthesis, startRebuildFullAudio, fetchQueueSnapshot,
     cancelSynthesis, reset, setAudioVariant,
   } = useSynthesisStore();
   const archiveInputRef = useRef(null);
@@ -146,6 +146,7 @@ export default function SynthesisPage() {
       loop: true,
       ducking_enabled: false,
       ducking_db: 8,
+      offset_ms: 0,
     },
     ambience_track: {
       relpath: "",
@@ -153,6 +154,7 @@ export default function SynthesisPage() {
       loop: true,
       ducking_enabled: false,
       ducking_db: 8,
+      offset_ms: 0,
     },
     tts_auto_retry: true,
     tts_retry_attempts: 2,
@@ -170,7 +172,10 @@ export default function SynthesisPage() {
     const projectId = currentProject.id || null;
     const isSameProject = synthesisConfigProjectIdRef.current === projectId;
     synthesisConfigProjectIdRef.current = projectId;
-    const hasSourceTimeline = Boolean(currentProject?.script?.metadata?.dubbing_source);
+    const hasSourceTimeline = Boolean(
+      currentProject?.script?.metadata?.dubbing_source ||
+      currentProject?.script?.metadata?.subtitle_source
+    );
     useSynthesisStore.setState((state) => ({
       config: {
         ...(state.config ?? {}),
@@ -180,21 +185,17 @@ export default function SynthesisPage() {
           : Boolean(currentProject.synthesis_config.timeline_lock_enabled ?? false),
       },
     }));
-  }, [currentProject?.id, currentProject?.script?.metadata?.dubbing_source, currentProject?.synthesis_config]);
+  }, [currentProject?.id, currentProject?.script?.metadata?.dubbing_source, currentProject?.script?.metadata?.subtitle_source, currentProject?.synthesis_config]);
 
   const isDubbingSourceProject = useMemo(
-    () => Boolean(currentProject?.script?.metadata?.dubbing_source),
-    [currentProject?.script?.metadata?.dubbing_source],
+    () => Boolean(currentProject?.script?.metadata?.dubbing_source || currentProject?.script?.metadata?.subtitle_source),
+    [currentProject?.script?.metadata?.dubbing_source, currentProject?.script?.metadata?.subtitle_source],
   );
   const useSourceTimeline = useMemo(
     () => {
-      const backend = String(config?.tts_backend || "omnivoice").trim().toLowerCase();
-      if (backend === "voxcpm2") {
-        return false;
-      }
-      return Boolean(currentProject?.script?.metadata?.dubbing_source && config?.timeline_lock_enabled);
+      return Boolean(isDubbingSourceProject && config?.timeline_lock_enabled);
     },
-    [config?.tts_backend, config?.timeline_lock_enabled, currentProject?.script?.metadata?.dubbing_source],
+    [config?.timeline_lock_enabled, isDubbingSourceProject],
   );
 
   useEffect(() => {
@@ -939,10 +940,13 @@ export default function SynthesisPage() {
         ...(baseConfig.bgm_track || {}),
         gain_db: Number(baseConfig.bgm_track?.gain_db || 0),
         ducking_db: Number(baseConfig.bgm_track?.ducking_db || 8),
+        offset_ms: Number(baseConfig.bgm_track?.offset_ms || 0),
       },
       ambience_track: {
         ...(baseConfig.ambience_track || {}),
         gain_db: Number(baseConfig.ambience_track?.gain_db || 0),
+        ducking_db: Number(baseConfig.ambience_track?.ducking_db || 8),
+        offset_ms: Number(baseConfig.ambience_track?.offset_ms || 0),
       },
     };
   }
@@ -959,6 +963,18 @@ export default function SynthesisPage() {
       config: buildRuntimeConfig(config),
     });
     await refreshCurrentProject(currentProject.id);
+  }
+
+  async function handleExtractBackground() {
+    if (!currentProject?.id || isRunning) {
+      return;
+    }
+    try {
+      await startBackgroundExtraction({ projectId: currentProject.id });
+      await refreshCurrentProject(currentProject.id);
+    } catch {
+      // Store-level error state and toast already report the failure.
+    }
   }
 
   async function handleUploadPostprocessAsset(assetType, file) {
@@ -1140,6 +1156,7 @@ export default function SynthesisPage() {
             ambiencePreviewUrl={ambiencePreviewUrl}
             onSetConfig={setConfig}
             onStartPostprocess={handleStartPostprocess}
+            onExtractBackground={handleExtractBackground}
             onUploadPostprocessAsset={handleUploadPostprocessAsset}
             onClearPostprocessAsset={handleClearPostprocessAsset}
           />

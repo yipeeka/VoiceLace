@@ -206,7 +206,7 @@ class SubtitleRoutesTest(unittest.TestCase):
                     "target_language": "中文",
                     "translation_source": "secondary_local",
                     "line_policy": "auto",
-                    "translated_segments": '[{"id":"sub-0001","text":"你好","tts_overrides":{"duration":1.2,"speed":0.9}}]',
+                    "translated_segments": '[{"id":"sub-0001","text":"你好","tts_overrides":{"duration":1.2,"speed":0.9,"denoise":true}}]',
                 },
                 files={"file": ("demo.srt", content, "text/plain")},
             )
@@ -216,7 +216,7 @@ class SubtitleRoutesTest(unittest.TestCase):
             segment = body["project"]["script"]["segments"][0]
             self.assertEqual(segment["text"], "你好")
             self.assertEqual(segment["source_text"], "hello")
-            self.assertEqual(segment["tts_overrides"]["speed"], 0.9)
+            self.assertEqual(segment["tts_overrides"], {"duration": 1.2, "speed": 0.9, "denoise": True})
         finally:
             if project_id:
                 self.client.delete(f"/api/v1/projects/{project_id}")

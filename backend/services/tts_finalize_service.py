@@ -8,18 +8,13 @@ import wave
 from backend.engine.mixer_engine import MixerEngine, TimelineEntry
 from backend.engine.subtitle_gen import timeline_to_lrc, timeline_to_srt
 from backend.engine.waveform_peaks import build_peaks_payload
+from backend.services.dubbing_timeline_service import is_source_timeline_lock_enabled
 from backend.services.tts_path_service import to_output_relpath
 from backend.services.tts_stale_service import from_output_relpath
 
 
 def should_use_source_timeline(*, config, project) -> bool:
-    backend = str(getattr(config, "tts_backend", "") or "").strip().lower()
-    if backend == "voxcpm2":
-        return False
-    return bool(
-        bool(getattr(config, "timeline_lock_enabled", False))
-        or bool((getattr(project.script, "metadata", {}) or {}).get("dubbing_source"))
-    )
+    return is_source_timeline_lock_enabled(config=config, project=project)
 
 
 def timeline_from_segment_results(segment_results: list[dict], gap_ms: int) -> list[TimelineEntry]:

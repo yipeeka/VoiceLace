@@ -3,6 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
+from .dubbing_timeline_service import (
+    filter_model_tts_overrides,
+    fingerprint_tts_overrides,
+    is_source_timeline_lock_enabled,
+)
 from .tts_task_service import config_payload_for_segment_cache
 
 
@@ -49,9 +54,16 @@ def build_synthesis_scan_plan(
     if config is not None:
         config_payload = config_payload_for_segment_cache(config)
     config_hash = hash_payload(config_payload)
+    source_timeline_lock = is_source_timeline_lock_enabled(config=config, project=project)
 
     for segment in run_segments:
         normalized_overrides = normalize_segment_tts_overrides(segment)
+        model_overrides = filter_model_tts_overrides(normalized_overrides, dubbing_timeline=source_timeline_lock)
+        fingerprint_overrides = fingerprint_tts_overrides(
+            model_overrides=model_overrides,
+            segment=segment,
+            dubbing_timeline=source_timeline_lock,
+        )
         preset_id = voice_assignments.get(segment.speaker)
         preset = presets_by_id.get(preset_id) if preset_id else None
         preset_payload = _preset_payload_for_backend(preset=preset, tts_backend=tts_backend)
@@ -62,7 +74,15 @@ def build_synthesis_scan_plan(
             config=config,
             tts_backend=tts_backend,
             tts_model_path=tts_model_path,
-            tts_overrides=normalized_overrides,
+            tts_overrides=model_overrides,
+        )
+        fingerprint = segment_cache_key(
+            text=segment.text,
+            preset=preset,
+            config=config,
+            tts_backend=tts_backend,
+            tts_model_path=tts_model_path,
+            tts_overrides=fingerprint_overrides,
         )
         cached_path = cache_dir / f"{key}.wav"
         hit = cached_path.exists() and cached_path.is_file() and cached_path.stat().st_size > 0
@@ -87,12 +107,12 @@ def build_synthesis_scan_plan(
                 preset,
                 preset_id,
                 preset_hash,
-                normalized_overrides,
+                model_overrides,
                 cached_path,
                 hit,
                 can_reuse,
                 project_asset_path,
-                key,
+                fingerprint,
             )
         )
 

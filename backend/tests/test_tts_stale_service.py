@@ -241,6 +241,203 @@ class TtsStaleServiceTest(unittest.TestCase):
             self.assertEqual(report["stale_count"], 0)
             self.assertIn("seg-a", report["ready_segment_ids"])
 
+    def test_dubbing_stale_ignores_timing_overrides_but_checks_target_duration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir)
+            project = Project(name="dubbing-stale")
+            project.script.metadata = {"dubbing_source": True}
+            project.synthesis_config.timeline_lock_enabled = True
+            segment = Segment(
+                id="seg-a",
+                index=0,
+                type="narration",
+                speaker="narrator",
+                text="配音片段",
+                tts_overrides={"duration": 2.0, "speed": 0.9, "denoise": True},
+                source_start_ms=0,
+                source_end_ms=2000,
+            )
+            project.script.segments = [segment]
+            audio_rel = f"projects/{project.id}/segments/seg-a.wav"
+            audio_path = output_dir / audio_rel
+            audio_path.parent.mkdir(parents=True, exist_ok=True)
+            audio_path.write_bytes(b"RIFF-a")
+            expected_fp = segment_cache_key(
+                text=segment.text,
+                preset=None,
+                config=project.synthesis_config,
+                tts_backend="mock",
+                tts_model_path="",
+                tts_overrides={
+                    "denoise": True,
+                    "_timeline_target_duration_ms": 2000,
+                    "_timeline_stretch_policy_version": 1,
+                },
+            )
+            project.audio_assets.segments["seg-a"] = SegmentAsset(
+                segment_id="seg-a",
+                audio_relpath=audio_rel,
+                duration_ms=1000,
+                source_text="配音片段",
+                source_speaker="narrator",
+                source_type="narration",
+                source_emotion="neutral",
+                source_tts_overrides={"denoise": True},
+                source_config_hash=_hash_payload(project.synthesis_config.model_dump()),
+                source_tts_backend="mock",
+                source_tts_model_path="",
+                fingerprint=expected_fp,
+            )
+
+            report = build_stale_report(
+                output_dir=output_dir,
+                project=project,
+                presets=[],
+                config=project.synthesis_config,
+                tts_backend="mock",
+                tts_model_path="",
+                normalize_segment_tts_overrides=lambda item, strict=False: item.tts_overrides or {},
+                segment_cache_key=segment_cache_key,
+                hash_payload=_hash_payload,
+                debug_stale_report=False,
+                logger=None,
+            )
+
+            self.assertEqual(report["stale_count"], 1)
+            self.assertIn("timeline_target_changed", report["items"][0]["reasons"])
+
+    def test_dubbing_stale_allows_tiny_timeline_duration_rounding(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir)
+            project = Project(name="dubbing-rounding")
+            project.script.metadata = {"dubbing_source": True}
+            project.synthesis_config.timeline_lock_enabled = True
+            segment = Segment(
+                id="seg-a",
+                index=0,
+                type="narration",
+                speaker="narrator",
+                text="配音片段",
+                source_start_ms=100,
+                source_end_ms=1702,
+            )
+            project.script.segments = [segment]
+            audio_rel = f"projects/{project.id}/segments/seg-a.wav"
+            audio_path = output_dir / audio_rel
+            audio_path.parent.mkdir(parents=True, exist_ok=True)
+            audio_path.write_bytes(b"RIFF-a")
+            expected_fp = segment_cache_key(
+                text=segment.text,
+                preset=None,
+                config=project.synthesis_config,
+                tts_backend="mock",
+                tts_model_path="",
+                tts_overrides={
+                    "_timeline_target_duration_ms": 1602,
+                    "_timeline_stretch_policy_version": 1,
+                },
+            )
+            project.audio_assets.segments["seg-a"] = SegmentAsset(
+                segment_id="seg-a",
+                audio_relpath=audio_rel,
+                duration_ms=1600,
+                source_text="配音片段",
+                source_speaker="narrator",
+                source_type="narration",
+                source_emotion="neutral",
+                source_tts_overrides={},
+                source_config_hash=_hash_payload(project.synthesis_config.model_dump()),
+                source_tts_backend="mock",
+                source_tts_model_path="",
+                fingerprint=expected_fp,
+            )
+
+            report = build_stale_report(
+                output_dir=output_dir,
+                project=project,
+                presets=[],
+                config=project.synthesis_config,
+                tts_backend="mock",
+                tts_model_path="",
+                normalize_segment_tts_overrides=lambda item, strict=False: item.tts_overrides or {},
+                segment_cache_key=segment_cache_key,
+                hash_payload=_hash_payload,
+                debug_stale_report=False,
+                logger=None,
+            )
+
+            self.assertEqual(report["stale_count"], 0)
+            self.assertIn("seg-a", report["ready_segment_ids"])
+
+    def test_unlocked_dubbing_stale_uses_full_tts_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir)
+            project = Project(name="dubbing-unlocked")
+            project.script.metadata = {"dubbing_source": True}
+            project.synthesis_config.timeline_lock_enabled = False
+            overrides = {
+                "duration": 2.0,
+                "speed": 0.9,
+                "denoise": True,
+                "num_step": 24,
+                "guidance_scale": 1.8,
+                "custom": "keep",
+            }
+            segment = Segment(
+                id="seg-a",
+                index=0,
+                type="narration",
+                speaker="narrator",
+                text="配音片段",
+                tts_overrides=overrides,
+                source_start_ms=100,
+                source_end_ms=1702,
+            )
+            project.script.segments = [segment]
+            audio_rel = f"projects/{project.id}/segments/seg-a.wav"
+            audio_path = output_dir / audio_rel
+            audio_path.parent.mkdir(parents=True, exist_ok=True)
+            audio_path.write_bytes(b"RIFF-a")
+            expected_fp = segment_cache_key(
+                text=segment.text,
+                preset=None,
+                config=project.synthesis_config,
+                tts_backend="mock",
+                tts_model_path="",
+                tts_overrides=overrides,
+            )
+            project.audio_assets.segments["seg-a"] = SegmentAsset(
+                segment_id="seg-a",
+                audio_relpath=audio_rel,
+                duration_ms=1600,
+                source_text="配音片段",
+                source_speaker="narrator",
+                source_type="narration",
+                source_emotion="neutral",
+                source_tts_overrides=overrides,
+                source_config_hash=_hash_payload(project.synthesis_config.model_dump()),
+                source_tts_backend="mock",
+                source_tts_model_path="",
+                fingerprint=expected_fp,
+            )
+
+            report = build_stale_report(
+                output_dir=output_dir,
+                project=project,
+                presets=[],
+                config=project.synthesis_config,
+                tts_backend="mock",
+                tts_model_path="",
+                normalize_segment_tts_overrides=lambda item, strict=False: item.tts_overrides or {},
+                segment_cache_key=segment_cache_key,
+                hash_payload=_hash_payload,
+                debug_stale_report=False,
+                logger=None,
+            )
+
+            self.assertEqual(report["stale_count"], 0)
+            self.assertIn("seg-a", report["ready_segment_ids"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,12 +11,9 @@ from backend.models import Character, Project, Segment
 from backend.persistence import append_project_event, load_project, save_project
 from backend.services.project_snapshot_service import create_project_snapshot
 from backend.services.dubbing_translation_service import (
-    DEFAULT_MAX_SPEED,
-    DEFAULT_MIN_SPEED,
-    resolve_target_duration_sec,
-    safe_duration_from_ms,
     translate_dubbing_segments_for_state,
 )
+from backend.services.dubbing_timeline_service import apply_reasonable_dubbing_timeline
 
 SubtitleFormat = Literal["srt", "ass"]
 SubtitleLinePolicy = Literal["auto", "first_line", "second_line", "all"]
@@ -347,21 +344,7 @@ def _segment_from_row(row: dict[str, Any], *, index: int) -> Segment:
     duration_ms = row.get("duration_ms")
     if duration_ms is None and start_ms is not None and end_ms is not None and end_ms >= start_ms:
         duration_ms = end_ms - start_ms
-    target_duration = resolve_target_duration_sec(start_ms, end_ms)
-    if target_duration is None:
-        target_duration = safe_duration_from_ms(start_ms, end_ms)
     overrides = dict(row.get("tts_overrides") or {})
-    if target_duration is not None:
-        overrides.setdefault("duration", round(float(target_duration), 3))
-    speed = overrides.get("speed")
-    if speed is None:
-        overrides["speed"] = 1.0
-    else:
-        try:
-            numeric_speed = float(speed)
-        except (TypeError, ValueError):
-            numeric_speed = 1.0
-        overrides["speed"] = max(DEFAULT_MIN_SPEED, min(DEFAULT_MAX_SPEED, numeric_speed))
     return Segment(
         id=str(row.get("id") or f"sub-{index + 1:04d}"),
         index=index,
@@ -375,6 +358,7 @@ def _segment_from_row(row: dict[str, Any], *, index: int) -> Segment:
         source_start_ms=start_ms,
         source_end_ms=end_ms,
         source_duration_ms=int(duration_ms) if duration_ms is not None else None,
+        timing_check=dict(row.get("timing_check") or {}),
     )
 
 
@@ -458,16 +442,7 @@ async def create_dubbing_project_from_subtitle(
                 "start_ms": cue.start_ms,
                 "end_ms": cue.end_ms,
                 "duration_ms": cue.duration_ms,
-                "tts_overrides": {
-                    "duration": round(
-                        float(
-                            resolve_target_duration_sec(cue.start_ms, cue.end_ms)
-                            or max(0.3, cue.duration_ms / 1000.0)
-                        ),
-                        3,
-                    ),
-                    "speed": 1.0,
-                },
+                "tts_overrides": {},
             }
             for cue in cues
         ]
@@ -498,6 +473,7 @@ async def create_dubbing_project_from_subtitle(
         "subtitle_line_policy": parsed["line_policy"],
         "subtitle_segment_count": len(rows),
     }
+    rows = apply_reasonable_dubbing_timeline(rows)
     segments = [_segment_from_row(row, index=idx) for idx, row in enumerate(rows)]
     project.script.segments = segments
     project.script.characters = _characters_from_segments(segments)

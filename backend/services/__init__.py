@@ -83,6 +83,7 @@ from .tts_delivery_service import (
     write_silence_wav,
 )
 from .tts_postprocess_service import bind_postprocess_asset_to_project, run_postprocess_task
+from .tts_background_extraction_service import run_background_extraction_task, resolve_project_background_source_audio
 from .tts_scan_service import build_synthesis_scan_plan
 from .tts_segment_service import process_synthesis_segment
 from .tts_pipeline_service import run_synthesis_task
@@ -177,6 +178,8 @@ __all__ = [
     "run_synthesis_task",
     "run_rebuild_full_audio_task",
     "run_postprocess_task",
+    "run_background_extraction_task",
+    "resolve_project_background_source_audio",
     "bind_postprocess_asset_to_project",
     "hash_payload",
     "public_task",

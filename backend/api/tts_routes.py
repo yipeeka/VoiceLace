@@ -32,10 +32,12 @@ from backend.services import (
     resolve_export_audio_path,
     resolve_export_audio_response_path,
     resolve_project_segment_audio_path,
+    resolve_project_background_source_audio,
     resolve_segment_asset_path,
     resolve_segment_peaks_path,
     resolve_subtitle_path,
     resolve_subtitle_response_path,
+    run_background_extraction_task,
     run_postprocess_task,
     run_rebuild_full_audio_task,
     run_synthesis_task,
@@ -57,6 +59,10 @@ async def _run_synthesis_task(task_id: str, payload: SynthesizeRequest, state) -
 
 async def _run_postprocess_task(task_id: str, payload: PostprocessRequest, state) -> None:
     await run_postprocess_task(task_id=task_id, payload=payload, state=state, logger=logger)
+
+
+async def _run_background_extraction_task(task_id: str, project_id: str, state) -> None:
+    await run_background_extraction_task(task_id=task_id, project_id=project_id, state=state, logger=logger)
 
 
 async def _run_rebuild_full_audio_task(task_id: str, project_id: str, state) -> None:
@@ -103,6 +109,9 @@ async def _dispatch_tts_task(task_id: str, state) -> None:
     payload = task.get("payload")
     if task.get("kind") == "postprocess":
         await _run_postprocess_task(task_id, payload, state)
+        return
+    if task.get("kind") == "extract_background":
+        await _run_background_extraction_task(task_id, task["project_id"], state)
         return
     if task.get("kind") == "rebuild_full_audio":
         await _run_rebuild_full_audio_task(task_id, task["project_id"], state)
@@ -213,6 +222,24 @@ async def start_postprocess(project_id: str, payload: PostprocessRequest | None 
         task=task,
         task_id=task_id,
         message={"type": "task_status", "status": "queued", "kind": "postprocess", "queue_position": queue_position},
+    )
+    return {"task_id": task_id, "queue_position": queue_position}
+
+
+@router.post("/projects/{project_id}/postprocess/extract-background")
+async def start_background_extraction(project_id: str, state=Depends(get_app_state)):
+    project = load_project(state.settings.projects_dir, project_id)
+    resolve_project_background_source_audio(output_dir=state.settings.output_dir, project=project)
+    task_id = str(uuid4())
+    task = create_tts_task_record(task_id=task_id, project_id=project_id, kind="extract_background")
+    task["payload"] = {"project_id": project_id}
+    state.tts_tasks[task_id] = task
+    queue_position = await _enqueue_tts_task(state=state, task_id=task_id)
+    await emit_task_event(
+        state=state,
+        task=task,
+        task_id=task_id,
+        message={"type": "task_status", "status": "queued", "kind": "extract_background", "queue_position": queue_position},
     )
     return {"task_id": task_id, "queue_position": queue_position}
 

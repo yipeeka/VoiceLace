@@ -10,6 +10,7 @@ from unittest.mock import patch
 from backend.services.audio_vocal_separation_service import (
     build_vocal_separation_status,
     normalize_demucs_model,
+    prepare_background_audio_for_remix,
     prepare_vocal_audio_for_asr,
 )
 
@@ -71,6 +72,7 @@ class AudioVocalSeparationServiceTest(unittest.TestCase):
                     vocals = root / "work" / "demucs" / "htdemucs" / "input" / "vocals.wav"
                     vocals.parent.mkdir(parents=True, exist_ok=True)
                     vocals.write_bytes(b"vocals")
+                    (vocals.parent / "no_vocals.wav").write_bytes(b"background")
                     return _Proc(returncode=0)
                 return _Proc(returncode=0)
 
@@ -88,6 +90,50 @@ class AudioVocalSeparationServiceTest(unittest.TestCase):
             self.assertTrue(result.used)
             self.assertEqual(result.model, "htdemucs_ft")
             self.assertEqual(result.audio_path.name, "vocals.wav")
+            self.assertEqual(result.background_path.name, "no_vocals.wav")
+            self.assertFalse(result.warnings)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_background_success_returns_no_vocals_path(self) -> None:
+        root = TEST_OUTPUT_ROOT / f"background-sep-success-{uuid.uuid4().hex[:8]}"
+        shutil.rmtree(root, ignore_errors=True)
+        root.mkdir(parents=True, exist_ok=True)
+        try:
+            audio = root / "sample.wav"
+            audio.write_bytes(b"RIFFdemo")
+            repo = root / "repo"
+            repo.mkdir()
+
+            class _Proc:
+                def __init__(self, returncode=0, stdout="", stderr=""):
+                    self.returncode = returncode
+                    self.stdout = stdout
+                    self.stderr = stderr
+
+            def fake_run(cmd, *args, **kwargs):
+                if isinstance(cmd, list) and "-m" in cmd and "demucs.separate" in cmd:
+                    out_dir = root / "work" / "demucs" / "htdemucs" / "input"
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                    (out_dir / "vocals.wav").write_bytes(b"vocals")
+                    (out_dir / "no_vocals.wav").write_bytes(b"background")
+                    return _Proc(returncode=0)
+                return _Proc(returncode=0)
+
+            with patch("backend.services.audio_vocal_separation_service.subprocess.run", side_effect=fake_run):
+                result = asyncio.run(
+                    prepare_background_audio_for_remix(
+                        audio,
+                        enabled=True,
+                        model="htdemucs",
+                        repo_dir=str(repo),
+                        device="cpu",
+                        work_dir=root / "work",
+                    )
+                )
+            self.assertTrue(result.used)
+            self.assertEqual(result.audio_path.name, "no_vocals.wav")
+            self.assertEqual(result.background_path.name, "no_vocals.wav")
             self.assertFalse(result.warnings)
         finally:
             shutil.rmtree(root, ignore_errors=True)

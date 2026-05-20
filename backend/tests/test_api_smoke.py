@@ -696,9 +696,8 @@ class ApiSmokeTest(unittest.TestCase):
             self.assertEqual(segment["end_ms"], 3000)
             self.assertEqual(segment["duration_ms"], 3000)
             self.assertIn("tts_overrides", segment)
-            self.assertIn("speed", segment["tts_overrides"])
-            self.assertIn("duration", segment["tts_overrides"])
-            self.assertGreater(segment["tts_overrides"]["duration"], 0)
+            self.assertEqual(segment["tts_overrides"], {})
+            self.assertGreater(segment["target_duration_sec"], 0)
         finally:
             engine.generate_text = original_generate_text
             state.translation_engine_source = original_source

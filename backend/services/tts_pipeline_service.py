@@ -9,6 +9,7 @@ from backend.engine.tts_engine import TTSEngine
 from backend.models import FailedSegmentAsset, SegmentAsset, SynthesizeRequest
 from backend.persistence import load_project, save_project
 from .project_snapshot_service import create_project_snapshot
+from .dubbing_timeline_service import is_source_timeline_lock_enabled, source_target_duration_ms
 
 from .tts_finalize_service import finalize_rebuild_full, resolve_partial_final_format, should_use_source_timeline, update_project_audio_assets_after_synthesis
 from .tts_path_service import (
@@ -141,6 +142,7 @@ async def run_synthesis_task(*, task_id: str, payload: SynthesizeRequest, state,
         to_generate_count = scan_plan["to_generate_count"]
         scan_items = scan_plan["scan_items"]
         unresolved_non_target_ids = scan_plan["unresolved_non_target_ids"]
+        source_timeline_lock = is_source_timeline_lock_enabled(config=config, project=project)
 
         if is_partial and rebuild_full and unresolved_non_target_ids:
             unresolved_preview = ", ".join(unresolved_non_target_ids[:8])
@@ -226,6 +228,7 @@ async def run_synthesis_task(*, task_id: str, payload: SynthesizeRequest, state,
                         tts_model_path=tts_model_path,
                         task_id=task_id,
                         gap_duration_ms=int(config.gap_duration_ms),
+                        time_stretch_target_ms=source_target_duration_ms(segment) if source_timeline_lock else None,
                     )
                     break
                 except Exception as exc:

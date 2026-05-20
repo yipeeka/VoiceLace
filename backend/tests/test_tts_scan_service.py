@@ -123,6 +123,160 @@ class TtsScanServiceTest(unittest.TestCase):
 
             self.assertEqual(scan["unresolved_non_target_ids"], [seg_b.id])
 
+    def test_dubbing_scan_cache_ignores_timing_overrides_but_fingerprint_includes_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "output"
+            cache_dir = Path(tmp_dir) / "cache"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            cache_dir.mkdir(parents=True, exist_ok=True)
+
+            project = Project(name="scan-dub")
+            project.script.metadata = {"dubbing_source": True}
+            project.synthesis_config.timeline_lock_enabled = True
+            segment = Segment(
+                id="seg-a",
+                index=0,
+                type="narration",
+                speaker="narrator",
+                text="hello",
+                tts_overrides={"duration": 1.2, "speed": 0.8, "denoise": True, "num_step": 24, "custom": "keep"},
+                source_start_ms=0,
+                source_end_ms=1500,
+            )
+            project.script.segments = [segment]
+            raw_key = _segment_cache_key(
+                text=segment.text,
+                preset=None,
+                config=project.synthesis_config,
+                tts_backend="mock",
+                tts_model_path="",
+                tts_overrides={"denoise": True, "num_step": 24, "custom": "keep"},
+            )
+            (cache_dir / f"{raw_key}.wav").write_bytes(b"RIFF-cache")
+
+            scan = build_synthesis_scan_plan(
+                run_segments=[segment],
+                voice_assignments=project.voice_assignments,
+                presets_by_id={},
+                config=project.synthesis_config,
+                cache_dir=cache_dir,
+                is_partial=False,
+                rebuild_full=True,
+                target_segment_ids=set(),
+                output_dir=output_dir,
+                project=project,
+                tts_backend="mock",
+                tts_model_path="",
+                normalize_segment_tts_overrides=lambda item, strict=True: item.tts_overrides or {},
+                segment_cache_key=_segment_cache_key,
+                hash_payload=_hash_payload,
+                resolve_segment_asset_path=resolve_segment_asset_path,
+            )
+
+            self.assertEqual(scan["cached_count"], 1)
+            item = scan["scan_items"][0]
+            self.assertEqual(item[4], {"denoise": True, "num_step": 24, "custom": "keep"})
+            self.assertNotEqual(item[9], raw_key)
+
+    def test_unlocked_dubbing_scan_keeps_timing_overrides_for_model(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "output"
+            cache_dir = Path(tmp_dir) / "cache"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            cache_dir.mkdir(parents=True, exist_ok=True)
+
+            project = Project(name="scan-dub-unlocked")
+            project.script.metadata = {"dubbing_source": True}
+            project.synthesis_config.timeline_lock_enabled = False
+            segment = Segment(
+                id="seg-a",
+                index=0,
+                type="narration",
+                speaker="narrator",
+                text="hello",
+                tts_overrides={
+                    "duration": 1.2,
+                    "speed": 0.8,
+                    "denoise": True,
+                    "num_step": 24,
+                    "guidance_scale": 1.8,
+                    "custom": "keep",
+                },
+                source_start_ms=0,
+                source_end_ms=1500,
+            )
+            project.script.segments = [segment]
+
+            scan = build_synthesis_scan_plan(
+                run_segments=[segment],
+                voice_assignments=project.voice_assignments,
+                presets_by_id={},
+                config=project.synthesis_config,
+                cache_dir=cache_dir,
+                is_partial=False,
+                rebuild_full=True,
+                target_segment_ids=set(),
+                output_dir=output_dir,
+                project=project,
+                tts_backend="mock",
+                tts_model_path="",
+                normalize_segment_tts_overrides=lambda item, strict=True: item.tts_overrides or {},
+                segment_cache_key=_segment_cache_key,
+                hash_payload=_hash_payload,
+                resolve_segment_asset_path=resolve_segment_asset_path,
+            )
+
+            self.assertEqual(
+                scan["scan_items"][0][4],
+                {
+                    "duration": 1.2,
+                    "speed": 0.8,
+                    "denoise": True,
+                    "num_step": 24,
+                    "guidance_scale": 1.8,
+                    "custom": "keep",
+                },
+            )
+
+    def test_non_dubbing_scan_keeps_timing_overrides_for_model(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "output"
+            cache_dir = Path(tmp_dir) / "cache"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            cache_dir.mkdir(parents=True, exist_ok=True)
+
+            project = Project(name="scan-normal")
+            segment = Segment(
+                id="seg-a",
+                index=0,
+                type="narration",
+                speaker="narrator",
+                text="hello",
+                tts_overrides={"duration": 1.2, "speed": 0.8, "denoise": True},
+            )
+            project.script.segments = [segment]
+
+            scan = build_synthesis_scan_plan(
+                run_segments=[segment],
+                voice_assignments=project.voice_assignments,
+                presets_by_id={},
+                config=project.synthesis_config,
+                cache_dir=cache_dir,
+                is_partial=False,
+                rebuild_full=True,
+                target_segment_ids=set(),
+                output_dir=output_dir,
+                project=project,
+                tts_backend="mock",
+                tts_model_path="",
+                normalize_segment_tts_overrides=lambda item, strict=True: item.tts_overrides or {},
+                segment_cache_key=_segment_cache_key,
+                hash_payload=_hash_payload,
+                resolve_segment_asset_path=resolve_segment_asset_path,
+            )
+
+            self.assertEqual(scan["scan_items"][0][4], {"duration": 1.2, "speed": 0.8, "denoise": True})
+
 
 if __name__ == "__main__":
     unittest.main()

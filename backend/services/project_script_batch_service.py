@@ -19,6 +19,7 @@ from backend.persistence import append_project_event, load_project, save_project
 
 from .project_script_service import sync_script_metadata
 from .project_snapshot_service import create_project_snapshot
+from .dubbing_timeline_service import is_source_timeline_lock_enabled
 
 SPLIT_TIMELINE_GAP_MS = 200
 _MIN_SPLIT_TIMELINE_DURATION_MS = 100
@@ -120,7 +121,7 @@ def _coerce_positive_seconds(value) -> float | None:
     return number
 
 
-def _split_timeline_fields(base: Segment, left_text: str, right_text: str) -> tuple[dict, dict]:
+def _split_timeline_fields(base: Segment, left_text: str, right_text: str, *, update_overrides_duration: bool = True) -> tuple[dict, dict]:
     start_ms = base.source_start_ms
     end_ms = base.source_end_ms
     if start_ms is None or end_ms is None:
@@ -150,23 +151,25 @@ def _split_timeline_fields(base: Segment, left_text: str, right_text: str) -> tu
     left_duration = max(0, left_end - start)
     right_duration = max(0, end - right_start)
 
+    left_overrides = _split_tts_overrides_duration(base.tts_overrides, left_duration) if update_overrides_duration else dict(base.tts_overrides or {})
+    right_overrides = _split_tts_overrides_duration(base.tts_overrides, right_duration) if update_overrides_duration else dict(base.tts_overrides or {})
     return (
         {
             "source_start_ms": start,
             "source_end_ms": left_end,
             "source_duration_ms": left_duration,
-            "tts_overrides": _split_tts_overrides_duration(base.tts_overrides, left_duration),
+            "tts_overrides": left_overrides,
         },
         {
             "source_start_ms": right_start,
             "source_end_ms": end,
             "source_duration_ms": right_duration,
-            "tts_overrides": _split_tts_overrides_duration(base.tts_overrides, right_duration),
+            "tts_overrides": right_overrides,
         },
     )
 
 
-def _merge_timeline_fields(first: Segment, second: Segment) -> dict:
+def _merge_timeline_fields(first: Segment, second: Segment, *, update_overrides_duration: bool = True) -> dict:
     first_start = first.source_start_ms
     second_end = second.source_end_ms
     if first_start is not None and second_end is not None:
@@ -182,8 +185,13 @@ def _merge_timeline_fields(first: Segment, second: Segment) -> dict:
                 "source_start_ms": start,
                 "source_end_ms": end,
                 "source_duration_ms": duration_ms,
-                "tts_overrides": _split_tts_overrides_duration(first.tts_overrides, duration_ms),
+                "tts_overrides": _split_tts_overrides_duration(first.tts_overrides, duration_ms)
+                if update_overrides_duration
+                else dict(first.tts_overrides or {}),
             }
+
+    if not update_overrides_duration:
+        return {}
 
     first_duration = _coerce_positive_seconds((first.tts_overrides or {}).get("duration"))
     second_duration = _coerce_positive_seconds((second.tts_overrides or {}).get("duration"))
@@ -394,6 +402,7 @@ def split_segment(project_id: str, payload: SplitSegmentRequest, *, projects_dir
     if idx < 0:
         raise HTTPException(status_code=404, detail="要拆分的片段不存在")
     base = project.script.segments[idx]
+    update_overrides_duration = not is_source_timeline_lock_enabled(config=project.synthesis_config, project=project)
     text = base.text or ""
     if payload.cursor <= 0 or payload.cursor >= len(text):
         raise HTTPException(status_code=400, detail="拆分位置必须在文本中间")
@@ -403,7 +412,12 @@ def split_segment(project_id: str, payload: SplitSegmentRequest, *, projects_dir
     if not left or not right:
         raise HTTPException(status_code=400, detail="拆分后的片段不能为空")
 
-    left_timeline, right_timeline = _split_timeline_fields(base, left, right)
+    left_timeline, right_timeline = _split_timeline_fields(
+        base,
+        left,
+        right,
+        update_overrides_duration=update_overrides_duration,
+    )
     base.text = left
     for key, value in left_timeline.items():
         setattr(base, key, value)
@@ -440,6 +454,7 @@ def merge_adjacent_segments(project_id: str, payload: MergeSegmentsRequest, *, p
 
     first_segment = project.script.segments[first_idx]
     second_segment = project.script.segments[second_idx]
+    update_overrides_duration = not is_source_timeline_lock_enabled(config=project.synthesis_config, project=project)
     first_text = (first_segment.text or "").strip()
     second_text = (second_segment.text or "").strip()
     if not first_text and not second_text:
@@ -448,7 +463,11 @@ def merge_adjacent_segments(project_id: str, payload: MergeSegmentsRequest, *, p
         first_segment.text = f"{first_text} {second_text}".strip()
     else:
         first_segment.text = first_text or second_text
-    for key, value in _merge_timeline_fields(first_segment, second_segment).items():
+    for key, value in _merge_timeline_fields(
+        first_segment,
+        second_segment,
+        update_overrides_duration=update_overrides_duration,
+    ).items():
         setattr(first_segment, key, value)
     project.script.segments.pop(second_idx)
 

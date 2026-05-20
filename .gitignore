@@ -8,7 +8,7 @@ backend/data/
 frontend/dist/
 frontend/node_modules/
 
-models/
+/models/
 docs/
 
 *.log

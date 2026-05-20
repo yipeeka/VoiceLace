@@ -79,6 +79,25 @@ const runSynthesisFlow = async ({
     const completeWithResult = (result) => {
       const resolvedKind = result.kind || taskKind || "synthesis";
       const resolvedStatus = result.status || "done";
+      if (resolvedKind === "extract_background") {
+        set({
+          isRunning: false,
+          taskKind: resolvedKind,
+          status: resolvedStatus,
+          modelStatus: "",
+          lastSyncError: "",
+          progress: result.progress || { current: 0, total: 0 },
+          queuePosition: Number(result.queue_position || 0),
+          failedCount: Number(result.failed_count || 0),
+          retryCount: Number(result.retry_count || 0),
+          effectiveSegmentConcurrency: Number(result.effective_segment_concurrency || 1),
+        });
+        useUiStore.getState().pushToast({
+          title: completeToastTitle(result),
+          tone: resolvedStatus === "partial_failed" ? "warning" : "success",
+        });
+        return result;
+      }
       const exportPath =
         result.processed_export_url ||
         result.export_url ||
@@ -372,6 +391,7 @@ export const useSynthesisStore = create((set) => ({
       loop: true,
       ducking_enabled: false,
       ducking_db: 8,
+      offset_ms: 0,
     },
     ambience_track: {
       relpath: "",
@@ -379,6 +399,7 @@ export const useSynthesisStore = create((set) => ({
       loop: true,
       ducking_enabled: false,
       ducking_db: 8,
+      offset_ms: 0,
     },
     tts_auto_retry: true,
     tts_retry_attempts: 2,
@@ -474,6 +495,30 @@ export const useSynthesisStore = create((set) => ({
       completeToastTitle: () => "后期处理完成",
     });
   },
+  startBackgroundExtraction: async ({ projectId }) => {
+    return await runSynthesisFlow({
+      set,
+      projectId,
+      config: useSynthesisStore.getState().config || {},
+      taskKind: "extract_background",
+      endpoint: `/tts/projects/${projectId}/postprocess/extract-background`,
+      statusEndpoint: "/tts/synthesize",
+      payload: {},
+      resetSegmentResults: false,
+      mergeSegmentResults: true,
+      resetAudioUrls: false,
+      queueMessage: "背景声提取任务已创建，等待执行",
+      segmentVerb: "提取",
+      exhaustedMessage: "背景声提取连接已关闭（重连失败）",
+      timeoutMessage: "背景声提取任务等待超时",
+      syncErrorMessage: "背景声提取状态同步失败",
+      cancelRequestedMessage: "正在取消背景声提取任务...",
+      canceledMessage: "背景声提取任务已取消",
+      failureMessage: "背景声提取失败",
+      completeToastTitle: (result) =>
+        result.warnings?.length ? `背景声提取完成（${result.warnings.length} 条提示）` : "背景声已提取并绑定为环境音",
+    });
+  },
   startRetryFailed: async ({ projectId, config }) => {
     return await runSynthesisFlow({
       set,
@@ -558,7 +603,13 @@ export const useSynthesisStore = create((set) => ({
     const taskId = useSynthesisStore.getState().taskId;
     const taskKind = useSynthesisStore.getState().taskKind || "synthesis";
     const taskLabel =
-      taskKind === "postprocess" ? "后期处理任务" : taskKind === "rebuild_full_audio" ? "重组音频任务" : "合成任务";
+      taskKind === "postprocess"
+        ? "后期处理任务"
+        : taskKind === "extract_background"
+          ? "背景声提取任务"
+          : taskKind === "rebuild_full_audio"
+            ? "重组音频任务"
+            : "合成任务";
     if (!taskId) {
       return { status: "idle" };
     }

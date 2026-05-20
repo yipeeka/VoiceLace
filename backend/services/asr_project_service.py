@@ -12,6 +12,7 @@ from typing import Any, Awaitable, Callable
 from backend.models import LlmParseRequest, Project
 from backend.persistence import append_project_event, save_project
 from .audio_vocal_separation_service import prepare_vocal_audio_for_asr
+from .dubbing_timeline_service import apply_reasonable_dubbing_timeline
 from .project_source_audio_service import save_project_source_audio_mp3
 
 CHUNK_DURATION_MS = 10 * 60 * 1000
@@ -374,7 +375,10 @@ async def create_project_from_audio(
     if not merged_segments:
         raise RuntimeError("全部分块转写失败，未创建项目。")
 
-    effective_segments = _apply_speaker_map(merged_segments, speaker_map or {})
+    effective_segments = apply_reasonable_dubbing_timeline(
+        _apply_speaker_map(merged_segments, speaker_map or {}),
+        audio_duration_ms=duration_ms if duration_ms > 0 else None,
+    )
     text = _build_plain_text(effective_segments, "")
     labeled_text = _build_labeled_text(effective_segments, text)
     source_text = labeled_text if speaker_labels else text

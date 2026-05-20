@@ -173,5 +173,7 @@ def public_task(task: dict) -> dict:
         "failed_count": int(task.get("failed_count", 0) or 0),
         "retry_count": int(task.get("retry_count", 0) or 0),
         "effective_segment_concurrency": int(task.get("effective_segment_concurrency", 1) or 1),
+        "background_relpath": task.get("background_relpath", ""),
+        "warnings": list(task.get("warnings", []) or []),
         "error": task["error"],
     }

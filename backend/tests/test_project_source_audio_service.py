@@ -48,12 +48,20 @@ class ProjectSourceAudioServiceTest(unittest.TestCase):
 
             calls = []
             original_runner = service._run_ffmpeg_trim_to_mp3
+            original_wav_runner = service._run_ffmpeg_trim_to_wav
+            original_probe = service._probe_audio_duration_ms
 
             def fake_runner(input_path: Path, output_path: Path, *, start_ms: int, end_ms: int) -> None:
                 calls.append((input_path, output_path, start_ms, end_ms))
                 output_path.write_bytes(b"ID3demo")
 
+            def fake_wav_runner(input_path: Path, output_path: Path, *, start_ms: int, end_ms: int) -> None:
+                calls.append((input_path, output_path, start_ms, end_ms))
+                output_path.write_bytes(b"RIFFdemo")
+
             service._run_ffmpeg_trim_to_mp3 = fake_runner  # type: ignore[assignment]
+            service._run_ffmpeg_trim_to_wav = fake_wav_runner  # type: ignore[assignment]
+            service._probe_audio_duration_ms = lambda _path: 9000  # type: ignore[assignment]
             try:
                 saved = service.save_project_source_audio_mp3(
                     project=project,
@@ -63,22 +71,28 @@ class ProjectSourceAudioServiceTest(unittest.TestCase):
                 )
             finally:
                 service._run_ffmpeg_trim_to_mp3 = original_runner  # type: ignore[assignment]
+                service._run_ffmpeg_trim_to_wav = original_wav_runner  # type: ignore[assignment]
+                service._probe_audio_duration_ms = original_probe  # type: ignore[assignment]
 
-            self.assertEqual(calls[0][2:], (1000, 4200))
+            self.assertEqual(calls[0][2:], (0, 9000))
+            self.assertEqual(calls[1][2:], (0, 9000))
             self.assertEqual(saved.audio_assets.source_audio_name, "input.wav")
-            self.assertEqual(saved.audio_assets.source_audio_start_ms, 1000)
-            self.assertEqual(saved.audio_assets.source_audio_end_ms, 4200)
-            self.assertEqual(saved.audio_assets.source_audio_duration_ms, 3200)
+            self.assertEqual(saved.audio_assets.source_audio_start_ms, 0)
+            self.assertEqual(saved.audio_assets.source_audio_end_ms, 9000)
+            self.assertEqual(saved.audio_assets.source_audio_duration_ms, 9000)
+            self.assertTrue((output_dir / saved.audio_assets.source_audio_wav_relpath).exists())
             self.assertTrue((output_dir / saved.audio_assets.source_audio_mp3_relpath).exists())
 
             save_project(projects_dir, saved)
             reloaded = load_project(projects_dir, saved.id)
+            self.assertEqual(reloaded.audio_assets.source_audio_wav_relpath, saved.audio_assets.source_audio_wav_relpath)
             self.assertEqual(reloaded.audio_assets.source_audio_mp3_relpath, saved.audio_assets.source_audio_mp3_relpath)
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
     def test_old_project_audio_assets_are_compatible(self) -> None:
         project = Project.model_validate({"name": "legacy", "audio_assets": {}})
+        self.assertIsNone(project.audio_assets.source_audio_wav_relpath)
         self.assertIsNone(project.audio_assets.source_audio_mp3_relpath)
         self.assertIsNone(project.audio_assets.source_audio_start_ms)
 

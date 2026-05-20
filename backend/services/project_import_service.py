@@ -12,6 +12,7 @@ def reset_imported_audio_assets(project: Project) -> None:
             "latest_task_id": None,
             "full_wav_relpath": None,
             "full_mp3_relpath": None,
+            "source_audio_wav_relpath": None,
             "source_audio_mp3_relpath": None,
             "source_audio_name": None,
             "source_audio_start_ms": None,

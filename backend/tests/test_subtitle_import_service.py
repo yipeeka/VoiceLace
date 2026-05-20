@@ -105,7 +105,7 @@ Dialogue: 0,0:00:04.00,0:00:05.00,Default,儿子,0,0,0,,知道了
             self.assertEqual(project.script.metadata["dubbing_mode"], "original")
             self.assertEqual(project.script.segments[0].source_start_ms, 0)
             self.assertEqual(project.script.segments[0].source_end_ms, 2000)
-            self.assertEqual(project.script.segments[0].tts_overrides["duration"], 1.9)
+            self.assertEqual(project.script.segments[0].tts_overrides, {})
 
     async def test_create_translated_project_uses_translation_service(self) -> None:
         raw = """1
@@ -129,7 +129,7 @@ Hello
             self.assertEqual(segment.source_text, "Hello")
             self.assertEqual(segment.text, "Hello译")
             self.assertEqual(segment.source_duration_ms, 1500)
-            self.assertIn("speed", segment.tts_overrides)
+            self.assertEqual(segment.tts_overrides, {})
 
 
 if __name__ == "__main__":

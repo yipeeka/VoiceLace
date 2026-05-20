@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Pause, Play, SlidersHorizontal, Square, Trash2, Upload, Wand2 } from "lucide-react";
+import { AudioLines, ChevronDown, ChevronUp, Download, Pause, Play, SlidersHorizontal, Square, Trash2, Upload, Wand2 } from "lucide-react";
 import { useId, useRef, useState } from "react";
 
 import GlassCard from "../shared/GlassCard";
@@ -46,8 +46,9 @@ export function SynthesisGenerateCard({
   const [speedDraft, setSpeedDraft] = useState("1.0");
   const requestedBackend = config.tts_backend || "omnivoice";
   const ttsBackend = requestedBackend;
-  const showTimelineLock = ttsBackend !== "voxcpm2";
-  const canUseTimelineLock = showTimelineLock && isDubbingSourceProject;
+  const showTimelineLock = true;
+  const canUseTimelineLock = isDubbingSourceProject;
+  const timelineLockActive = Boolean(isDubbingSourceProject && config.timeline_lock_enabled);
   const omnivoiceConfig = {
     num_step: Number(config?.omnivoice?.num_step ?? config.num_step ?? 32),
     guidance_scale: Number(config?.omnivoice?.guidance_scale ?? config.guidance_scale ?? 2),
@@ -132,11 +133,6 @@ export function SynthesisGenerateCard({
             </TabsContent>
 
             <TabsContent value="voxcpm2">
-              {isDubbingSourceProject ? (
-                <div className="statusBadge warning" style={{ marginBottom: 10, display: "block", textAlign: "left" }}>
-                  VoxCPM2 可用于配音项目，但不保证与原始时间轴完全同步，可能出现声音时长不对齐。
-                </div>
-              ) : null}
               <Slider
                 label="采样步数 (inference_timesteps)"
                 value={[Number(voxcpm2Config.inference_timesteps)]}
@@ -192,7 +188,7 @@ export function SynthesisGenerateCard({
             unit="ms"
           />
 
-          {ttsBackend !== "voxcpm2" ? (
+          {!timelineLockActive && ttsBackend !== "voxcpm2" ? (
             <div className="formGroup">
               <label className="formLabel" htmlFor={speedInputId}>片段 speed（批量写入 tts_overrides）</label>
               <div className="controlRow" style={{ alignItems: "center" }}>
@@ -337,6 +333,7 @@ export function SynthesisPostprocessCard({
   ambiencePreviewUrl,
   onSetConfig,
   onStartPostprocess,
+  onExtractBackground,
   onUploadPostprocessAsset,
   onClearPostprocessAsset,
 }) {
@@ -349,6 +346,11 @@ export function SynthesisPostprocessCard({
   const hasRawFullAudio =
     Boolean(currentProject?.audio_assets?.full_wav_relpath) ||
     Boolean(currentProject?.audio_assets?.full_mp3_relpath);
+  const hasSourceAudio =
+    Boolean(currentProject?.audio_assets?.source_audio_wav_relpath) ||
+    Boolean(currentProject?.audio_assets?.source_audio_mp3_relpath);
+  const ambienceRelpath = String(config.ambience_track?.relpath || "");
+  const ambienceDownloadLabel = ambienceRelpath.includes("ambience_from_source") ? "下载背景声" : "下载环境音";
   const segmentOptions = (segments || []).map((segment, index) => ({
     value: segment.id,
     label: `#${index + 1} ${(segment.text || "").slice(0, 18) || "空片段"}`,
@@ -583,7 +585,9 @@ export function SynthesisPostprocessCard({
                 >
                   {previewPlayingType === "bgm" ? "暂停" : "播放"}
                 </Button>
-                <span className="muted" style={{ fontSize: 12 }}>{config.bgm_track?.relpath || "未绑定"}</span>
+                <span className="muted postprocessAssetPath" title={config.bgm_track?.relpath || "未绑定"}>
+                  {config.bgm_track?.relpath || "未绑定"}
+                </span>
               </div>
               <input
                 ref={bgmInputRef}
@@ -612,6 +616,15 @@ export function SynthesisPostprocessCard({
                 min={-30}
                 max={12}
                 step={1}
+              />
+              <Slider
+                label="BGM 偏移 (ms)"
+                value={[Number(config.bgm_track?.offset_ms ?? 0)]}
+                onValueChange={([v]) => onSetConfig({ bgm_track: { ...(config.bgm_track || {}), offset_ms: v } })}
+                min={-5000}
+                max={5000}
+                step={50}
+                unit="ms"
               />
               <div className="editorGrid">
                 <label className="controlRow" style={{ cursor: "pointer" }}>
@@ -651,6 +664,15 @@ export function SynthesisPostprocessCard({
                 <Button
                   variant="secondary"
                   size="sm"
+                  icon={AudioLines}
+                  onClick={() => onExtractBackground?.()}
+                  disabled={isRunning || !currentProject?.id || !hasSourceAudio}
+                >
+                  提取背景声
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
                   icon={Upload}
                   onClick={() => ambienceInputRef.current?.click()}
                   disabled={isUploadingPostAsset}
@@ -675,8 +697,21 @@ export function SynthesisPostprocessCard({
                 >
                   {previewPlayingType === "ambience" ? "暂停" : "播放"}
                 </Button>
-                <span className="muted" style={{ fontSize: 12 }}>{config.ambience_track?.relpath || "未绑定"}</span>
+                {ambiencePreviewUrl ? (
+                  <a
+                    className="btn btn-ghost btn-sm"
+                    href={ambiencePreviewUrl}
+                    download={ambienceRelpath.includes("ambience_from_source") ? "ambience_from_source.wav" : undefined}
+                  >
+                    <Download aria-hidden="true" focusable="false" size={13} />
+                    {ambienceDownloadLabel}
+                  </a>
+                ) : null}
+                <span className="muted postprocessAssetPath" title={config.ambience_track?.relpath || "未绑定"}>
+                  {config.ambience_track?.relpath || "未绑定"}
+                </span>
               </div>
+              {!hasSourceAudio ? <div className="muted" style={{ fontSize: 12 }}>没有可用原音频</div> : null}
               <input
                 ref={ambienceInputRef}
                 type="file"
@@ -704,6 +739,15 @@ export function SynthesisPostprocessCard({
                 min={-30}
                 max={12}
                 step={1}
+              />
+              <Slider
+                label="环境音偏移 (ms)"
+                value={[Number(config.ambience_track?.offset_ms ?? 0)]}
+                onValueChange={([v]) => onSetConfig({ ambience_track: { ...(config.ambience_track || {}), offset_ms: v } })}
+                min={-5000}
+                max={5000}
+                step={50}
+                unit="ms"
               />
               <label className="controlRow" style={{ cursor: "pointer" }}>
                 <input

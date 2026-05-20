@@ -67,7 +67,7 @@ class DubbingTranslationServiceTest(unittest.IsolatedAsyncioTestCase):
         _CONTEXT_HINTS_CACHE.clear()
         _SEGMENT_TRANSLATION_CACHE.clear()
 
-    async def test_normalizes_segments_and_applies_duration_buffer(self) -> None:
+    async def test_normalizes_segments_without_timing_overrides(self) -> None:
         state = _build_state()
         result = await translate_dubbing_segments_for_state(
             state=state,
@@ -85,9 +85,8 @@ class DubbingTranslationServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["context_hints"])
         row = result["segments"][0]
         self.assertEqual(row["source_text"], "雾未散")
-        self.assertAlmostEqual(float(row["tts_overrides"]["duration"]), 1.9, places=3)
-        self.assertGreaterEqual(float(row["tts_overrides"]["speed"]), 0.8)
-        self.assertLessEqual(float(row["tts_overrides"]["speed"]), 1.2)
+        self.assertEqual(row["tts_overrides"], {})
+        self.assertAlmostEqual(float(row["target_duration_sec"]), 1.9, places=3)
 
     async def test_passthrough_mode_skips_llm_and_keeps_source_text(self) -> None:
         state = _build_state()
@@ -103,9 +102,10 @@ class DubbingTranslationServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["backend"], "passthrough")
         self.assertEqual(result["segments"][0]["text"], "雾未散")
         self.assertEqual(result["segments"][0]["source_text"], "雾未散")
-        self.assertAlmostEqual(float(result["segments"][0]["tts_overrides"]["duration"]), 1.9, places=3)
+        self.assertEqual(result["segments"][0]["tts_overrides"], {})
+        self.assertAlmostEqual(float(result["segments"][0]["target_duration_sec"]), 1.9, places=3)
 
-    async def test_clamps_speed_window_to_expected_range(self) -> None:
+    async def test_legacy_speed_window_does_not_emit_speed_override(self) -> None:
         state = _build_state()
         result = await translate_dubbing_segments_for_state(
             state=state,
@@ -115,9 +115,7 @@ class DubbingTranslationServiceTest(unittest.IsolatedAsyncioTestCase):
             min_speed=0.1,
             max_speed=2.0,
         )
-        speed = float(result["segments"][0]["tts_overrides"]["speed"])
-        self.assertGreaterEqual(speed, 0.8)
-        self.assertLessEqual(speed, 1.2)
+        self.assertEqual(result["segments"][0]["tts_overrides"], {})
 
     async def test_batch_json_output_maps_segments(self) -> None:
         class BatchEngine(_FakeTranslationEngine):

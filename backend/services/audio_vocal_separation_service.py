@@ -19,6 +19,7 @@ class VocalSeparationResult:
     model: str
     repo_dir: str
     warnings: list[str]
+    background_path: Path | None = None
 
     def to_payload(self) -> dict:
         return {
@@ -27,6 +28,7 @@ class VocalSeparationResult:
             "model": self.model,
             "repo_dir": self.repo_dir,
             "warnings": list(self.warnings),
+            "background_path": str(self.background_path) if self.background_path else "",
         }
 
 
@@ -78,7 +80,7 @@ async def prepare_vocal_audio_for_asr(
 
     try:
         separated = await asyncio.to_thread(
-            _run_demucs_vocal_separation,
+            _run_demucs_two_stem_separation,
             audio_path,
             work_dir=work_dir,
             model=normalized_model,
@@ -86,19 +88,73 @@ async def prepare_vocal_audio_for_asr(
             device=str(device or "cpu").strip() or "cpu",
         )
         return VocalSeparationResult(
-            audio_path=separated,
+            audio_path=separated["vocals"],
             enabled=True,
             used=True,
             model=normalized_model,
             repo_dir=str(repo_path),
             warnings=[],
+            background_path=separated.get("no_vocals"),
         )
     except Exception as exc:
         warnings.append(f"Demucs 人声分离失败，已使用原音频继续识别：{exc}")
         return VocalSeparationResult(audio_path=audio_path, enabled=True, used=False, model=normalized_model, repo_dir=str(repo_path), warnings=warnings)
 
 
-def _run_demucs_vocal_separation(audio_path: Path, *, work_dir: Path, model: str, repo_path: Path, device: str) -> Path:
+async def prepare_background_audio_for_remix(
+    audio_path: Path,
+    *,
+    enabled: bool,
+    model: str,
+    repo_dir: str,
+    device: str,
+    work_dir: Path,
+) -> VocalSeparationResult:
+    normalized_model = normalize_demucs_model(model)
+    repo_text = str(repo_dir or "").strip()
+    warnings: list[str] = []
+    if not enabled:
+        warnings.append("Demucs 背景声提取未启用。")
+        return VocalSeparationResult(audio_path=audio_path, enabled=False, used=False, model=normalized_model, repo_dir=repo_text, warnings=warnings)
+
+    repo_path = Path(repo_text).expanduser() if repo_text else None
+    if repo_path is None:
+        warnings.append("Demucs 模型目录未配置，无法提取背景声。")
+        return VocalSeparationResult(audio_path=audio_path, enabled=True, used=False, model=normalized_model, repo_dir=repo_text, warnings=warnings)
+    if not repo_path.exists() or not repo_path.is_dir():
+        warnings.append(f"Demucs 模型目录不存在：{repo_path}，无法提取背景声。")
+        return VocalSeparationResult(audio_path=audio_path, enabled=True, used=False, model=normalized_model, repo_dir=repo_text, warnings=warnings)
+
+    try:
+        separated = await asyncio.to_thread(
+            _run_demucs_two_stem_separation,
+            audio_path,
+            work_dir=work_dir,
+            model=normalized_model,
+            repo_path=repo_path,
+            device=str(device or "cpu").strip() or "cpu",
+        )
+    except Exception as exc:
+        warnings.append(f"Demucs 背景声提取失败：{exc}")
+        return VocalSeparationResult(audio_path=audio_path, enabled=True, used=False, model=normalized_model, repo_dir=str(repo_path), warnings=warnings)
+
+    background = separated.get("no_vocals")
+    if background is None:
+        warnings.append("未找到 Demucs 输出 no_vocals.wav。")
+        return VocalSeparationResult(audio_path=audio_path, enabled=True, used=False, model=normalized_model, repo_dir=str(repo_path), warnings=warnings)
+
+    return VocalSeparationResult(
+        audio_path=background,
+        enabled=True,
+        used=True,
+        model=normalized_model,
+        repo_dir=str(repo_path),
+        warnings=[],
+        background_path=background,
+    )
+
+
+def _run_demucs_two_stem_separation(audio_path: Path, *, work_dir: Path, model: str, repo_path: Path, device: str) -> dict[str, Path]:
     work_dir.mkdir(parents=True, exist_ok=True)
     normalized_input = work_dir / "input.wav"
     demucs_out = work_dir / "demucs"
@@ -146,9 +202,25 @@ def _run_demucs_vocal_separation(audio_path: Path, *, work_dir: Path, model: str
         stdout = str(proc.stdout or "").strip()
         raise RuntimeError(stderr or stdout or f"Demucs exited with code {proc.returncode}")
 
-    candidates = sorted(demucs_out.glob(f"**/{normalized_input.stem}/vocals.wav"))
-    if not candidates:
-        candidates = sorted(demucs_out.glob("**/vocals.wav"))
-    if not candidates:
+    vocals_candidates = sorted(demucs_out.glob(f"**/{normalized_input.stem}/vocals.wav"))
+    if not vocals_candidates:
+        vocals_candidates = sorted(demucs_out.glob("**/vocals.wav"))
+    if not vocals_candidates:
         raise RuntimeError("未找到 Demucs 输出 vocals.wav")
-    return candidates[0]
+    background_candidates = sorted(demucs_out.glob(f"**/{normalized_input.stem}/no_vocals.wav"))
+    if not background_candidates:
+        background_candidates = sorted(demucs_out.glob("**/no_vocals.wav"))
+    result = {"vocals": vocals_candidates[0]}
+    if background_candidates:
+        result["no_vocals"] = background_candidates[0]
+    return result
+
+
+def _run_demucs_vocal_separation(audio_path: Path, *, work_dir: Path, model: str, repo_path: Path, device: str) -> Path:
+    return _run_demucs_two_stem_separation(
+        audio_path,
+        work_dir=work_dir,
+        model=model,
+        repo_path=repo_path,
+        device=device,
+    )["vocals"]
