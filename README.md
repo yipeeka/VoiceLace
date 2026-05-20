@@ -147,16 +147,15 @@ cd frontend
 npm run dev
 ```
 
-### 4. Workflow / 页面顺序
+### 4. Classic Workflows / 经典工作流程
 
-1. **Speech Recognition / 语音识别**：upload audio or subtitles, transcribe/translate, and create a dubbing project / 上传音频或字幕，转写/翻译后创建配音项目
-2. **Text Input / 文本输入**：create a project from pasted text and parse it / 也可以粘贴文本新建项目并解析
-3. **Parse QC / 解析质检**：review structure before editing / 检查 LLM 拆分结构
-4. **Script Editor / 剧本编辑**：edit speakers, segments, emotion, and TTS overrides / 编辑分段、说话人、情绪和 TTS 覆盖项
-5. **Voice Profiles / 声音配置**：bind voices to characters / 给角色绑定声音预设
-6. **Music Generation / 音乐生成**：generate or upload music and bind it as `BGM` / `Ambience` / 生成或上传音乐素材，并绑定为 `BGM` / `Ambience`
-7. **Synthesis Export / 合成导出**：full synthesis first, then regenerate changed segments / 先全量合成，之后只重生成改动段落
-8. **Export / 工程导出**：export project files or ZIP archives / 按需导出项目文件或 ZIP
+Pick a path by what you want to make. / 按你要交付的成品选择路径：
+
+1. **Dubbing Translation / 配音翻译**：Speech Recognition (audio / video / subtitles) -> subtitle translation or text proofreading -> Script Editor -> Voice Profiles -> Music Generation for BGM (optional) -> Synthesis Export / 语音识别（音频 / 视频 / 字幕）-> 字幕翻译或文本校对 -> 剧本编辑 -> 声音配置 -> 音乐生成 BGM（可选）-> 合成导出
+2. **Audiobook Production / 有声书生成**：Text Input -> LLM script parsing -> Parse QC -> Script Editor -> multi-character Voice Profiles -> segment review and partial regeneration -> Synthesis Export / 文本输入 -> LLM 剧本解析 -> 解析质检 -> 剧本编辑 -> 多角色声音配置 -> 分段试听与局部重生成 -> 合成导出
+3. **Subtitle Creation / 字幕生成**：Speech Recognition (audio / video) -> text proofreading -> Script Editor -> synthesis/alignment check -> export `SRT` / 语音识别（音频 / 视频）-> 文本校对 -> 剧本编辑 -> 合成 / 对齐检查 -> 导出 `SRT`
+4. **Music Generation / 音乐生成**：enable Music Generation -> write a prompt or use the AI music assistant -> generate / cover / repaint -> add to the music asset library -> bind as `BGM` or `Ambience` / 开启音乐生成 -> 输入提示词或使用 AI 音乐助手 -> 生成 / cover / repaint -> 加入音乐素材库 -> 绑定为 `BGM` 或 `Ambience`
+5. **Voice Cloning / 克隆声音**：prepare reference audio -> create a voice preset -> preview and tune -> bind to character or narration -> test a short segment -> batch synthesize / 准备参考音频 -> 创建声音预设 -> 试听微调 -> 绑定角色 / 旁白 -> 小段验证 -> 批量合成
 
 ---
 

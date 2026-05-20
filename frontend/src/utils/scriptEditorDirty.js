@@ -24,14 +24,10 @@ function normalizeDraftSegment(segmentDraft) {
   if (!parsed.ok) {
     return { invalid: true, value: null };
   }
-  const hasSourceBounds =
-    segmentDraft?.sourceBoundsStartMs !== null &&
-    segmentDraft?.sourceBoundsStartMs !== undefined &&
-    segmentDraft?.sourceBoundsEndMs !== null &&
-    segmentDraft?.sourceBoundsEndMs !== undefined;
-  const sourceStartMs = hasSourceBounds ? parseSegmentTimestamp(segmentDraft?.sourceStartText) : (segmentDraft?.source_start_ms ?? null);
-  const sourceEndMs = hasSourceBounds ? parseSegmentTimestamp(segmentDraft?.sourceEndText) : (segmentDraft?.source_end_ms ?? null);
-  if (hasSourceBounds && (sourceStartMs === null || sourceEndMs === null || sourceEndMs <= sourceStartMs)) {
+  const canEditSourceTiming = Boolean(segmentDraft?.sourceStartText && segmentDraft?.sourceEndText);
+  const sourceStartMs = canEditSourceTiming ? parseSegmentTimestamp(segmentDraft?.sourceStartText) : (segmentDraft?.source_start_ms ?? null);
+  const sourceEndMs = canEditSourceTiming ? parseSegmentTimestamp(segmentDraft?.sourceEndText) : (segmentDraft?.source_end_ms ?? null);
+  if (canEditSourceTiming && (sourceStartMs === null || sourceEndMs === null || sourceEndMs <= sourceStartMs)) {
     return { invalid: true, value: null };
   }
   return {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { Redo2, Undo2 } from "lucide-react";
 
 import ScriptSidebarColumn from "../components/script/ScriptSidebarColumn";
 import ScriptDiffPreviewDialog from "../components/script/ScriptDiffPreviewDialog";
@@ -91,6 +92,8 @@ export default function SynthesisPage() {
   const [segmentDraft, setSegmentDraft] = useState(null);
   const [savedScript, setSavedScript] = useState(() => normalizeDraftScript(currentProject?.script));
   const [draftScript, setDraftScript] = useState(() => normalizeDraftScript(currentProject?.script));
+  const [undoStack, setUndoStack] = useState([]);
+  const [redoStack, setRedoStack] = useState([]);
   const [newSegment, setNewSegment] = useState(() => createSegmentDraft(0));
   const [insertAfterSegmentId, setInsertAfterSegmentId] = useState(null);
   const [activeSpeakerFilter, setActiveSpeakerFilter] = useState(queryState.speaker);
@@ -111,6 +114,24 @@ export default function SynthesisPage() {
   const setProjectSaveAction = useUiStore((state) => state.setProjectSaveAction);
   const clearProjectSaveAction = useUiStore((state) => state.clearProjectSaveAction);
   const pushToast = useUiStore.getState().pushToast;
+
+  const resetHistory = useCallback((nextDraft) => {
+    setUndoStack([]);
+    setRedoStack([]);
+    setDraftScript(nextDraft);
+  }, []);
+
+  const applyDraftMutation = useCallback((updater) => {
+    setDraftScript((current) => {
+      const next = typeof updater === "function" ? updater(current) : updater;
+      if (!next || JSON.stringify(next) === JSON.stringify(current)) {
+        return current;
+      }
+      setUndoStack((stack) => [...stack, current]);
+      setRedoStack([]);
+      return next;
+    });
+  }, []);
 
   const config = useSynthesisStore((s) => s.config ?? {
     tts_backend: "omnivoice",
@@ -204,7 +225,7 @@ export default function SynthesisPage() {
     const hasLocalChanges = computeScriptDiff(savedScript, draftScript).hasChanges;
     if (lastProjectIdRef.current !== projectId) {
       setSavedScript(normalized);
-      setDraftScript(normalized);
+      resetHistory(normalized);
       setNewSegment(createSegmentDraft(normalized.segments.length));
       setSelectedSegmentIds([]);
       setEditingSegmentId(null);
@@ -227,10 +248,10 @@ export default function SynthesisPage() {
     }
     if (!hasLocalChanges) {
       setSavedScript(normalized);
-      setDraftScript(normalized);
+      resetHistory(normalized);
       setNewSegment((current) => ({ ...current, index: normalized.segments.length }));
     }
-  }, [currentProject?.id, currentProject?.script]);
+  }, [currentProject?.id, currentProject?.script, resetHistory]);
 
   useEffect(() => {
     return () => {
@@ -416,6 +437,7 @@ export default function SynthesisPage() {
     return hasEditingDraftChanges(base, segmentDraft);
   }, [draftScript?.segments, editingSegmentId, segmentDraft]);
   const hasUnsavedChanges = scriptDiff.hasChanges || editingDraftDirty;
+
   const characters = useMemo(
     () => buildCharacterStats(draftScript?.segments || []),
     [draftScript?.segments]
@@ -718,13 +740,51 @@ export default function SynthesisPage() {
     return true;
   }
 
+  function handleUndo() {
+    setUndoStack((past) => {
+      if (!past.length) return past;
+      const previous = past[past.length - 1];
+      setRedoStack((future) => [draftScript, ...future]);
+      setDraftScript(previous);
+      return past.slice(0, -1);
+    });
+  }
+
+  function handleRedo() {
+    setRedoStack((future) => {
+      if (!future.length) return future;
+      const next = future[0];
+      setUndoStack((past) => [...past, draftScript]);
+      setDraftScript(next);
+      return future.slice(1);
+    });
+  }
+
+  useEffect(() => {
+    function onKeyDown(event) {
+      const isPrimary = event.ctrlKey || event.metaKey;
+      if (!isPrimary) return;
+      if (event.key.toLowerCase() === "z" && !event.shiftKey) {
+        event.preventDefault();
+        handleUndo();
+        return;
+      }
+      if (event.key.toLowerCase() === "y" || (event.key.toLowerCase() === "z" && event.shiftKey)) {
+        event.preventDefault();
+        handleRedo();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [draftScript, undoStack.length, redoStack.length]);
+
   function beginEditSegment(segment) {
     const baseSegment = (draftScript?.segments || []).find((item) => item.id === segment.segment_id);
     if (!baseSegment) {
       return;
     }
     setEditingSegmentId(segment.segment_id);
-    setSegmentDraft(buildSegmentEditorDraft(baseSegment));
+    setSegmentDraft(buildSegmentEditorDraft(baseSegment, { segments: draftScript?.segments || [] }));
   }
 
   function cancelEditSegment() {
@@ -741,7 +801,7 @@ export default function SynthesisPage() {
       pushToast({ title: `片段编辑错误：${normalized.error}`, tone: "error" });
       return;
     }
-    setDraftScript((current) => ({
+    applyDraftMutation((current) => ({
       ...current,
       segments: (current.segments || []).map((item, index) =>
         item.id === segment.segment_id ? { ...normalized.value, id: item.id, index } : { ...item, index }
@@ -753,7 +813,7 @@ export default function SynthesisPage() {
   }
 
   function handleDeleteSegment(segmentId) {
-    setDraftScript((current) => ({
+    applyDraftMutation((current) => ({
       ...current,
       segments: (current.segments || [])
         .filter((segment) => segment.id !== segmentId)
@@ -780,7 +840,7 @@ export default function SynthesisPage() {
       id: normalized.value.id || crypto.randomUUID(),
       index: 0,
     };
-    setDraftScript((current) => ({
+    applyDraftMutation((current) => ({
       ...current,
       segments: (() => {
         const list = [...(current.segments || [])];
@@ -806,7 +866,7 @@ export default function SynthesisPage() {
     const selectedSet = new Set(selectedSegmentIds || []);
     const applySelected = scope === "selected" && selectedSet.size > 0;
     let changedCount = 0;
-    setDraftScript((current) => ({
+    applyDraftMutation((current) => ({
       ...current,
       segments: (current.segments || []).map((segment, index) => {
         const shouldUpdate = applySelected ? selectedSet.has(segment.id) : true;
@@ -876,7 +936,7 @@ export default function SynthesisPage() {
     await refreshCurrentProject(currentProject.id);
     const normalized = normalizeDraftScript(updated);
     setSavedScript(normalized);
-    setDraftScript(normalized);
+    resetHistory(normalized);
     setNewSegment(createSegmentDraft(normalized.segments.length));
     setEditingSegmentId(null);
     setSegmentDraft(null);
@@ -1067,7 +1127,7 @@ export default function SynthesisPage() {
     if (!canReorderTimeline || !over || active.id === over.id) {
       return;
     }
-    setDraftScript((current) => {
+    applyDraftMutation((current) => {
       const list = [...(current.segments || [])];
       const oldIndex = list.findIndex((segment) => segment.id === active.id);
       const newIndex = list.findIndex((segment) => segment.id === over.id);
@@ -1231,6 +1291,14 @@ export default function SynthesisPage() {
           addButtonLabel="+ 添加片段"
           actionContent={
             <>
+              <div className="controlRow" style={{ gap: 8, flexWrap: "wrap" }}>
+                <Button variant="ghost" icon={Undo2} onClick={handleUndo} disabled={!undoStack.length}>
+                  撤销
+                </Button>
+                <Button variant="ghost" icon={Redo2} onClick={handleRedo} disabled={!redoStack.length}>
+                  重做
+                </Button>
+              </div>
               <Button
                 variant="primary"
                 disabled={!currentProject?.id || isScriptSaving || !hasUnsavedChanges}

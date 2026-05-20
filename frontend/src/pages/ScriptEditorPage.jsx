@@ -903,7 +903,7 @@ export default function ScriptEditorPage() {
 
   function beginEdit(segment) {
     setEditingId(segment.id);
-    setSegmentDraft(buildSegmentEditorDraft(segment));
+    setSegmentDraft(buildSegmentEditorDraft(segment, { segments: draftScript?.segments || [] }));
     setSelectedSegmentIds((current) => current.filter((id) => id !== segment.id));
   }
 

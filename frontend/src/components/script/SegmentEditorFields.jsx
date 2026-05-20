@@ -26,8 +26,7 @@ export default function SegmentEditorFields({
   const currentSpeaker = (draft?.speaker || "").trim();
   const isKnownSpeaker = knownSpeakerOptions.some((item) => item.value === currentSpeaker);
   const speakerSelectValue = isKnownSpeaker ? currentSpeaker : "__new__";
-  const canEditSourceTiming = draft?.sourceBoundsStartMs !== null && draft?.sourceBoundsStartMs !== undefined
-    && draft?.sourceBoundsEndMs !== null && draft?.sourceBoundsEndMs !== undefined;
+  const canEditSourceTiming = Boolean(draft?.sourceStartText && draft?.sourceEndText);
 
   const resolvedSpeakerOptions = useMemo(() => {
     if (knownSpeakerOptions.some((item) => item.value === "__new__")) {
@@ -137,7 +136,7 @@ export default function SegmentEditorFields({
                 />
               </div>
               <div className="muted segmentTimingHint">
-                只能在原时间范围内收窄，保存后会同步更新片段时间码。
+                可收窄或放宽，但不能超过上下段边界；保存后会同步更新片段时间码。
               </div>
             </div>
           ) : null}

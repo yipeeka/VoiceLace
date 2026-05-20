@@ -13,6 +13,16 @@ import { getStoredSegmentDurationMismatch } from "../../utils/segmentTiming";
 const STATUS_ICON = { done: "✅", running: "⏳", pending: "⬜", error: "❌", skipped: "⏭", stale: "🟨", missing: "⚠", failed: "❌" };
 const STATUS_ROW_CLS = { done: "done", running: "running", pending: "pending", error: "error", stale: "stale", missing: "missing", failed: "error" };
 
+function formatSourceTimelineMs(value) {
+  const ms = Number(value);
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const totalMs = Math.max(0, Math.round(ms));
+  const minutes = Math.floor(totalMs / 60000);
+  const seconds = Math.floor((totalMs % 60000) / 1000);
+  const millis = totalMs % 1000;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(millis).padStart(3, "0")}`;
+}
+
 function isInteractiveRowTarget(target) {
   return Boolean(target?.closest?.(
     "button, input, label, select, textarea, a, [role='button'], [role='slider'], .dragHandle, .audioPlayer, .synthSegmentActions"
@@ -65,6 +75,14 @@ export default function SegmentTimelineRow({
     Number(segmentTiming.start) >= 0 &&
     typeof onLocateFullAudioSegment === "function"
   );
+  const sourceStartMs = Number(seg?.source_start_ms);
+  const sourceEndMs = Number(seg?.source_end_ms);
+  const hasSourceTimeline = Number.isFinite(sourceStartMs) && Number.isFinite(sourceEndMs) && sourceStartMs >= 0 && sourceEndMs > sourceStartMs;
+  const timeBadgeText = hasSourceTimeline
+    ? `${formatSourceTimelineMs(sourceStartMs)} - ${formatSourceTimelineMs(sourceEndMs)}`
+    : segmentTiming
+      ? `${formatTimeMs(segmentTiming.start)} - ${formatTimeMs(segmentTiming.end)}`
+      : "";
 
   useEffect(() => {
     if (!actionsOpen) return undefined;
@@ -135,11 +153,11 @@ export default function SegmentTimelineRow({
           <div className="synthSegmentSpeakerRow">
             <CharacterBadge name={seg.speaker} showDot />
           </div>
-          {segStatus === "done" && segmentTiming && (
+          {segStatus === "done" && timeBadgeText ? (
             <span className="synthSegmentTimeBadge">
-              {formatTimeMs(segmentTiming.start)} - {formatTimeMs(segmentTiming.end)}
+              {timeBadgeText}
             </span>
-          )}
+          ) : null}
         </div>
       </div>
       {staleLabel || seg.draft_status === "unsaved" || durationMismatch?.isMismatch ? (
