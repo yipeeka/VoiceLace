@@ -34,6 +34,15 @@ test("speech recognition store keeps hybrid qwen whisper timeline backend", () =
 });
 
 test("speech recognition store clamps hybrid preview max line length", () => {
+  useSpeechRecognitionStore.getState().setQwen3PreviewMaxLineLength(-1);
+  assert.equal(useSpeechRecognitionStore.getState().qwen3PreviewMaxLineLength, -1);
+
+  useSpeechRecognitionStore.getState().setQwen3PreviewMaxLineLength("");
+  assert.equal(useSpeechRecognitionStore.getState().qwen3PreviewMaxLineLength, -1);
+
+  useSpeechRecognitionStore.getState().setQwen3PreviewMaxLineLength("-");
+  assert.equal(useSpeechRecognitionStore.getState().qwen3PreviewMaxLineLength, -1);
+
   useSpeechRecognitionStore.getState().setQwen3PreviewMaxLineLength(18);
   assert.equal(useSpeechRecognitionStore.getState().qwen3PreviewMaxLineLength, 18);
 

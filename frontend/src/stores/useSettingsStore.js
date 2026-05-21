@@ -6,6 +6,16 @@ import { useUiStore } from "./useUiStore.js";
 
 let systemStatusRequest = null;
 
+function normalizeQwen3PreviewMaxLineLength(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw || raw === "-") return -1;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return -1;
+  const rounded = Math.round(parsed);
+  if (rounded === -1) return -1;
+  return Math.min(50, Math.max(2, rounded));
+}
+
 function fetchSystemStatus() {
   if (!systemStatusRequest) {
     systemStatusRequest = api.get("/system/status").finally(() => {
@@ -86,7 +96,7 @@ export function normalizeOrchestratorConfig(raw) {
     qwen3_asr_threads: Number(raw.qwen3_asr_threads ?? 0),
     qwen3_asr_language: raw.qwen3_asr_language ?? "auto",
     qwen3_asr_enable_timestamps: Boolean(raw.qwen3_asr_enable_timestamps ?? false),
-    qwen3_asr_preview_max_line_length: Number(raw.qwen3_asr_preview_max_line_length ?? 20),
+    qwen3_asr_preview_max_line_length: normalizeQwen3PreviewMaxLineLength(raw.qwen3_asr_preview_max_line_length ?? -1),
     firered_asr_model_path: raw.firered_asr_model_path ?? "",
     firered_asr_threads: Number(raw.firered_asr_threads ?? 0),
     firered_asr_language: raw.firered_asr_language ?? "auto",
@@ -167,7 +177,7 @@ export function toOrchestratorPayload(config) {
     qwen3_asr_threads: Number(config.qwen3_asr_threads ?? 0),
     qwen3_asr_language: config.qwen3_asr_language ?? "auto",
     qwen3_asr_enable_timestamps: Boolean(config.qwen3_asr_enable_timestamps ?? false),
-    qwen3_asr_preview_max_line_length: Math.min(50, Math.max(2, Number(config.qwen3_asr_preview_max_line_length ?? 20) || 20)),
+    qwen3_asr_preview_max_line_length: normalizeQwen3PreviewMaxLineLength(config.qwen3_asr_preview_max_line_length ?? -1),
     firered_asr_model_path: config.firered_asr_model_path ?? "",
     firered_asr_threads: Number(config.firered_asr_threads ?? 0),
     firered_asr_language: config.firered_asr_language ?? "auto",

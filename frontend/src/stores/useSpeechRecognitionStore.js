@@ -1,5 +1,15 @@
 import { create } from "zustand";
 
+function normalizeQwen3PreviewMaxLineLength(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw || raw === "-") return -1;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return -1;
+  const rounded = Math.round(parsed);
+  if (rounded === -1) return -1;
+  return Math.min(50, Math.max(2, rounded));
+}
+
 export const useSpeechRecognitionStore = create((set) => ({
   speakerLabels: false,
   transcript: "",
@@ -17,7 +27,7 @@ export const useSpeechRecognitionStore = create((set) => ({
   asrBackend: "whisper",
   asrLanguage: "auto",
   asrEnableTimestamps: false,
-  qwen3PreviewMaxLineLength: 20,
+  qwen3PreviewMaxLineLength: -1,
   silenceAwareSplit: false,
   vocalSeparationEnabled: false,
   vocalSeparationModel: "htdemucs",
@@ -68,8 +78,7 @@ export const useSpeechRecognitionStore = create((set) => ({
   },
   setAsrEnableTimestamps: (asrEnableTimestamps) => set({ asrEnableTimestamps: Boolean(asrEnableTimestamps) }),
   setQwen3PreviewMaxLineLength: (qwen3PreviewMaxLineLength) => {
-    const parsed = Number(qwen3PreviewMaxLineLength);
-    set({ qwen3PreviewMaxLineLength: Math.min(50, Math.max(2, Number.isFinite(parsed) ? Math.round(parsed) : 20)) });
+    set({ qwen3PreviewMaxLineLength: normalizeQwen3PreviewMaxLineLength(qwen3PreviewMaxLineLength) });
   },
   setSilenceAwareSplit: (silenceAwareSplit) => set({ silenceAwareSplit: Boolean(silenceAwareSplit) }),
   setVocalSeparationEnabled: (vocalSeparationEnabled) => set({ vocalSeparationEnabled: Boolean(vocalSeparationEnabled) }),
@@ -108,7 +117,7 @@ export const useSpeechRecognitionStore = create((set) => ({
       translationResult: "",
       translationError: "",
       asrEnableTimestamps: false,
-      qwen3PreviewMaxLineLength: 20,
+      qwen3PreviewMaxLineLength: -1,
       silenceAwareSplit: false,
       asrLanguage: "auto",
       vocalSeparationEnabled: false,

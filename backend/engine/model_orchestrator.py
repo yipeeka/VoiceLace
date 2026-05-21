@@ -223,12 +223,10 @@ class ModelOrchestrator:
         config.qwen3_asr_language = str(getattr(config, "qwen3_asr_language", "auto") or "auto").strip() or "auto"
         config.qwen3_asr_enable_timestamps = bool(getattr(config, "qwen3_asr_enable_timestamps", False))
         try:
-            config.qwen3_asr_preview_max_line_length = min(
-                50,
-                max(2, int(getattr(config, "qwen3_asr_preview_max_line_length", 20) or 20)),
-            )
+            preview_max_line_length = int(getattr(config, "qwen3_asr_preview_max_line_length", -1))
+            config.qwen3_asr_preview_max_line_length = -1 if preview_max_line_length == -1 else min(50, max(2, preview_max_line_length))
         except Exception:
-            config.qwen3_asr_preview_max_line_length = 20
+            config.qwen3_asr_preview_max_line_length = -1
         return config
 
     @classmethod

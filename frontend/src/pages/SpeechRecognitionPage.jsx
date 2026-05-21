@@ -369,7 +369,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
 
   useEffect(() => {
     if (qwen3PreviewMaxLineLengthHydratedRef.current) return;
-    if (qwen3PreviewMaxLineLength !== 20) {
+    if (qwen3PreviewMaxLineLength !== -1) {
       qwen3PreviewMaxLineLengthHydratedRef.current = true;
       return;
     }
@@ -849,7 +849,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       formData.append("speaker_labels", String(Boolean(speakerLabels)));
       formData.append("enable_timestamps", String(Boolean(effectiveAsrEnableTimestamps)));
       formData.append("silence_aware_split", String(!isQwen3Backend && Boolean(silenceAwareSplit)));
-      if (isHybridTimelineBackend) {
+      if (isQwen3Backend || isHybridTimelineBackend) {
         formData.append("qwen3_preview_max_line_length", String(qwen3PreviewMaxLineLength));
       }
       formData.append("vocal_separation", String(Boolean(vocalSeparationEnabled)));

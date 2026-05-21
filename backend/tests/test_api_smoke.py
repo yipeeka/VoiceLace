@@ -488,7 +488,7 @@ class ApiSmokeTest(unittest.TestCase):
         finally:
             asr.transcribe = original_transcribe
 
-    def test_asr_transcribe_file_passes_preview_line_length_only_for_hybrid_backend(self) -> None:
+    def test_asr_transcribe_file_passes_preview_line_length_for_qwen_backends(self) -> None:
         asr = self.app_state.asr_engine
         original_transcribe = asr.transcribe
         captured: dict[str, object] = {}
@@ -530,6 +530,32 @@ class ApiSmokeTest(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(captured["backend"], "qwen3_text_whisper_timeline")
             self.assertEqual(captured["preview_max_line_length"], 17)
+
+            response = self.client.post(
+                "/api/v1/asr/transcribe-file",
+                data={
+                    "backend": "qwen3_crispasr",
+                    "speaker_labels": "false",
+                    "qwen3_preview_max_line_length": "30",
+                },
+                files={"file": ("sample.wav", b"RIFFdemo", "audio/wav")},
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(captured["backend"], "qwen3_crispasr")
+            self.assertEqual(captured["preview_max_line_length"], 30)
+
+            response = self.client.post(
+                "/api/v1/asr/transcribe-file",
+                data={
+                    "backend": "qwen3_crispasr",
+                    "speaker_labels": "false",
+                    "qwen3_preview_max_line_length": "-1",
+                },
+                files={"file": ("sample.wav", b"RIFFdemo", "audio/wav")},
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(captured["backend"], "qwen3_crispasr")
+            self.assertEqual(captured["preview_max_line_length"], -1)
 
             response = self.client.post(
                 "/api/v1/asr/transcribe-file",

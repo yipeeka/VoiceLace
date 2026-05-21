@@ -95,6 +95,18 @@
   align-self: end;
 }
 
+.speechAsrOptionsGrid {
+  align-items: start;
+}
+
+.speechAsrToggleStack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 2px;
+  min-width: 0;
+}
+
 .inlineCheckRow {
   cursor: pointer;
 }

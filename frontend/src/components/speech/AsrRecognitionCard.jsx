@@ -117,29 +117,18 @@ export default function AsrRecognitionCard({
             ))}
           </select>
         </div>
-        {showTimestampToggle ? (
-          <label className="controlRow inlineCheckRow">
-            <input
-              type="checkbox"
-              checked={Boolean(qwen3TimestampsRequested || qwen3DefaultTimestamps)}
-              onChange={(event) => onAsrEnableTimestampsChange(event.target.checked)}
-              disabled={isBusy || Boolean(qwen3DefaultTimestamps)}
-            />
-            <span>输出 Qwen3 时间轴</span>
-          </label>
-        ) : null}
       </div>
 
-      {isHybridTimelineBackend ? (
+      {isQwen3Backend || isHybridTimelineBackend ? (
         <div className="editorGrid three speechAsrGrid">
           <div className="formGroup">
-            <label className="formLabel" htmlFor={previewMaxLineLengthId}>预览分行长度 -ml</label>
+            <label className="formLabel" htmlFor={previewMaxLineLengthId}>预览分行长度 -ml（-1 不传）</label>
             <input
               id={previewMaxLineLengthId}
               name="qwen3_preview_max_line_length"
               className="textInput"
               type="number"
-              min="2"
+              min="-1"
               max="50"
               step="1"
               value={qwen3PreviewMaxLineLength}
@@ -147,20 +136,59 @@ export default function AsrRecognitionCard({
               disabled={isBusy}
             />
           </div>
-          <div className="muted speechAsrHint">仅用于混合模式调用 CrispASR 的分句分行，不影响 Whisper 或 Qwen3-ASR 单后端。</div>
+          <div className="muted speechAsrHint">用于 Qwen3-ASR 的 CrispASR 分句分行；Whisper 不受影响。</div>
         </div>
       ) : null}
 
-      <div className="editorGrid three speechAsrGrid">
-        <label className="controlRow inlineCheckRow">
-          <input
-            type="checkbox"
-            checked={Boolean(vocalSeparationEnabled)}
-            onChange={(event) => onVocalSeparationChange(event.target.checked)}
-            disabled={isBusy}
-          />
-          <span>识别前提取人声</span>
-        </label>
+      <div className="editorGrid three speechAsrGrid speechAsrOptionsGrid">
+        <div className="speechAsrToggleStack">
+          <label className="controlRow inlineCheckRow">
+            <input
+              type="checkbox"
+              checked={Boolean(vocalSeparationEnabled)}
+              onChange={(event) => onVocalSeparationChange(event.target.checked)}
+              disabled={isBusy}
+            />
+            <span>识别前提取人声</span>
+          </label>
+          {showTimestampToggle ? (
+            <label className="controlRow inlineCheckRow">
+              <input
+                type="checkbox"
+                checked={Boolean(qwen3TimestampsRequested || qwen3DefaultTimestamps)}
+                onChange={(event) => onAsrEnableTimestampsChange(event.target.checked)}
+                disabled={isBusy || Boolean(qwen3DefaultTimestamps)}
+              />
+              <span>输出 Qwen3 时间轴</span>
+            </label>
+          ) : null}
+          <label className="controlRow inlineCheckRow">
+            <input
+              type="checkbox"
+              checked={speakerLabels}
+              onChange={(event) => {
+                const checked = event.target.checked;
+                onSpeakerLabelsChange(checked);
+                if (checked && isQwen3Backend && !qwen3DefaultTimestamps) {
+                  onAsrEnableTimestampsChange(true);
+                }
+              }}
+              disabled={speakerLabelsDisabled}
+            />
+            <span>说话人标签</span>
+          </label>
+          {!isQwen3Backend ? (
+            <label className="controlRow inlineCheckRow">
+              <input
+                type="checkbox"
+                checked={Boolean(silenceAwareSplit)}
+                onChange={(event) => onSilenceAwareSplitChange(event.target.checked)}
+                disabled={isTranscribing || isRecording || isCreatingProject}
+              />
+              <span>避开长静音切分片段</span>
+            </label>
+          ) : null}
+        </div>
         <div className="formGroup">
           <label className="formLabel" htmlFor={demucsSelectId}>Demucs 模型</label>
           <select
@@ -179,33 +207,6 @@ export default function AsrRecognitionCard({
           <div className="muted speechAsrHint">{vocalSeparationHint}</div>
         ) : null}
       </div>
-
-      <label className="controlRow inlineCheckRow">
-        <input
-          type="checkbox"
-          checked={speakerLabels}
-          onChange={(event) => {
-            const checked = event.target.checked;
-            onSpeakerLabelsChange(checked);
-            if (checked && isQwen3Backend && !qwen3DefaultTimestamps) {
-              onAsrEnableTimestampsChange(true);
-            }
-          }}
-          disabled={speakerLabelsDisabled}
-        />
-        <span>输出说话人标签（说话人1：文本）</span>
-      </label>
-      {!isQwen3Backend ? (
-        <label className="controlRow inlineCheckRow">
-          <input
-            type="checkbox"
-            checked={Boolean(silenceAwareSplit)}
-            onChange={(event) => onSilenceAwareSplitChange(event.target.checked)}
-            disabled={isTranscribing || isRecording || isCreatingProject}
-          />
-          <span>避开长静音切分片段</span>
-        </label>
-      ) : null}
       {speakerLabelHint ? <div className="muted">{speakerLabelHint}</div> : null}
 
       <div className="controlRow">

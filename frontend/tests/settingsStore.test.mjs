@@ -76,6 +76,9 @@ test("settings store preserves Qwen3 ASR preview line length", () => {
 
   const payload = toOrchestratorPayload(normalized);
   assert.equal(payload.qwen3_asr_preview_max_line_length, 18);
+  assert.equal(toOrchestratorPayload({ qwen3_asr_preview_max_line_length: -1 }).qwen3_asr_preview_max_line_length, -1);
+  assert.equal(toOrchestratorPayload({ qwen3_asr_preview_max_line_length: "" }).qwen3_asr_preview_max_line_length, -1);
+  assert.equal(toOrchestratorPayload({ qwen3_asr_preview_max_line_length: "-" }).qwen3_asr_preview_max_line_length, -1);
   assert.equal(toOrchestratorPayload({ qwen3_asr_preview_max_line_length: 1 }).qwen3_asr_preview_max_line_length, 2);
   assert.equal(toOrchestratorPayload({ qwen3_asr_preview_max_line_length: 120 }).qwen3_asr_preview_max_line_length, 50);
 });

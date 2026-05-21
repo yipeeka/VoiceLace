@@ -66,6 +66,16 @@ def _parse_int_form(val: str | None, *, default: int, minimum: int, maximum: int
     return min(maximum, max(minimum, parsed))
 
 
+def _parse_qwen3_preview_max_line_length(val: str | None, *, default: int) -> int:
+    try:
+        parsed = int(str(val if val is not None else default).strip())
+    except (TypeError, ValueError):
+        parsed = default
+    if parsed == -1:
+        return -1
+    return min(50, max(2, parsed))
+
+
 def _normalize_preview_asr_backend(value: str | None, *, default: str = "whisper") -> str:
     normalized = str(value or "").strip().lower() or str(default or "whisper").strip().lower() or "whisper"
     if normalized in {"qwen3_asr", "qwen3-asr"}:
@@ -98,7 +108,7 @@ async def _transcribe_with_optional_language(
         "enable_timestamps": enable_timestamps,
         "silence_aware_split": silence_aware_split,
     }
-    if backend == HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND and qwen3_preview_max_line_length is not None:
+    if backend in {"qwen3_crispasr", HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND} and qwen3_preview_max_line_length is not None:
         kwargs["qwen3_preview_max_line_length"] = qwen3_preview_max_line_length
     try:
         return await engine.transcribe(audio_path, **kwargs)
@@ -251,12 +261,14 @@ async def transcribe_file(
     if normalized_backend == HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND:
         effective_timestamps = False
     effective_preview_max_line_length = None
-    if normalized_backend == HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND:
-        effective_preview_max_line_length = _parse_int_form(
+    if normalized_backend in {"qwen3_crispasr", HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND}:
+        try:
+            configured_preview_max_line_length = int(getattr(state.asr_engine, "qwen3_preview_max_line_length", -1))
+        except Exception:
+            configured_preview_max_line_length = -1
+        effective_preview_max_line_length = _parse_qwen3_preview_max_line_length(
             qwen3_preview_max_line_length,
-            default=int(getattr(state.asr_engine, "qwen3_preview_max_line_length", 20) or 20),
-            minimum=2,
-            maximum=50,
+            default=configured_preview_max_line_length,
         )
 
     suffix = Path(file.filename or "upload.wav").suffix or ".wav"

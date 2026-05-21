@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from difflib import SequenceMatcher
 import gc
+import json
 import math
 from pathlib import Path
 import re
@@ -149,6 +150,7 @@ class ASREngine:
                 raw_text, segments, backend_used = await self._transcribe_whisper_segments(target)
         elif target_backend == "qwen3_crispasr":
             qwen3_enable_timestamps = bool(enable_timestamps) if enable_timestamps is not None else None
+            qwen3_max_line_length = self._normalize_qwen3_preview_max_line_length(qwen3_preview_max_line_length)
             if requested_speaker_labels:
                 self._validate_qwen3_speaker_label_requirements()
                 qwen3_enable_timestamps = True
@@ -156,6 +158,7 @@ class ASREngine:
                 target,
                 enable_timestamps_override=qwen3_enable_timestamps,
                 language_override=requested_language,
+                max_line_length=qwen3_max_line_length,
             )
         else:
             raise ValueError(f"Unsupported ASR backend: {backend}")
@@ -180,6 +183,10 @@ class ASREngine:
                 recovered_segments.append(seg)
             aligned_segments = recovered_segments
             if target_backend == "qwen3_crispasr":
+                aligned_segments, zero_count, zero_repairs = self._repair_qwen3_zero_duration_and_overlaps(aligned_segments)
+                timeline_repairs.extend(zero_repairs)
+                if zero_count:
+                    warnings.append(f"已修复 {zero_count} 个 Qwen3 零时长、引号或重叠时间轴片段。")
                 aligned_segments, tail_merge_count, tail_repairs = self._merge_qwen3_trailing_fragments(aligned_segments)
                 timeline_repairs.extend(tail_repairs)
                 if tail_merge_count:
@@ -188,6 +195,13 @@ class ASREngine:
                 timeline_repairs.extend(short_timing_repairs)
                 if short_timing_count:
                     warnings.append(f"已修复 {short_timing_count} 个 Qwen3 过短时间轴片段。")
+                aligned_segments, weak_split_count, weak_split_repairs = self._split_qwen3_long_segments_by_weak_punctuation(
+                    aligned_segments,
+                    max_line_length=qwen3_max_line_length,
+                )
+                timeline_repairs.extend(weak_split_repairs)
+                if weak_split_count:
+                    warnings.append(f"已按弱标点拆分 {weak_split_count} 个 Qwen3 过长识别片段。")
             if aligned_segments:
                 rebuilt_text = "\n".join(str(seg.get("text", "")).strip() for seg in aligned_segments if str(seg.get("text", "")).strip()).strip()
                 if rebuilt_text:
@@ -331,7 +345,12 @@ class ASREngine:
         if corrected_count:
             warnings.append(f"Whisper 时间轴已矫正 {corrected_count} 个异常过长或过宽的识别片段。")
 
-        preview_max_line_length = min(50, max(2, int(preview_max_line_length or getattr(self, "qwen3_preview_max_line_length", 20) or 20)))
+        configured_preview_max_line_length = (
+            preview_max_line_length
+            if preview_max_line_length is not None
+            else getattr(self, "qwen3_preview_max_line_length", -1)
+        )
+        preview_max_line_length = self._normalize_qwen3_preview_max_line_length(configured_preview_max_line_length)
         qwen_raw_text, qwen_segments, _ = await self._transcribe_crispasr_segments(
             target,
             enable_timestamps_override=False,
@@ -542,6 +561,16 @@ class ASREngine:
         if not math.isfinite(number) or number < 0:
             return None
         return number
+
+    @staticmethod
+    def _normalize_qwen3_preview_max_line_length(value: Any) -> int | None:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None
+        if parsed == -1:
+            return None
+        return min(50, max(2, parsed))
 
     @classmethod
     def _word_time_range(cls, words: Any) -> tuple[float, float] | None:
@@ -2016,6 +2045,325 @@ class ASREngine:
 
         return repaired, repair_count, repairs
 
+    @classmethod
+    def _parse_crispasr_qwen3_json_segments(cls, text: str) -> list[dict[str, Any]]:
+        try:
+            payload = json.loads(str(text or ""))
+        except Exception:
+            return []
+        transcription = payload.get("transcription") if isinstance(payload, dict) else None
+        if not isinstance(transcription, list):
+            return []
+
+        parsed: list[dict[str, Any]] = []
+        for entry in transcription:
+            if not isinstance(entry, dict):
+                continue
+            offsets = entry.get("offsets") if isinstance(entry.get("offsets"), dict) else {}
+            start_ms = cls._coerce_finite_seconds(offsets.get("from"))
+            end_ms = cls._coerce_finite_seconds(offsets.get("to"))
+            start = start_ms / 1000.0 if start_ms is not None else None
+            end = end_ms / 1000.0 if end_ms is not None else None
+            raw_words = entry.get("words")
+            word_values: list[float] = []
+            if isinstance(raw_words, list):
+                for word in raw_words:
+                    if not isinstance(word, dict):
+                        continue
+                    for key in ("t0", "t1"):
+                        value = cls._coerce_finite_seconds(word.get(key))
+                        if value is not None:
+                            word_values.append(value)
+            max_offset_ms = max([value for value in (start_ms, end_ms) if value is not None], default=0.0)
+            max_word_value = max(word_values, default=0.0)
+            word_scale = 0.01 if max_word_value and max_offset_ms and max_word_value * 10 <= max_offset_ms * 1.25 else 0.001
+            words: list[dict[str, Any]] = []
+            if isinstance(raw_words, list):
+                for word in raw_words:
+                    if not isinstance(word, dict):
+                        continue
+                    word_text = str(word.get("text") or "").strip()
+                    t0 = cls._coerce_finite_seconds(word.get("t0"))
+                    t1 = cls._coerce_finite_seconds(word.get("t1"))
+                    if not word_text or t0 is None or t1 is None:
+                        continue
+                    word_start = max(0.0, t0 * word_scale)
+                    word_end = max(word_start, t1 * word_scale)
+                    words.append({"start": word_start, "end": word_end, "text": word_text})
+            segment: dict[str, Any] = {"text": str(entry.get("text") or "").strip(), "qwen3_json_words": words}
+            if start is not None:
+                segment["start"] = start
+            if end is not None:
+                segment["end"] = max(start if start is not None else 0.0, end)
+            parsed.append(segment)
+        return parsed
+
+    @classmethod
+    def _attach_qwen3_json_words_to_segments(
+        cls,
+        segments: list[dict[str, Any]],
+        json_segments: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not segments or not json_segments:
+            return [dict(segment or {}) for segment in segments]
+
+        flat_words: list[dict[str, Any]] = []
+        stream_chars: list[str] = []
+        char_to_word: list[int] = []
+        for json_segment in json_segments:
+            for word in json_segment.get("qwen3_json_words") or []:
+                text = str(word.get("text") or "")
+                normalized = cls._normalize_alignment_text(text)
+                if not normalized:
+                    continue
+                word_index = len(flat_words)
+                flat_words.append(dict(word))
+                for char in normalized:
+                    stream_chars.append(char)
+                    char_to_word.append(word_index)
+        stream = "".join(stream_chars)
+        cursor = 0
+        attached: list[dict[str, Any]] = []
+
+        for segment in segments:
+            item = dict(segment or {})
+            text = str(item.get("text") or "").strip()
+            start = cls._coerce_finite_seconds(item.get("start"))
+            end = cls._coerce_finite_seconds(item.get("end"))
+            matched_words: list[dict[str, Any]] = []
+            if start is not None and end is not None and end > start:
+                low = max(0.0, start - 0.08)
+                high = end + 0.08
+                for word in flat_words:
+                    word_start = cls._coerce_finite_seconds(word.get("start"))
+                    word_end = cls._coerce_finite_seconds(word.get("end"))
+                    if word_start is None or word_end is None:
+                        continue
+                    midpoint = (word_start + word_end) / 2.0
+                    if low <= midpoint <= high and word_end > word_start:
+                        matched_words.append(dict(word))
+            if not matched_words and text and stream and char_to_word:
+                normalized = cls._normalize_alignment_text(text)
+                if normalized:
+                    found = stream.find(normalized, cursor)
+                    if found < 0:
+                        found = stream.find(normalized)
+                    if found >= 0:
+                        end_pos = found + len(normalized)
+                        word_indexes = sorted(set(char_to_word[found:end_pos]))
+                        matched_words = [
+                            dict(flat_words[index])
+                            for index in word_indexes
+                            if 0 <= index < len(flat_words)
+                            and cls._coerce_finite_seconds(flat_words[index].get("end")) is not None
+                            and cls._coerce_finite_seconds(flat_words[index].get("start")) is not None
+                            and float(flat_words[index]["end"]) > float(flat_words[index]["start"])
+                        ]
+                        cursor = max(cursor, end_pos)
+            if matched_words:
+                item["words"] = matched_words
+            attached.append(item)
+        return attached
+
+    @classmethod
+    def _repair_qwen3_zero_duration_and_overlaps(
+        cls,
+        segments: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]]]:
+        source = [dict(segment or {}) for segment in segments]
+        repaired: list[dict[str, Any]] = []
+        repairs: list[dict[str, Any]] = []
+        quote_openers = set("“\"'‘（([{《【「『")
+        quote_closers = set("”\"'’）)]}》】」』")
+        punctuation_or_quote = set("，,。.!！？?；;、…“”\"'‘’（）()[]{}《》【】「」『』")
+        sentence_end = set("。.!！？?")
+
+        def compact(value: str) -> str:
+            return re.sub(r"\s+", "", value)
+
+        def is_punctuation_fragment(value: str) -> bool:
+            text = compact(value)
+            return bool(text) and all(char in punctuation_or_quote for char in text)
+
+        def is_open_quote_fragment(value: str) -> bool:
+            text = compact(value)
+            return bool(text) and all(char in quote_openers for char in text)
+
+        def is_closing_quote_fragment(value: str) -> bool:
+            text = compact(value)
+            if not text:
+                return False
+            if all(char in quote_closers for char in text):
+                return True
+            return text[0] in sentence_end and all(char in sentence_end or char in quote_closers for char in text)
+
+        def append_text(target: dict[str, Any], text: str) -> None:
+            target["text"] = cls._join_tokens_for_language(str(target.get("text", "")).strip(), text)
+
+        def prepend_text(target: dict[str, Any], text: str) -> None:
+            target["text"] = cls._join_tokens_for_language(text, str(target.get("text", "")).strip())
+
+        def merge_words(target: dict[str, Any], item: dict[str, Any], *, prepend: bool = False) -> None:
+            target_words = list(target.get("words") or [])
+            item_words = list(item.get("words") or [])
+            if not item_words:
+                return
+            target["words"] = item_words + target_words if prepend else target_words + item_words
+
+        index = 0
+        while index < len(source):
+            item = dict(source[index])
+            text = str(item.get("text", "") or "").strip()
+            if not text:
+                index += 1
+                continue
+            start = cls._coerce_finite_seconds(item.get("start"))
+            end = cls._coerce_finite_seconds(item.get("end"))
+            if start is None:
+                start = 0.0
+            if end is None:
+                end = start
+
+            if is_open_quote_fragment(text) and index + 1 < len(source):
+                prepend_text(source[index + 1], text)
+                merge_words(source[index + 1], item, prepend=True)
+                repairs.append({"kind": "qwen3_quote_fragment_merge", "moved_text": text, "direction": "next"})
+                index += 1
+                continue
+
+            zero_or_negative = end <= start
+            previous = repaired[-1] if repaired else None
+            previous_end = cls._coerce_finite_seconds(previous.get("end")) if previous else None
+            gap_to_previous = start - previous_end if previous_end is not None else None
+            should_merge_previous = previous is not None and (
+                is_punctuation_fragment(text)
+                or is_closing_quote_fragment(text)
+                or (zero_or_negative and len(compact(text)) <= 8 and gap_to_previous is not None and gap_to_previous <= 0.35)
+            )
+            if should_merge_previous and previous is not None:
+                append_text(previous, text)
+                merge_words(previous, item)
+                if end > start and not is_punctuation_fragment(text):
+                    previous["end"] = max(float(previous.get("end") or start), end)
+                repairs.append(
+                    {
+                        "kind": "qwen3_quote_fragment_merge" if is_punctuation_fragment(text) else "qwen3_zero_duration_merge",
+                        "moved_text": text,
+                        "direction": "previous",
+                    }
+                )
+                index += 1
+                continue
+
+            if previous_end is not None and start < previous_end:
+                before_start = start
+                start = previous_end + 0.001
+                item["start"] = start
+                repairs.append(
+                    {
+                        "kind": "qwen3_overlap_shift",
+                        "text": text,
+                        "start_before": before_start,
+                        "start_after": start,
+                    }
+                )
+            if end <= start:
+                word_range = cls._word_time_range(item.get("words"))
+                if word_range and word_range[1] > word_range[0]:
+                    end = max(start + 0.001, word_range[1] + TIMELINE_WORD_PADDING_SEC)
+                else:
+                    end = start + min(0.8, max(0.16, cls._estimate_speaking_seconds(text)))
+                item["end"] = end
+                repairs.append({"kind": "qwen3_min_duration", "text": text, "start": start, "end_after": end})
+            repaired.append(item)
+            index += 1
+
+        return repaired, len(repairs), repairs
+
+    @classmethod
+    def _split_qwen3_long_segments_by_weak_punctuation(
+        cls,
+        segments: list[dict[str, Any]],
+        *,
+        max_line_length: int | None,
+    ) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]]]:
+        if max_line_length is None:
+            return [dict(segment or {}) for segment in segments], 0, []
+        try:
+            limit = min(50, max(2, int(max_line_length or 20)))
+        except Exception:
+            return [dict(segment or {}) for segment in segments], 0, []
+
+        output: list[dict[str, Any]] = []
+        repairs: list[dict[str, Any]] = []
+        split_count = 0
+        for segment in segments:
+            item = dict(segment or {})
+            text = str(item.get("text", "") or "").strip()
+            if not text or cls._preview_line_text_length(text) <= limit:
+                output.append(item)
+                continue
+            parts = [part for part in cls._split_preview_text_by_natural_breaks(text, limit) if part.strip()]
+            if parts and text[-1:] in "。！？!?" and "".join(parts) != text and "".join(parts) + text[-1] == text:
+                parts[-1] = cls._join_tokens_for_language(parts[-1], text[-1])
+            if len(parts) <= 1:
+                output.append(item)
+                continue
+
+            start = cls._coerce_finite_seconds(item.get("start"))
+            end = cls._coerce_finite_seconds(item.get("end"))
+            if start is None or end is None or end <= start:
+                output.append(item)
+                continue
+            duration = max(0.001, end - start)
+            words = cls._normalize_word_items(item.get("words"))
+            cursor = 0
+            consumed_chars = 0
+            total_chars = sum(max(1, cls._preview_line_text_length(part)) for part in parts)
+            created: list[dict[str, Any]] = []
+            for index, part in enumerate(parts):
+                part_chars = max(1, cls._preview_line_text_length(part))
+                part_item = {**item, "text": part}
+                part_words: list[dict[str, Any]] = []
+                if words:
+                    target_chars = consumed_chars + part_chars
+                    word_chars = 0
+                    while cursor < len(words) and (not part_words or word_chars < part_chars):
+                        word = words[cursor]
+                        word_len = max(1, cls._preview_line_text_length(str(word.get("text") or "")))
+                        part_words.append(word)
+                        word_chars += word_len
+                        cursor += 1
+                        if consumed_chars + word_chars >= target_chars and index + 1 < len(parts):
+                            break
+                    if part_words:
+                        part_item["words"] = part_words
+                        part_item["start"] = max(start, float(part_words[0]["start"]) - TIMELINE_WORD_PADDING_SEC)
+                        part_item["end"] = min(end, float(part_words[-1]["end"]) + TIMELINE_WORD_PADDING_SEC)
+                if not part_words:
+                    part_start = start + duration * consumed_chars / max(1, total_chars)
+                    next_chars = consumed_chars + part_chars
+                    part_end = start + duration * next_chars / max(1, total_chars)
+                    part_item["start"] = part_start
+                    part_item["end"] = part_end
+                consumed_chars += part_chars
+                if created:
+                    previous_end = cls._coerce_finite_seconds(created[-1].get("end"))
+                    part_start = cls._coerce_finite_seconds(part_item.get("start"))
+                    if previous_end is not None and part_start is not None and part_start <= previous_end:
+                        part_item["start"] = previous_end + 0.001
+                    part_end = cls._coerce_finite_seconds(part_item.get("end"))
+                    if part_end is not None and part_end <= float(part_item["start"]):
+                        part_item["end"] = float(part_item["start"]) + 0.001
+                created.append(part_item)
+            if len(created) <= 1:
+                output.append(item)
+                continue
+            output.extend(created)
+            split_count += len(created) - 1
+            repairs.append({"kind": "qwen3_weak_punctuation_split", "source_text": text, "parts": parts})
+        return output, split_count, repairs
+
     async def _transcribe_crispasr_segments(
         self,
         target: Path,
@@ -2043,7 +2391,9 @@ class ASREngine:
 
         work_dir = Path(tempfile.mkdtemp(prefix="qwen3_asr_", dir=settings.output_dir))
         normalized_wav = work_dir / "input_16k.wav"
-        srt_output = work_dir / "output.srt"
+        output_stem = work_dir / "output"
+        srt_output = output_stem.with_suffix(".srt")
+        json_output = output_stem.with_name(f"{output_stem.name}_json.json")
         try:
             cmd_decode = [
                 "ffmpeg",
@@ -2082,7 +2432,7 @@ class ASREngine:
                 cmd.extend(["-t", str(threads)])
             if language:
                 cmd.extend(["-l", language])
-            if split_on_punctuation:
+            if split_on_punctuation and not use_timestamps:
                 cmd.append("--split-on-punct")
             if max_line_length is not None:
                 line_length = max(1, int(max_line_length or 1))
@@ -2093,9 +2443,7 @@ class ASREngine:
                     raise RuntimeError(f"Qwen3-ForcedAligner GGUF 模型不存在: {forced_aligner_path}")
                 cmd.extend(["-am", str(forced_aligner_path)])
             if use_timestamps:
-                cmd.extend(["-osrt"])
-                if max_line_length is None:
-                    cmd.extend(["-ml", "1"])
+                cmd.extend(["--vad", "-osrt", "-ojf", "--split-on-punct", "-of", str(output_stem)])
 
             try:
                 proc = await asyncio.to_thread(
@@ -2116,15 +2464,26 @@ class ASREngine:
 
             raw_output = (proc.stdout or "").strip()
             segments: list[dict[str, Any]] = []
+            json_segments: list[dict[str, Any]] = []
             if use_timestamps:
                 if srt_output.exists():
                     srt_text = srt_output.read_text(encoding="utf-8", errors="ignore")
                     segments = self._parse_srt_segments(srt_text)
+                json_candidates = [json_output]
+                json_candidates.extend(sorted(path for path in work_dir.glob("*_json.json") if path != json_output))
+                for candidate in json_candidates:
+                    if not candidate.exists():
+                        continue
+                    json_segments = self._parse_crispasr_qwen3_json_segments(candidate.read_text(encoding="utf-8", errors="ignore"))
+                    if json_segments:
+                        break
                 if not segments:
                     segments = self._parse_srt_segments(raw_output)
                 if not segments:
                     token_segments = self._parse_inline_timestamp_tokens(raw_output)
                     segments = self._merge_timestamp_tokens(token_segments)
+                if segments and json_segments:
+                    segments = self._attach_qwen3_json_words_to_segments(segments, json_segments)
                 raw_text = "\n".join(seg.get("text", "").strip() for seg in segments if seg.get("text", "").strip()).strip()
                 if not raw_text:
                     raw_text = raw_output.strip()
@@ -2147,11 +2506,12 @@ class ASREngine:
                 segments = [{"start": None, "end": None, "text": raw_text}]
             return raw_text, segments, "qwen3_crispasr"
         finally:
-            for path in (normalized_wav, srt_output):
-                try:
-                    path.unlink(missing_ok=True)
-                except Exception:
-                    pass
+            try:
+                for path in work_dir.iterdir():
+                    if path.is_file():
+                        path.unlink(missing_ok=True)
+            except Exception:
+                pass
             try:
                 work_dir.rmdir()
             except Exception:
