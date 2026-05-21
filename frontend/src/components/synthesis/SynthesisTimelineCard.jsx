@@ -52,6 +52,7 @@ export default function SynthesisTimelineCard({
   isAutoPlay,
   stop,
   pushToast,
+  className = "",
 }) {
   const timelineRef = useRef(null);
   const selectionAnchorSegmentIdRef = useRef(null);
@@ -105,7 +106,7 @@ export default function SynthesisTimelineCard({
   }
 
   return (
-    <GlassCard>
+    <GlassCard className={className}>
       <h2 className="cardTitle">
         分段时间线
         {totalVisibleSegments ? (

@@ -1374,7 +1374,7 @@ export default function ScriptEditorPage() {
   }
 
   return (
-    <div className="pageGrid sidebarLayout">
+    <div className="pageGrid sidebarLayout scriptEditorViewportLayout">
       {/* Left: character panel */}
       <ScriptSidebarColumn
         characters={characters}
@@ -1433,7 +1433,7 @@ export default function ScriptEditorPage() {
       />
 
       {/* Right: segment list */}
-      <GlassCard>
+      <GlassCard className="scriptSegmentViewportCard">
         <div className="sectionHeader">
           <div className="sectionHeaderLeft">
             <h2 className="cardTitle">片段列表</h2>

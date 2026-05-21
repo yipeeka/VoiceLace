@@ -19,6 +19,7 @@ export default function SynthesisFullAudioCard({
   seekToSeconds = null,
   seekSignal = 0,
   playOnSeek = false,
+  className = "",
 }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [playSignal, setPlaySignal] = useState(0);
@@ -48,7 +49,7 @@ export default function SynthesisFullAudioCard({
   }
 
   return (
-    <GlassCard>
+    <GlassCard className={className}>
       <h2 className="cardTitle">完整音频</h2>
       <SynthesisWaveSurfer
         projectId={projectId}
@@ -57,7 +58,7 @@ export default function SynthesisFullAudioCard({
         segments={segments}
         gapDurationMs={gapDurationMs}
         useSourceTimeline={useSourceTimeline}
-        height={80}
+        height={48}
         onCurrentTimeChange={onCurrentTimeChange}
         autoPlaySignal={playSignal}
         pauseSignal={pauseSignal}

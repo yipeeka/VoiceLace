@@ -1186,7 +1186,7 @@ export default function SynthesisPage() {
   }, [setProjectSaveAction, clearProjectSaveAction, handleSaveProjectFile]);
 
   return (
-    <div className="pageGrid" style={{ gap: 20 }}>
+    <div className="pageGrid synthesisPageViewportLayout" style={{ gap: 20 }}>
       {/* Control row */}
       <div className="pageGrid twoCols" style={{ alignItems: "stretch" }}>
         <div className="listStack">
@@ -1259,105 +1259,109 @@ export default function SynthesisPage() {
         />
       </div>
 
-      {/* Full audio player */}
-      <SynthesisFullAudioCard
-        projectId={currentProject?.id}
-        fullAudioUrl={fullAudioUrl}
-        audioVariant={audioVariant}
-        segments={segments}
-        gapDurationMs={Number(config.gap_duration_ms || 300)}
-        useSourceTimeline={useSourceTimeline}
-        onCurrentTimeChange={setFullAudioCurrentTime}
-        seekToSeconds={fullAudioSeekSeconds}
-        seekSignal={fullAudioSeekSignal}
-      />
-
-      <div className="pageGrid sidebarLayout">
-        <ScriptSidebarColumn
-          characters={characters}
-          totalSegments={segments.length}
-          activeSpeakerFilter={activeSpeakerFilter}
-          onSelectSpeaker={setActiveSpeakerFilter}
-          hasUnsavedChanges={hasUnsavedChanges}
-          error={scriptError}
-          newSegment={newSegment}
-          newSegmentSpeakerOptions={newSegmentSpeakerOptions}
-          canEdit={Boolean(currentProject?.id)}
-          isSaving={isScriptSaving}
-          insertAfterLabel={insertAfterLabel}
-          onClearInsertAnchor={() => setInsertAfterSegmentId(null)}
-          onNewSegmentFieldChange={(field, value) => setNewSegment((current) => ({ ...current, [field]: value }))}
-          onAddSegment={handleAddSegment}
-          addButtonLabel="+ 添加片段"
-          actionContent={
-            <>
-              <div className="controlRow" style={{ gap: 8, flexWrap: "wrap" }}>
-                <Button variant="ghost" icon={Undo2} onClick={handleUndo} disabled={!undoStack.length}>
-                  撤销
-                </Button>
-                <Button variant="ghost" icon={Redo2} onClick={handleRedo} disabled={!redoStack.length}>
-                  重做
-                </Button>
-              </div>
-              <Button
-                variant="primary"
-                disabled={!currentProject?.id || isScriptSaving || !hasUnsavedChanges}
-                onClick={handleSaveScript}
-              >
-                {isScriptSaving ? "保存中…" : hasUnsavedChanges ? "保存剧本" : "已保存"}
-              </Button>
-              <Button variant="secondary" onClick={() => setDiffPreviewOpen(true)} disabled={!hasUnsavedChanges}>
-                查看差异
-              </Button>
-            </>
-          }
+      <div className="synthesisViewportWorkArea">
+        {/* Full audio player */}
+        <SynthesisFullAudioCard
+          className="synthesisFullAudioViewportCard"
+          projectId={currentProject?.id}
+          fullAudioUrl={fullAudioUrl}
+          audioVariant={audioVariant}
+          segments={segments}
+          gapDurationMs={Number(config.gap_duration_ms || 300)}
+          useSourceTimeline={useSourceTimeline}
+          onCurrentTimeChange={setFullAudioCurrentTime}
+          seekToSeconds={fullAudioSeekSeconds}
+          seekSignal={fullAudioSeekSignal}
         />
 
-        <SynthesisTimelineCard
-          API_ORIGIN={API_ORIGIN}
-          sensors={sensors}
-          canReorderTimeline={canReorderTimeline}
-          onTimelineDragEnd={handleTimelineDragEnd}
-          segments={visibleSegments}
-          totalVisibleSegments={visibleSegments.length}
-          activeSpeakerFilter={activeSpeakerFilter}
-          activeStatusFilter={activeStatusFilter}
-          statusCounts={statusCounts}
-          onStatusFilterChange={setActiveStatusFilter}
-          shouldShowSegmentTimeline={shouldShowSegmentTimeline}
-          selectedSegmentIds={selectedSegmentIds}
-          setSelectedSegmentIds={setSelectedSegmentIds}
-          staleTargetIds={visibleStaleTargetIds}
-          recommendedRegenerateIds={visibleRecommendedRegenerateIds}
-          isRunning={isRunning}
-          handleRegenerateSelected={handleRegenerateSelected}
-          canRebuildFullAudio={canRebuildFullAudio}
-          fullAudioRebuildRequired={fullAudioRebuildRequired}
-          fullAudioRebuildHint={fullAudioRebuildHint}
-          handleRebuildFullAudio={handleRebuildFullAudio}
-          staleItemBySegmentId={staleItemBySegmentId}
-          getSegmentStaleLabel={getSegmentStaleLabel}
-          segmentTimings={segmentTimings}
-          formatTimeMs={formatTimeMs}
-          currentSegmentId={highlightedSegmentId}
-          recentlyUpdatedSegmentId={recentlyUpdatedSegmentId}
-          editingSegmentId={editingSegmentId}
-          segmentDraft={segmentDraft}
-          setSegmentDraft={setSegmentDraft}
-          isScriptSaving={isScriptSaving}
-          beginEditSegment={beginEditSegment}
-          cancelEditSegment={cancelEditSegment}
-          saveEditedSegment={saveEditedSegment}
-          handleSingleSegmentSynthesis={handleSingleSegmentSynthesis}
-          handleDeleteSegment={handleDeleteSegment}
-          setInsertAfterSegmentId={setInsertAfterSegmentId}
-          insertAfterSegmentId={insertAfterSegmentId}
-          onLocateFullAudioSegment={handleLocateFullAudioSegment}
-          playFrom={playFrom}
-          isAutoPlay={isAutoPlay}
-          stop={stop}
-          pushToast={pushToast}
-        />
+        <div className="pageGrid sidebarLayout synthesisSegmentViewportLayout">
+          <ScriptSidebarColumn
+            characters={characters}
+            totalSegments={segments.length}
+            activeSpeakerFilter={activeSpeakerFilter}
+            onSelectSpeaker={setActiveSpeakerFilter}
+            hasUnsavedChanges={hasUnsavedChanges}
+            error={scriptError}
+            newSegment={newSegment}
+            newSegmentSpeakerOptions={newSegmentSpeakerOptions}
+            canEdit={Boolean(currentProject?.id)}
+            isSaving={isScriptSaving}
+            insertAfterLabel={insertAfterLabel}
+            onClearInsertAnchor={() => setInsertAfterSegmentId(null)}
+            onNewSegmentFieldChange={(field, value) => setNewSegment((current) => ({ ...current, [field]: value }))}
+            onAddSegment={handleAddSegment}
+            addButtonLabel="+ 添加片段"
+            actionContent={
+              <>
+                <div className="controlRow" style={{ gap: 8, flexWrap: "wrap" }}>
+                  <Button variant="ghost" icon={Undo2} onClick={handleUndo} disabled={!undoStack.length}>
+                    撤销
+                  </Button>
+                  <Button variant="ghost" icon={Redo2} onClick={handleRedo} disabled={!redoStack.length}>
+                    重做
+                  </Button>
+                </div>
+                <Button
+                  variant="primary"
+                  disabled={!currentProject?.id || isScriptSaving || !hasUnsavedChanges}
+                  onClick={handleSaveScript}
+                >
+                  {isScriptSaving ? "保存中…" : hasUnsavedChanges ? "保存剧本" : "已保存"}
+                </Button>
+                <Button variant="secondary" onClick={() => setDiffPreviewOpen(true)} disabled={!hasUnsavedChanges}>
+                  查看差异
+                </Button>
+              </>
+            }
+          />
+
+          <SynthesisTimelineCard
+            className="synthesisTimelineViewportCard"
+            API_ORIGIN={API_ORIGIN}
+            sensors={sensors}
+            canReorderTimeline={canReorderTimeline}
+            onTimelineDragEnd={handleTimelineDragEnd}
+            segments={visibleSegments}
+            totalVisibleSegments={visibleSegments.length}
+            activeSpeakerFilter={activeSpeakerFilter}
+            activeStatusFilter={activeStatusFilter}
+            statusCounts={statusCounts}
+            onStatusFilterChange={setActiveStatusFilter}
+            shouldShowSegmentTimeline={shouldShowSegmentTimeline}
+            selectedSegmentIds={selectedSegmentIds}
+            setSelectedSegmentIds={setSelectedSegmentIds}
+            staleTargetIds={visibleStaleTargetIds}
+            recommendedRegenerateIds={visibleRecommendedRegenerateIds}
+            isRunning={isRunning}
+            handleRegenerateSelected={handleRegenerateSelected}
+            canRebuildFullAudio={canRebuildFullAudio}
+            fullAudioRebuildRequired={fullAudioRebuildRequired}
+            fullAudioRebuildHint={fullAudioRebuildHint}
+            handleRebuildFullAudio={handleRebuildFullAudio}
+            staleItemBySegmentId={staleItemBySegmentId}
+            getSegmentStaleLabel={getSegmentStaleLabel}
+            segmentTimings={segmentTimings}
+            formatTimeMs={formatTimeMs}
+            currentSegmentId={highlightedSegmentId}
+            recentlyUpdatedSegmentId={recentlyUpdatedSegmentId}
+            editingSegmentId={editingSegmentId}
+            segmentDraft={segmentDraft}
+            setSegmentDraft={setSegmentDraft}
+            isScriptSaving={isScriptSaving}
+            beginEditSegment={beginEditSegment}
+            cancelEditSegment={cancelEditSegment}
+            saveEditedSegment={saveEditedSegment}
+            handleSingleSegmentSynthesis={handleSingleSegmentSynthesis}
+            handleDeleteSegment={handleDeleteSegment}
+            setInsertAfterSegmentId={setInsertAfterSegmentId}
+            insertAfterSegmentId={insertAfterSegmentId}
+            onLocateFullAudioSegment={handleLocateFullAudioSegment}
+            playFrom={playFrom}
+            isAutoPlay={isAutoPlay}
+            stop={stop}
+            pushToast={pushToast}
+          />
+        </div>
       </div>
       <ScriptDiffPreviewDialog open={diffPreviewOpen} onOpenChange={setDiffPreviewOpen} diff={scriptDiff} />
       <ExportWizardDialog
