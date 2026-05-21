@@ -18,6 +18,14 @@ import { useScriptStore } from "../stores/useScriptStore";
 import { useSynthesisStore } from "../stores/useSynthesisStore";
 import { useUiStore } from "../stores/useUiStore";
 import { API_ORIGIN, api } from "../utils/api";
+import {
+  areArrangementDraftsEqual,
+  buildArrangementDraft,
+  buildScriptSegmentsWithArrangement,
+  getArrangementWarnings,
+  hasAnyArrangementSourceTiming,
+  normalizeArrangementDraft,
+} from "../utils/audioArrangement";
 import { buildProjectFilePayload, saveProjectFile } from "../utils/projectFile";
 import { buildSegmentEditorDraft, createSegmentDraft, normalizeSegmentFromEditorDraft } from "../utils/segmentEditorState";
 import { hasEditingDraftChanges } from "../utils/scriptEditorDirty";
@@ -103,6 +111,8 @@ export default function SynthesisPage() {
   const [fullAudioCurrentTime, setFullAudioCurrentTime] = useState(0);
   const [fullAudioSeekSeconds, setFullAudioSeekSeconds] = useState(0);
   const [fullAudioSeekSignal, setFullAudioSeekSignal] = useState(0);
+  const [arrangementDraft, setArrangementDraft] = useState(null);
+  const [arrangementEdited, setArrangementEdited] = useState(false);
   const [diffPreviewOpen, setDiffPreviewOpen] = useState(false);
   const [isUploadingPostAsset, setIsUploadingPostAsset] = useState(false);
   const [expandedSynthesisPanel, setExpandedSynthesisPanel] = useState(queryState.panel);
@@ -208,15 +218,23 @@ export default function SynthesisPage() {
     }));
   }, [currentProject?.id, currentProject?.script?.metadata?.dubbing_source, currentProject?.script?.metadata?.subtitle_source, currentProject?.synthesis_config]);
 
+  const hasEditableSourceTimeline = useMemo(
+    () => hasAnyArrangementSourceTiming(draftScript?.segments || []),
+    [draftScript?.segments],
+  );
   const isDubbingSourceProject = useMemo(
-    () => Boolean(currentProject?.script?.metadata?.dubbing_source || currentProject?.script?.metadata?.subtitle_source),
-    [currentProject?.script?.metadata?.dubbing_source, currentProject?.script?.metadata?.subtitle_source],
+    () => Boolean(
+      currentProject?.script?.metadata?.dubbing_source ||
+      currentProject?.script?.metadata?.subtitle_source ||
+      hasEditableSourceTimeline
+    ),
+    [currentProject?.script?.metadata?.dubbing_source, currentProject?.script?.metadata?.subtitle_source, hasEditableSourceTimeline],
   );
   const useSourceTimeline = useMemo(
     () => {
-      return Boolean(isDubbingSourceProject && config?.timeline_lock_enabled);
+      return Boolean((isDubbingSourceProject || hasEditableSourceTimeline) && config?.timeline_lock_enabled);
     },
-    [config?.timeline_lock_enabled, isDubbingSourceProject],
+    [config?.timeline_lock_enabled, hasEditableSourceTimeline, isDubbingSourceProject],
   );
 
   useEffect(() => {
@@ -238,6 +256,8 @@ export default function SynthesisPage() {
       setFullAudioCurrentTime(0);
       setFullAudioSeekSeconds(0);
       setFullAudioSeekSignal(0);
+      setArrangementDraft(null);
+      setArrangementEdited(false);
       setExpandedSynthesisPanel("synthesis");
       if (updatedRowTimerRef.current) {
         clearTimeout(updatedRowTimerRef.current);
@@ -658,6 +678,56 @@ export default function SynthesisPage() {
     });
     return timings;
   }, [segments, config.gap_duration_ms, resolvedSegmentDurations, useSourceTimeline]);
+
+  const defaultArrangementDraft = useMemo(() => buildArrangementDraft({
+    segments,
+    gapDurationMs: Number(config.gap_duration_ms || 300),
+    useSourceTimeline,
+    bgmOffsetMs: Number(config.bgm_track?.offset_ms || 0),
+    ambienceOffsetMs: Number(config.ambience_track?.offset_ms || 0),
+  }), [
+    segments,
+    config.gap_duration_ms,
+    config.bgm_track?.offset_ms,
+    config.ambience_track?.offset_ms,
+    useSourceTimeline,
+  ]);
+
+  const arrangementDirty = useMemo(() => {
+    if (!arrangementDraft || !arrangementEdited) {
+      return false;
+    }
+    return !areArrangementDraftsEqual(
+      { ...arrangementDraft, tracks: defaultArrangementDraft.tracks },
+      defaultArrangementDraft,
+    );
+  }, [arrangementDraft, arrangementEdited, defaultArrangementDraft]);
+
+  const arrangementWarnings = useMemo(
+    () => getArrangementWarnings(arrangementDraft || defaultArrangementDraft),
+    [arrangementDraft, defaultArrangementDraft],
+  );
+
+  useEffect(() => {
+    setArrangementDraft((current) => {
+      if (!current || !arrangementEdited) {
+        return defaultArrangementDraft;
+      }
+      const currentIds = (current.segments || []).map((item) => item.segmentId).join("|");
+      const defaultIds = (defaultArrangementDraft.segments || []).map((item) => item.segmentId).join("|");
+      if (currentIds !== defaultIds) {
+        return defaultArrangementDraft;
+      }
+      const comparable = { ...current, tracks: defaultArrangementDraft.tracks };
+      if (areArrangementDraftsEqual(comparable, defaultArrangementDraft)) {
+        return defaultArrangementDraft;
+      }
+      return {
+        ...current,
+        tracks: defaultArrangementDraft.tracks,
+      };
+    });
+  }, [arrangementEdited, defaultArrangementDraft]);
 
   const { isAutoPlay, currentSegmentId, playFrom, stop } = usePlaybackQueue(visibleSegments);
   const fullAudioCurrentSegmentId = useMemo(() => {
@@ -1092,6 +1162,35 @@ export default function SynthesisPage() {
     pushToast({ title: `${assetType === "bgm" ? "背景音乐" : "环境音"}已移除`, tone: "success" });
   }
 
+  function handleResetArrangementDraft() {
+    setArrangementDraft(defaultArrangementDraft);
+    setArrangementEdited(false);
+    pushToast({ title: "已重置编排预览", tone: "default" });
+  }
+
+  function handleArrangementDraftChange(nextDraft) {
+    setArrangementDraft(nextDraft);
+    setArrangementEdited(true);
+  }
+
+  function handleApplyArrangementDraft() {
+    if (!arrangementDraft || !draftScript?.segments?.length) {
+      return;
+    }
+    const normalizedDraft = normalizeArrangementDraft(arrangementDraft);
+    const changedCount = normalizedDraft.segments.length;
+    applyDraftMutation((current) => ({
+      ...current,
+      segments: buildScriptSegmentsWithArrangement(current.segments || [], normalizedDraft),
+    }));
+    setConfig({ timeline_lock_enabled: true });
+    setEditingSegmentId(null);
+    setSegmentDraft(null);
+    setArrangementDraft(normalizedDraft);
+    setArrangementEdited(false);
+    pushToast({ title: `已将 ${changedCount} 个片段的时间窗写入剧本草稿，保存剧本后生效`, tone: "success" });
+  }
+
   async function handleSingleSegmentSynthesis(segmentId) {
     if (guardUnsavedChanges("重新生成")) {
       return;
@@ -1263,6 +1362,7 @@ export default function SynthesisPage() {
         {/* Full audio player */}
         <SynthesisFullAudioCard
           className="synthesisFullAudioViewportCard"
+          currentProject={currentProject}
           projectId={currentProject?.id}
           fullAudioUrl={fullAudioUrl}
           audioVariant={audioVariant}
@@ -1272,6 +1372,22 @@ export default function SynthesisPage() {
           onCurrentTimeChange={setFullAudioCurrentTime}
           seekToSeconds={fullAudioSeekSeconds}
           seekSignal={fullAudioSeekSignal}
+          fullAudioCurrentTime={fullAudioCurrentTime}
+          arrangementDraft={arrangementDraft}
+          arrangementDirty={arrangementDirty}
+          arrangementWarnings={arrangementWarnings}
+          onArrangementDraftChange={handleArrangementDraftChange}
+          onApplyArrangementDraft={handleApplyArrangementDraft}
+          onResetArrangementDraft={handleResetArrangementDraft}
+          config={config}
+          onSetConfig={setConfig}
+          isRunning={isRunning}
+          isUploadingPostAsset={isUploadingPostAsset}
+          bgmPreviewUrl={bgmPreviewUrl}
+          ambiencePreviewUrl={ambiencePreviewUrl}
+          onUploadPostprocessAsset={handleUploadPostprocessAsset}
+          onClearPostprocessAsset={handleClearPostprocessAsset}
+          onExtractBackground={handleExtractBackground}
         />
 
         <div className="pageGrid sidebarLayout synthesisSegmentViewportLayout">

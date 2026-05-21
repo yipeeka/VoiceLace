@@ -62,11 +62,18 @@ export default function SynthesisWaveSurfer({
   seekSignal = 0,
   playOnSeek = false,
   onPlayStateChange = null,
+  onDurationChange = null,
+  onWaveformSyncChange = null,
+  externalScrollLeft = 0,
+  externalScrollSignal = 0,
+  children = null,
 }) {
   const containerRef = useRef(null);
   const wavesurferRef = useRef(null);
   const regionWarningLoggedRef = useRef(false);
   const readyRef = useRef(false);
+  const onDurationChangeRef = useRef(onDurationChange);
+  const onWaveformSyncChangeRef = useRef(onWaveformSyncChange);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -76,6 +83,39 @@ export default function SynthesisWaveSurfer({
   const [waveformPayload, setWaveformPayload] = useState({ data: [], duration_ms: 0, level: 1024 });
   const [waveformError, setWaveformError] = useState("");
   const [forcePlainLoad, setForcePlainLoad] = useState(false);
+
+  useEffect(() => {
+    onDurationChangeRef.current = onDurationChange;
+  }, [onDurationChange]);
+
+  useEffect(() => {
+    onWaveformSyncChangeRef.current = onWaveformSyncChange;
+  }, [onWaveformSyncChange]);
+
+  function emitWaveformSync(ws) {
+    if (!ws || typeof onWaveformSyncChangeRef.current !== "function") return;
+    const durationSeconds = Number(ws.getDuration?.() || 0);
+    const wrapper = ws.getWrapper?.();
+    const scrollContainer = wrapper?.parentElement || null;
+    const scrollWidth = Math.max(
+      Number(wrapper?.scrollWidth || 0),
+      Number(scrollContainer?.scrollWidth || 0),
+    );
+    const clientWidth = Math.max(
+      Number(scrollContainer?.clientWidth || 0),
+      Number(wrapper?.clientWidth || 0),
+    );
+    const scrollLeft = Number.isFinite(Number(ws.getScroll?.()))
+      ? Number(ws.getScroll())
+      : Number(scrollContainer?.scrollLeft || 0);
+    onWaveformSyncChangeRef.current({
+      durationSeconds,
+      scrollLeft: Math.max(0, scrollLeft),
+      scrollWidth,
+      clientWidth,
+      pixelsPerSecond: durationSeconds > 0 && scrollWidth > 0 ? scrollWidth / durationSeconds : 0,
+    });
+  }
 
   useEffect(() => {
     if (typeof onCurrentTimeChange === "function") {
@@ -191,6 +231,7 @@ export default function SynthesisWaveSurfer({
 
     let ws = null;
     let regionsPlugin = null;
+    let disposed = false;
 
     try {
       regionsPlugin = RegionsPlugin.create();
@@ -223,23 +264,36 @@ export default function SynthesisWaveSurfer({
         ],
       });
 
-      if (!forcePlainLoad && precomputedChannelData && precomputedDurationSec) {
-        ws.load(audioUrl, [precomputedChannelData], precomputedDurationSec);
-      } else {
-        ws.load(audioUrl);
+      const loadPromise = !forcePlainLoad && precomputedChannelData && precomputedDurationSec
+        ? ws.load(audioUrl, [precomputedChannelData], precomputedDurationSec)
+        : ws.load(audioUrl);
+      if (loadPromise && typeof loadPromise.catch === "function") {
+        loadPromise.catch((err) => {
+          if (disposed) {
+            return;
+          }
+          const message = String(err?.message || err || "").toLowerCase();
+          if (message.includes("abort") || message.includes("destroy")) {
+            return;
+          }
+          setWaveformError("WaveSurfer 初始化失败，建议重试或刷新页面。");
+        });
       }
     } catch {
       return undefined;
     }
 
     ws.on("ready", () => {
-      setDuration(ws.getDuration());
+      if (disposed) return;
+      const nextDuration = ws.getDuration();
+      setDuration(nextDuration);
+      onDurationChangeRef.current?.(nextDuration);
       setIsReady(true);
       readyRef.current = true;
       setWaveformError("");
+      requestAnimationFrame(() => emitWaveformSync(ws));
 
       // Regions are decorative only. If region rendering fails, do not block playback.
-      let regionRenderFailed = false;
       regionConfig.forEach((config) => {
         try {
           const region = regionsPlugin.addRegion(config);
@@ -254,7 +308,6 @@ export default function SynthesisWaveSurfer({
             contentEl.title = config.text;
           }
         } catch (error) {
-          regionRenderFailed = true;
           if (import.meta?.env?.DEV && !regionWarningLoggedRef.current) {
             regionWarningLoggedRef.current = true;
             // Non-blocking diagnostics in development only.
@@ -262,10 +315,6 @@ export default function SynthesisWaveSurfer({
           }
         }
       });
-
-      if (regionRenderFailed) {
-        setWaveformError("分段标注暂不可用，已保留完整音频播放。");
-      }
     });
 
     ws.on("audioprocess", () => setCurrentTime(ws.getCurrentTime()));
@@ -273,7 +322,12 @@ export default function SynthesisWaveSurfer({
     ws.on("play", () => setIsPlaying(true));
     ws.on("pause", () => setIsPlaying(false));
     ws.on("finish", () => setIsPlaying(false));
+    ws.on("scroll", () => emitWaveformSync(ws));
+    ws.on("zoom", () => requestAnimationFrame(() => emitWaveformSync(ws)));
+    ws.on("redrawcomplete", () => emitWaveformSync(ws));
+    ws.on("resize", () => emitWaveformSync(ws));
     ws.on("error", (err) => {
+      if (disposed) return;
       const message = String(err?.message || err || "").toLowerCase();
       if (message.includes("abort") || message.includes("destroy")) {
         return;
@@ -295,7 +349,15 @@ export default function SynthesisWaveSurfer({
     wavesurferRef.current = ws;
 
     return () => {
-      ws?.destroy();
+      disposed = true;
+      try {
+        const destroyed = ws?.destroy();
+        if (destroyed && typeof destroyed.catch === "function") {
+          destroyed.catch(() => undefined);
+        }
+      } catch {
+        // Destroy can throw during hot reload or aborted media loads; teardown should stay non-blocking.
+      }
       wavesurferRef.current = null;
       readyRef.current = false;
       setIsPlaying(false);
@@ -309,10 +371,25 @@ export default function SynthesisWaveSurfer({
     if (!wavesurferRef.current || !isReady) return;
     try {
       wavesurferRef.current.zoom(mapZoomToPixelsPerSecond(zoom));
+      requestAnimationFrame(() => emitWaveformSync(wavesurferRef.current));
     } catch {
       setWaveformError("缩放失败，已保持当前波形视图。");
     }
   }, [zoom, isReady]);
+
+  useEffect(() => {
+    if (!externalScrollSignal || !wavesurferRef.current || !isReady) return;
+    const nextScrollLeft = Math.max(0, Number(externalScrollLeft || 0));
+    try {
+      const currentScrollLeft = Number(wavesurferRef.current.getScroll?.() || 0);
+      if (Math.abs(currentScrollLeft - nextScrollLeft) > 1) {
+        wavesurferRef.current.setScroll(nextScrollLeft);
+      }
+      requestAnimationFrame(() => emitWaveformSync(wavesurferRef.current));
+    } catch {
+      setWaveformError("同步滚动失败，已保持当前波形视图。");
+    }
+  }, [externalScrollLeft, externalScrollSignal, isReady]);
 
   const togglePlay = async () => {
     if (!wavesurferRef.current || !isReady) return;
@@ -374,7 +451,7 @@ export default function SynthesisWaveSurfer({
   if (!audioUrl) return null;
 
   return (
-    <div className="synthesisWaveformShell" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+    <div className={`synthesisWaveformShell ${children ? "hasSyncedArrangement" : ""}`}>
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
         <button
           type="button"
@@ -429,15 +506,15 @@ export default function SynthesisWaveSurfer({
         </div>
       </div>
 
-      <div
-        style={{
-          background: "var(--bg-elevated)",
-          border: "1px solid var(--border-default)",
-          borderRadius: "var(--radius-md)",
-          overflow: "hidden",
-        }}
-      >
-        <div ref={containerRef} style={{ width: "100%" }} />
+      <div className="synthesisWaveformUnifiedViewport">
+        <div className="synthesisWaveformViewport">
+          <div ref={containerRef} style={{ width: "100%" }} />
+        </div>
+        {children ? (
+          <div className="synthesisWaveformArrangementSlot">
+            {children}
+          </div>
+        ) : null}
       </div>
 
       {waveformError ? (
