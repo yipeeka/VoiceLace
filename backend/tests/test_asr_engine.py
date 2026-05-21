@@ -760,6 +760,40 @@ class AsrEngineTest(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_hybrid_qwen3_text_whisper_timeline_prefix_expansion_does_not_cross_previous_end(self) -> None:
+        qwen_segments = [
+            {"text": "前一句。"},
+            {"text": "嗯，为什么我要走？"},
+        ]
+        whisper_segments = [
+            {
+                "start": 9.0,
+                "end": 11.5,
+                "text": "前一句为什么我要走",
+                "words": [
+                    {"start": 9.000, "end": 9.240, "word": "前"},
+                    {"start": 9.260, "end": 10.000, "word": "一句"},
+                    {"start": 10.050, "end": 10.360, "word": "为什么"},
+                    {"start": 10.380, "end": 10.540, "word": "我"},
+                    {"start": 10.560, "end": 10.780, "word": "要"},
+                    {"start": 10.800, "end": 11.100, "word": "走"},
+                ],
+            }
+        ]
+
+        fused, _ = ASREngine._fuse_qwen_text_with_whisper_timeline(
+            qwen_segments,
+            whisper_segments,
+            audio_duration_sec=12.0,
+        )
+
+        self.assertEqual(len(fused), 2)
+        self.assertEqual(fused[0]["end_ms"], 10000)
+        self.assertEqual(fused[1]["timing_check"]["qwen_unmatched_prefix"], "嗯，")
+        self.assertGreater(fused[1]["timing_check"]["expanded_before_ms"], 0)
+        self.assertEqual(fused[1]["start_ms"], fused[0]["end_ms"] + 1)
+        self.assertLess(fused[1]["start_ms"], fused[1]["end_ms"])
+
     def test_hybrid_qwen3_text_whisper_timeline_rejects_weak_opening_anchor(self) -> None:
         temp_dir = settings.data_dir / "tmp-tests" / "asr-hybrid-anchor-reject"
         shutil.rmtree(temp_dir, ignore_errors=True)
