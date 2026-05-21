@@ -467,6 +467,14 @@ export default function OrchestratorConfigCard({ form, isSaving, onSetField, onS
                     onChange={(value) => onSetField("qwen3_asr_language", value)}
                     placeholder="auto / zh / en…"
                   />
+                  <NumberField
+                    id="qwen3-asr-preview-max-line-length"
+                    label="预览分行字数"
+                    min="2"
+                    max="50"
+                    value={form.qwen3_asr_preview_max_line_length ?? 20}
+                    onChange={(value) => onSetField("qwen3_asr_preview_max_line_length", value)}
+                  />
                 </div>
                 <ToggleRow
                   id="qwen3-asr-enable-timestamps"

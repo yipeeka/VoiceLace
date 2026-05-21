@@ -48,6 +48,7 @@ class RuntimeConfigTest(unittest.TestCase):
                 qwen3_asr_threads=4,
                 qwen3_asr_language="auto",
                 qwen3_asr_enable_timestamps=True,
+                qwen3_asr_preview_max_line_length=18,
             )
             save_runtime_config(path, cfg)
             raw = json.loads(path.read_text(encoding="utf-8"))
@@ -72,6 +73,7 @@ class RuntimeConfigTest(unittest.TestCase):
             self.assertEqual(raw["qwen3_asr_forced_aligner_model_path"], "D:/models/qwen3-forced-aligner-0.6b-q4_k.gguf")
             self.assertEqual(raw["qwen3_asr_threads"], 4)
             self.assertTrue(raw["qwen3_asr_enable_timestamps"])
+            self.assertEqual(raw["qwen3_asr_preview_max_line_length"], 18)
             self.assertEqual(raw["secondary_llm_model_path"], "E:/models/qwen2.5-1.5b.gguf")
             loaded = load_runtime_config(path)
             self.assertFalse(loaded.enable_llama_cpp_think_mode)
@@ -98,6 +100,7 @@ class RuntimeConfigTest(unittest.TestCase):
             self.assertEqual(loaded.qwen3_asr_threads, 4)
             self.assertEqual(loaded.qwen3_asr_language, "auto")
             self.assertTrue(loaded.qwen3_asr_enable_timestamps)
+            self.assertEqual(loaded.qwen3_asr_preview_max_line_length, 18)
             self.assertEqual(loaded.secondary_llm_n_ctx, 3072)
             self.assertEqual(loaded.secondary_llm_max_tokens, 900)
         finally:

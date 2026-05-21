@@ -17,6 +17,7 @@ export const useSpeechRecognitionStore = create((set) => ({
   asrBackend: "whisper",
   asrLanguage: "auto",
   asrEnableTimestamps: false,
+  qwen3PreviewMaxLineLength: 20,
   silenceAwareSplit: false,
   vocalSeparationEnabled: false,
   vocalSeparationModel: "htdemucs",
@@ -51,13 +52,25 @@ export const useSpeechRecognitionStore = create((set) => ({
   setTranslationTargetLanguage: (translationTargetLanguage) => set({ translationTargetLanguage: String(translationTargetLanguage ?? "中文") }),
   setAsrBackend: (asrBackend) => {
     const val = String(asrBackend ?? "whisper").trim().toLowerCase();
-    set({ asrBackend: val === "qwen3_crispasr" ? "qwen3_crispasr" : "whisper" });
+    if (val === "qwen3_crispasr") {
+      set({ asrBackend: "qwen3_crispasr" });
+      return;
+    }
+    if (val === "qwen3_text_whisper_timeline") {
+      set({ asrBackend: "qwen3_text_whisper_timeline" });
+      return;
+    }
+    set({ asrBackend: "whisper" });
   },
   setAsrLanguage: (asrLanguage) => {
     const val = String(asrLanguage ?? "auto").trim().toLowerCase();
     set({ asrLanguage: val || "auto" });
   },
   setAsrEnableTimestamps: (asrEnableTimestamps) => set({ asrEnableTimestamps: Boolean(asrEnableTimestamps) }),
+  setQwen3PreviewMaxLineLength: (qwen3PreviewMaxLineLength) => {
+    const parsed = Number(qwen3PreviewMaxLineLength);
+    set({ qwen3PreviewMaxLineLength: Math.min(50, Math.max(2, Number.isFinite(parsed) ? Math.round(parsed) : 20)) });
+  },
   setSilenceAwareSplit: (silenceAwareSplit) => set({ silenceAwareSplit: Boolean(silenceAwareSplit) }),
   setVocalSeparationEnabled: (vocalSeparationEnabled) => set({ vocalSeparationEnabled: Boolean(vocalSeparationEnabled) }),
   setVocalSeparationModel: (vocalSeparationModel) => {
@@ -95,6 +108,7 @@ export const useSpeechRecognitionStore = create((set) => ({
       translationResult: "",
       translationError: "",
       asrEnableTimestamps: false,
+      qwen3PreviewMaxLineLength: 20,
       silenceAwareSplit: false,
       asrLanguage: "auto",
       vocalSeparationEnabled: false,

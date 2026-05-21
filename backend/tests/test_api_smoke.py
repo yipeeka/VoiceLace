@@ -449,10 +449,12 @@ class ApiSmokeTest(unittest.TestCase):
             speaker_labels: bool = False,
             enable_timestamps: bool | None = None,
             silence_aware_split: bool = True,
+            qwen3_preview_max_line_length: int | None = None,
         ):
             self.assertTrue(Path(audio_path).exists())
             self.assertEqual(language, "auto")
             self.assertFalse(silence_aware_split)
+            self.assertIsNone(qwen3_preview_max_line_length)
             return {
                 "text": "测试文本",
                 "labeled_text": "说话人1：测试文本",
@@ -469,7 +471,12 @@ class ApiSmokeTest(unittest.TestCase):
         try:
             response = self.client.post(
                 "/api/v1/asr/transcribe-file",
-                data={"backend": "whisper", "speaker_labels": "true", "silence_aware_split": "false"},
+                data={
+                    "backend": "whisper",
+                    "speaker_labels": "true",
+                    "silence_aware_split": "false",
+                    "qwen3_preview_max_line_length": "17",
+                },
                 files={"file": ("sample.wav", b"RIFFdemo", "audio/wav")},
             )
             self.assertEqual(response.status_code, 200)
@@ -478,6 +485,75 @@ class ApiSmokeTest(unittest.TestCase):
             self.assertEqual(body["labeled_text"], "说话人1：测试文本")
             self.assertEqual(body["backend"], "whisper")
             self.assertTrue(body["speaker_labels"])
+        finally:
+            asr.transcribe = original_transcribe
+
+    def test_asr_transcribe_file_passes_preview_line_length_only_for_hybrid_backend(self) -> None:
+        asr = self.app_state.asr_engine
+        original_transcribe = asr.transcribe
+        captured: dict[str, object] = {}
+
+        async def fake_transcribe(
+            audio_path: str,
+            *,
+            backend: str = "whisper",
+            language: str = "auto",
+            speaker_labels: bool = False,
+            enable_timestamps: bool | None = None,
+            silence_aware_split: bool = True,
+            qwen3_preview_max_line_length: int | None = None,
+        ):
+            self.assertTrue(Path(audio_path).exists())
+            captured["backend"] = backend
+            captured["preview_max_line_length"] = qwen3_preview_max_line_length
+            return {
+                "text": "测试文本",
+                "labeled_text": "测试文本",
+                "backend": backend,
+                "speaker_labels": speaker_labels,
+                "model_files": {"main_model_path": ""},
+                "alignments": [],
+                "warnings": [],
+            }
+
+        asr.transcribe = fake_transcribe
+        try:
+            response = self.client.post(
+                "/api/v1/asr/transcribe-file",
+                data={
+                    "backend": "qwen3_text_whisper_timeline",
+                    "speaker_labels": "false",
+                    "qwen3_preview_max_line_length": "17",
+                },
+                files={"file": ("sample.wav", b"RIFFdemo", "audio/wav")},
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(captured["backend"], "qwen3_text_whisper_timeline")
+            self.assertEqual(captured["preview_max_line_length"], 17)
+
+            response = self.client.post(
+                "/api/v1/asr/transcribe-file",
+                data={
+                    "backend": "qwen3_text_whisper_timeline",
+                    "speaker_labels": "false",
+                    "qwen3_preview_max_line_length": "120",
+                },
+                files={"file": ("sample.wav", b"RIFFdemo", "audio/wav")},
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(captured["preview_max_line_length"], 50)
+
+            response = self.client.post(
+                "/api/v1/asr/transcribe-file",
+                data={
+                    "backend": "qwen3_text_whisper_timeline",
+                    "speaker_labels": "false",
+                    "qwen3_preview_max_line_length": "1",
+                },
+                files={"file": ("sample.wav", b"RIFFdemo", "audio/wav")},
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(captured["preview_max_line_length"], 2)
         finally:
             asr.transcribe = original_transcribe
 

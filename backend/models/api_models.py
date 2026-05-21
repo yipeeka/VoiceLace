@@ -115,6 +115,7 @@ class OrchestratorConfigPayload(BaseModel):
     qwen3_asr_threads: int = 0
     qwen3_asr_language: str = "auto"
     qwen3_asr_enable_timestamps: bool = False
+    qwen3_asr_preview_max_line_length: int = Field(default=20, ge=2, le=50)
     firered_asr_model_path: str = ""
     firered_asr_threads: int = 0
     firered_asr_language: str = "auto"

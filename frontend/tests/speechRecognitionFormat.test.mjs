@@ -33,6 +33,14 @@ test("parseTimestampMs accepts dot and comma millisecond separators", () => {
 test("splitSpeakerText extracts speaker labels and falls back", () => {
   assert.deepEqual(splitSpeakerText("角色A：你好", "旁白"), { speaker: "角色A", text: "你好" });
   assert.deepEqual(splitSpeakerText("没有标签", "旁白"), { speaker: "旁白", text: "没有标签" });
+  assert.deepEqual(
+    splitSpeakerText("老周朝超前挪了两步，又回头对儿子说道：“把包袱扎紧，别散了。", "narrator"),
+    { speaker: "narrator", text: "老周朝超前挪了两步，又回头对儿子说道：“把包袱扎紧，别散了。" },
+  );
+  assert.deepEqual(
+    splitSpeakerText("旁边卖粥的汉子吆喝道：“热粥，新熬的热粥，一碗几文？", "narrator"),
+    { speaker: "narrator", text: "旁边卖粥的汉子吆喝道：“热粥，新熬的热粥，一碗几文？" },
+  );
 });
 
 test("renderCuesAsSrt preserves existing speaker prefixes", () => {
@@ -73,6 +81,35 @@ test("buildDubbingSegmentsFromPreview maps timeline edits back to ASR segments",
   });
   assert.deepEqual(result, [
     { id: "a", speaker: "角色A", text: "新文本", start_ms: 0, end_ms: 1200 },
+  ]);
+});
+
+test("buildDubbingSegmentsFromPreview keeps narrative colons as text", () => {
+  const result = buildDubbingSegmentsFromPreview({
+    alignments: [
+      { id: "a", speaker: "narrator", text: "旧文本", start_ms: 8180, end_ms: 14740 },
+      { id: "b", speaker: "narrator", text: "旧文本2", start_ms: 16840, end_ms: 22940 },
+    ],
+    previewText: [
+      "[00:00:08.180 --> 00:00:14.740] 老周朝超前挪了两步，又回头对儿子说道：“把包袱扎紧，别散了。",
+      "[00:00:16.840 --> 00:00:22.940] 旁边卖粥的汉子吆喝道：“热粥，新熬的热粥，一碗几文？",
+    ].join("\n"),
+  });
+  assert.deepEqual(result, [
+    {
+      id: "a",
+      speaker: "narrator",
+      text: "老周朝超前挪了两步，又回头对儿子说道：“把包袱扎紧，别散了。",
+      start_ms: 8180,
+      end_ms: 14740,
+    },
+    {
+      id: "b",
+      speaker: "narrator",
+      text: "旁边卖粥的汉子吆喝道：“热粥，新熬的热粥，一碗几文？",
+      start_ms: 16840,
+      end_ms: 22940,
+    },
   ]);
 });
 

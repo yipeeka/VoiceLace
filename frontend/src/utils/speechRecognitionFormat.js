@@ -44,9 +44,25 @@ export function splitSpeakerText(value, fallbackSpeaker = "narrator") {
   if (!match) {
     return { speaker: fallbackSpeaker || "narrator", text: raw };
   }
-  const speaker = String(match[1] || "").trim() || fallbackSpeaker || "narrator";
+  const candidate = String(match[1] || "").trim();
+  if (!isSpeakerLabelCandidate(candidate)) {
+    return { speaker: fallbackSpeaker || "narrator", text: raw };
+  }
+  const speaker = candidate || fallbackSpeaker || "narrator";
   const text = String(match[2] || "").trim();
   return { speaker, text };
+}
+
+function isSpeakerLabelCandidate(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return false;
+  const compact = raw.replace(/\s+/g, "");
+  if (!compact || compact.length > 16) return false;
+  if (/[，,。！？!?；;：“”"‘’'（）()\[\]【】《》<>、]/.test(compact)) return false;
+  if (/(说道|问道|喊道|叫道|吆喝道|喃喃道|笑道|骂道|答道|应道|念道|喝道|道|说|问|喊|叫)$/.test(compact)) {
+    return false;
+  }
+  return /^[\u4e00-\u9fffA-Za-z0-9 _.\-#]+$/.test(raw);
 }
 
 function normalizePositiveEndMs(startMs, endMs) {

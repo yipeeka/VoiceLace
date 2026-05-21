@@ -106,6 +106,9 @@ class Settings:
     default_qwen3_asr_enable_timestamps: bool = field(
         default_factory=lambda: os.getenv("BV_QWEN3_ASR_ENABLE_TIMESTAMPS", "false").lower() == "true"
     )
+    default_qwen3_asr_preview_max_line_length: int = field(
+        default_factory=lambda: int(os.getenv("BV_QWEN3_ASR_PREVIEW_MAX_LINE_LENGTH", "20"))
+    )
     default_pyannote_model_id: str = field(
         default_factory=lambda: os.getenv("BV_PYANNOTE_MODEL_ID", "pyannote/speaker-diarization-community-1")
     )

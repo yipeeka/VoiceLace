@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from backend.config import settings
-from backend.engine.asr_engine import ASREngine
+from backend.engine.asr_engine import ASREngine, HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND
 
 
 class AsrEngineTest(unittest.TestCase):
@@ -107,6 +107,143 @@ class AsrEngineTest(unittest.TestCase):
                 asyncio.run(engine.transcribe(str(wav_path), backend="qwen3_crispasr", speaker_labels=False))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_qwen3_crispasr_plain_text_can_request_punctuation_split_and_line_length(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-qwen3-split-ml"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            exe_path = temp_dir / "crispasr.exe"
+            exe_path.write_bytes(b"exe")
+            model_path = temp_dir / "qwen3.gguf"
+            model_path.write_bytes(b"gguf")
+
+            engine = ASREngine()
+            engine.crispasr_exe = str(exe_path)
+            engine.qwen3_model_path = str(model_path)
+            engine.qwen3_enable_timestamps = False
+            calls = []
+
+            class _Proc:
+                def __init__(self, returncode=0, stdout="", stderr=""):
+                    self.returncode = returncode
+                    self.stdout = stdout
+                    self.stderr = stderr
+
+            def fake_run(cmd, *args, **kwargs):
+                calls.append(cmd)
+                if isinstance(cmd, list) and cmd and cmd[0] == "ffmpeg":
+                    return _Proc(returncode=0, stdout="", stderr="")
+                return _Proc(returncode=0, stdout="第一句。\n第二句。", stderr="")
+
+            with patch("backend.engine.asr_engine.subprocess.run", side_effect=fake_run):
+                raw_text, segments, backend = asyncio.run(
+                    engine._transcribe_crispasr_segments(
+                        wav_path,
+                        split_on_punctuation=True,
+                        max_line_length=30,
+                    )
+                )
+
+            self.assertEqual(backend, "qwen3_crispasr")
+            self.assertIn("第一句", raw_text)
+            crisp_cmds = [cmd for cmd in calls if isinstance(cmd, list) and "--backend" in cmd]
+            self.assertEqual(len(crisp_cmds), 1)
+            cmd = crisp_cmds[0]
+            self.assertIn("--split-on-punct", cmd)
+            self.assertIn("-ml", cmd)
+            self.assertEqual(cmd[cmd.index("-ml") + 1], "30")
+            self.assertEqual(segments[0]["text"], "第一句。\n第二句。")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_hybrid_qwen_text_segments_split_long_preview_lines_on_natural_breaks(self) -> None:
+        text = (
+            "而且福利根本不止这些，孩子从幼儿园到大学全免费，十五个州的公立大学连学费都免，"
+            "就交一百多欧的注册费，还送全州公交地铁票，全家医保更是顶配，公立医保覆盖所有基础治疗，"
+            "看牙配眼镜都能报。"
+        )
+
+        rows = ASREngine._build_qwen_text_segments(
+            text,
+            [{"text": text}],
+            max_line_length=20,
+        )
+
+        self.assertGreater(len(rows), 1)
+        self.assertEqual("".join(row["text"] for row in rows), text)
+        self.assertTrue(any(row["text"].endswith("，") for row in rows[:-1]))
+        self.assertTrue(all(ASREngine._preview_line_text_length(row["text"]) <= 20 for row in rows))
+
+    def test_hybrid_qwen_text_segments_do_not_hard_cut_without_breaks(self) -> None:
+        text = "这是一个没有任何自然停顿所以不能被硬切开的超长识别片段"
+
+        rows = ASREngine._build_qwen_text_segments(
+            text,
+            [{"text": text}],
+            max_line_length=10,
+        )
+
+        self.assertEqual(rows, [{"text": text, "speaker": ""}])
+
+    def test_hybrid_qwen_text_segments_keep_crispasr_rows_until_too_long(self) -> None:
+        rows = ASREngine._build_qwen_text_segments(
+            "",
+            [
+                {"text": "第一句；第二句"},
+                {"text": "第三句，第四句"},
+            ],
+            max_line_length=20,
+        )
+
+        self.assertEqual(
+            rows,
+            [
+                {"text": "第一句；第二句", "speaker": ""},
+                {"text": "第三句，第四句", "speaker": ""},
+            ],
+        )
+
+    def test_hybrid_qwen_text_segments_split_only_standalone_weak_breaks(self) -> None:
+        text = "他说这句话，”然后继续说明，后面才可以拆分，最后也可以拆分。"
+
+        rows = ASREngine._build_qwen_text_segments(
+            text,
+            [{"text": text}],
+            max_line_length=8,
+        )
+
+        self.assertEqual("".join(row["text"] for row in rows), text)
+        self.assertIn("他说这句话，”然后继续说明，", [row["text"] for row in rows])
+        self.assertFalse(any(row["text"].endswith("，") and next_row["text"].startswith("”") for row, next_row in zip(rows, rows[1:])))
+        self.assertGreater(len(rows), 1)
+
+    def test_hybrid_qwen_text_segments_keep_closing_quote_with_sentence_punctuation(self) -> None:
+        rows = ASREngine._build_qwen_text_segments(
+            "",
+            [
+                {"text": "老周朝超前挪了两步，又回头对儿子说道：“把包袱扎紧，别散了。"},
+                {"text": "”我省得。"},
+                {"text": "旁边卖粥的汉子吆喝道：“热粥，新熬的热粥，一碗几文？"},
+                {"text": "两文一碗，童叟无欺。"},
+                {"text": "”说话间，城楼上鼓声三下，队伍忽然一阵骚动。"},
+            ],
+            max_line_length=20,
+        )
+
+        joined = "".join(row["text"] for row in rows)
+        self.assertIn("别散了。”我省得。", joined)
+        self.assertIn("说道：“把包袱扎紧", joined)
+        self.assertIn("吆喝道：“热粥", joined)
+        self.assertEqual(
+            joined,
+            "老周朝超前挪了两步，又回头对儿子说道：“把包袱扎紧，别散了。”我省得。"
+            "旁边卖粥的汉子吆喝道：“热粥，新熬的热粥，一碗几文？两文一碗，童叟无欺。”"
+            "说话间，城楼上鼓声三下，队伍忽然一阵骚动。",
+        )
+        self.assertFalse(any(row["text"].startswith("”") for row in rows))
 
     def test_qwen3_crispasr_parses_inline_timestamps_into_alignments(self) -> None:
         temp_dir = settings.data_dir / "tmp-tests" / "asr-qwen3-inline-ts"
@@ -275,6 +412,414 @@ class AsrEngineTest(unittest.TestCase):
 
             with self.assertRaisesRegex(RuntimeError, "Qwen3-ForcedAligner"):
                 asyncio.run(engine.transcribe(str(wav_path), backend="qwen3_crispasr", speaker_labels=True))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_hybrid_qwen3_text_whisper_timeline_uses_qwen_text_and_whisper_times(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-hybrid-qwen-whisper"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            engine = ASREngine()
+            engine.qwen3_preview_max_line_length = 20
+            calls = []
+
+            async def fake_whisper(_: object, *, language: str = "auto"):
+                calls.append(("whisper", language))
+                return (
+                    "他们都不上班吗？然后",
+                    [
+                        {
+                            "start": 5.40,
+                            "end": 7.60,
+                            "text": "他们都不上班吗？然后",
+                            "words": [
+                                {"start": 5.520, "end": 5.760, "word": "他们"},
+                                {"start": 5.800, "end": 5.960, "word": "都"},
+                                {"start": 6.000, "end": 6.240, "word": "不上"},
+                                {"start": 6.280, "end": 6.520, "word": "班"},
+                                {"start": 6.560, "end": 6.720, "word": "吗？"},
+                                {"start": 7.000, "end": 7.420, "word": "然后"},
+                            ],
+                        }
+                    ],
+                    "faster-whisper",
+                )
+
+            async def fake_qwen(
+                _: object,
+                *,
+                enable_timestamps_override=None,
+                language_override=None,
+                split_on_punctuation=False,
+                max_line_length=None,
+            ):
+                calls.append(("qwen3", language_override, enable_timestamps_override, split_on_punctuation, max_line_length))
+                return (
+                    "他们都不上班吗？\n然后",
+                    [{"text": "他们都不上班吗？"}, {"text": "然后"}],
+                    "qwen3_crispasr",
+                )
+
+            engine._transcribe_whisper_segments = fake_whisper  # type: ignore[assignment]
+            engine._transcribe_crispasr_segments = fake_qwen  # type: ignore[assignment]
+            engine._probe_audio_duration_seconds = lambda _path: 8.0  # type: ignore[method-assign]
+            engine._detect_silence_ranges = lambda _path: []  # type: ignore[method-assign]
+
+            result = asyncio.run(
+                engine.transcribe(
+                    str(wav_path),
+                    backend=HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND,
+                    language="zh",
+                    speaker_labels=False,
+                )
+            )
+
+            self.assertEqual(result["backend"], HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND)
+            self.assertEqual(calls, [("whisper", "zh"), ("qwen3", "zh", False, True, 20)])
+            self.assertEqual(result["text"], "他们都不上班吗？\n然后")
+            self.assertEqual(result["alignments"][0]["text"], "他们都不上班吗？")
+            self.assertEqual(result["alignments"][0]["start_ms"], 5520)
+            self.assertEqual(result["alignments"][0]["end_ms"], 6720)
+            self.assertEqual(result["alignments"][1]["text"], "然后")
+            self.assertEqual(result["alignments"][1]["start_ms"], 7000)
+            self.assertEqual(result["alignments"][1]["end_ms"], 7420)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_hybrid_qwen3_text_whisper_timeline_accepts_request_line_length(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-hybrid-request-ml"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            engine = ASREngine()
+            engine.qwen3_preview_max_line_length = 30
+            qwen_max_lengths = []
+
+            async def fake_whisper(_: object, *, language: str = "auto"):
+                return (
+                    "第一句第二句",
+                    [{"start": 0.0, "end": 2.0, "text": "第一句第二句"}],
+                    "faster-whisper",
+                )
+
+            async def fake_qwen(
+                _: object,
+                *,
+                enable_timestamps_override=None,
+                language_override=None,
+                split_on_punctuation=False,
+                max_line_length=None,
+            ):
+                qwen_max_lengths.append(max_line_length)
+                return ("第一句，第二句", [{"text": "第一句，第二句"}], "qwen3_crispasr")
+
+            engine._transcribe_whisper_segments = fake_whisper  # type: ignore[assignment]
+            engine._transcribe_crispasr_segments = fake_qwen  # type: ignore[assignment]
+            engine._probe_audio_duration_seconds = lambda _path: 2.0  # type: ignore[method-assign]
+            engine._detect_silence_ranges = lambda _path: []  # type: ignore[method-assign]
+
+            asyncio.run(
+                engine.transcribe(
+                    str(wav_path),
+                    backend=HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND,
+                    qwen3_preview_max_line_length=12,
+                )
+            )
+            asyncio.run(
+                engine.transcribe(
+                    str(wav_path),
+                    backend=HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND,
+                    qwen3_preview_max_line_length=120,
+                )
+            )
+            asyncio.run(
+                engine.transcribe(
+                    str(wav_path),
+                    backend=HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND,
+                    qwen3_preview_max_line_length=1,
+                )
+            )
+
+            self.assertEqual(qwen_max_lengths, [12, 50, 2])
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_hybrid_qwen3_text_whisper_timeline_falls_back_when_text_differs(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-hybrid-fallback"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            engine = ASREngine()
+
+            async def fake_whisper(_: object, *, language: str = "auto"):
+                return (
+                    "大家都上班吗然后",
+                    [{"start": 0.0, "end": 4.0, "text": "大家都上班吗然后"}],
+                    "faster-whisper",
+                )
+
+            async def fake_qwen(
+                _: object,
+                *,
+                enable_timestamps_override=None,
+                language_override=None,
+                split_on_punctuation=False,
+                max_line_length=None,
+            ):
+                return (
+                    "他们都不上班吗？\n然后",
+                    [{"text": "他们都不上班吗？"}, {"text": "然后"}],
+                    "qwen3_crispasr",
+                )
+
+            engine._transcribe_whisper_segments = fake_whisper  # type: ignore[assignment]
+            engine._transcribe_crispasr_segments = fake_qwen  # type: ignore[assignment]
+            engine._probe_audio_duration_seconds = lambda _path: 4.0  # type: ignore[method-assign]
+            engine._detect_silence_ranges = lambda _path: []  # type: ignore[method-assign]
+
+            result = asyncio.run(engine.transcribe(str(wav_path), backend=HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND))
+
+            self.assertEqual([item["text"] for item in result["alignments"]], ["他们都不上班吗？", "然后"])
+            self.assertTrue(any("未精确匹配" in warning for warning in result["warnings"]))
+            for item in result["alignments"]:
+                self.assertLess(item["start_ms"], item["end_ms"])
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_hybrid_qwen3_text_whisper_timeline_fallback_distributes_remaining_cursor_time(self) -> None:
+        qwen_segments = [
+            {"text": "现在直接取消，只剩最高两万欧元免审核度，"},
+            {"text": "还是五十岁以上，"},
+            {"text": "低于这个数的积蓄必须先花完才可以领福利。"},
+            {"text": "第三，房租补贴砍了，"},
+            {"text": "以后租金不能超过当地标准的一点五倍，"},
+            {"text": "超了自己补，再也不能靠政府住高价房了。"},
+        ]
+        whisper_segments = [
+            {
+                "start": 150.0,
+                "end": 168.0,
+                "text": "补助规则随后继续说明包含积蓄房租预约失联以及家庭福利缩水这些内容",
+            }
+        ]
+
+        fused, warnings = ASREngine._fuse_qwen_text_with_whisper_timeline(
+            qwen_segments,
+            whisper_segments,
+            audio_duration_sec=168.0,
+        )
+
+        self.assertEqual(len(fused), len(qwen_segments))
+        self.assertTrue(any("未精确匹配" in warning for warning in warnings))
+        self.assertTrue(all(item["timing_check"]["alignment"] == "timeline_cursor_ratio_fallback" for item in fused))
+        for previous, current in zip(fused, fused[1:]):
+            self.assertLess(previous["start_ms"], previous["end_ms"])
+            self.assertGreaterEqual(current["start_ms"], previous["end_ms"])
+        unique_ranges = {(item["start_ms"], item["end_ms"]) for item in fused}
+        self.assertEqual(len(unique_ranges), len(fused))
+        self.assertGreater(fused[-1]["end_ms"] - fused[0]["start_ms"], 10000)
+
+    def test_hybrid_qwen3_text_whisper_timeline_fuzzy_match_expands_qwen_prefix(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-hybrid-prefix"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            engine = ASREngine()
+
+            async def fake_whisper(_: object, *, language: str = "auto"):
+                return (
+                    "为什么我每次一抬头就总感觉有人盯着我呢",
+                    [
+                        {
+                            "start": 10.0,
+                            "end": 13.2,
+                            "text": "为什么我每次一抬头就总感觉有人盯着我呢",
+                            "words": [
+                                {"start": 10.000, "end": 10.300, "word": "为什么"},
+                                {"start": 10.320, "end": 10.460, "word": "我"},
+                                {"start": 10.500, "end": 10.760, "word": "每次"},
+                                {"start": 10.820, "end": 11.120, "word": "一抬头"},
+                                {"start": 11.180, "end": 11.360, "word": "就"},
+                                {"start": 11.420, "end": 11.780, "word": "总感觉"},
+                                {"start": 11.840, "end": 12.100, "word": "有人"},
+                                {"start": 12.160, "end": 12.460, "word": "盯着"},
+                                {"start": 12.520, "end": 12.680, "word": "我"},
+                                {"start": 12.700, "end": 12.920, "word": "呢"},
+                            ],
+                        }
+                    ],
+                    "faster-whisper",
+                )
+
+            async def fake_qwen(
+                _: object,
+                *,
+                enable_timestamps_override=None,
+                language_override=None,
+                split_on_punctuation=False,
+                max_line_length=None,
+            ):
+                return (
+                    "嗯，为什么我每次一抬头就总感觉有人盯着我？",
+                    [{"text": "嗯，为什么我每次一抬头就总感觉有人盯着我？"}],
+                    "qwen3_crispasr",
+                )
+
+            engine._transcribe_whisper_segments = fake_whisper  # type: ignore[assignment]
+            engine._transcribe_crispasr_segments = fake_qwen  # type: ignore[assignment]
+            engine._probe_audio_duration_seconds = lambda _path: 14.0  # type: ignore[method-assign]
+            engine._detect_silence_ranges = lambda _path: []  # type: ignore[method-assign]
+
+            result = asyncio.run(engine.transcribe(str(wav_path), backend=HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND))
+            item = result["alignments"][0]
+
+            self.assertEqual(item["text"], "嗯，为什么我每次一抬头就总感觉有人盯着我？")
+            self.assertLess(item["start_ms"], 10000)
+            self.assertEqual(item["end_ms"], 12920)
+            self.assertEqual(item["timing_check"]["qwen_unmatched_prefix"], "嗯，")
+            self.assertEqual(item["timing_check"]["qwen_unmatched_suffix"], "")
+            self.assertEqual(item["timing_check"]["whisper_boundary_suffix"], "呢")
+            self.assertGreater(item["timing_check"]["end_boundary_relaxed_ms"], 0)
+            self.assertGreater(item["timing_check"]["match_score"], 0.8)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_hybrid_qwen3_text_whisper_timeline_anchor_match_uses_sentence_tail(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-hybrid-anchor-prefix"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            engine = ASREngine()
+
+            async def fake_whisper(_: object, *, language: str = "auto"):
+                return (
+                    "为什么我每次一抬头就总感觉有人盯着我呢",
+                    [
+                        {
+                            "start": 10.0,
+                            "end": 13.2,
+                            "text": "为什么我每次一抬头就总感觉有人盯着我呢",
+                            "words": [
+                                {"start": 10.000, "end": 10.300, "word": "为什么"},
+                                {"start": 10.320, "end": 10.460, "word": "我"},
+                                {"start": 10.500, "end": 10.760, "word": "每次"},
+                                {"start": 10.820, "end": 11.120, "word": "一抬头"},
+                                {"start": 11.180, "end": 11.360, "word": "就"},
+                                {"start": 11.420, "end": 11.780, "word": "总感觉"},
+                                {"start": 11.840, "end": 12.100, "word": "有人"},
+                                {"start": 12.160, "end": 12.460, "word": "盯着"},
+                                {"start": 12.520, "end": 12.680, "word": "我"},
+                                {"start": 12.700, "end": 12.920, "word": "呢"},
+                            ],
+                        }
+                    ],
+                    "faster-whisper",
+                )
+
+            async def fake_qwen(
+                _: object,
+                *,
+                enable_timestamps_override=None,
+                language_override=None,
+                split_on_punctuation=False,
+                max_line_length=None,
+            ):
+                return (
+                    "嗯，为什么我每次一抬头就总感觉背后好像有人盯着我？",
+                    [{"text": "嗯，为什么我每次一抬头就总感觉背后好像有人盯着我？"}],
+                    "qwen3_crispasr",
+                )
+
+            engine._transcribe_whisper_segments = fake_whisper  # type: ignore[assignment]
+            engine._transcribe_crispasr_segments = fake_qwen  # type: ignore[assignment]
+            engine._probe_audio_duration_seconds = lambda _path: 14.0  # type: ignore[method-assign]
+            engine._detect_silence_ranges = lambda _path: []  # type: ignore[method-assign]
+
+            result = asyncio.run(engine.transcribe(str(wav_path), backend=HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND))
+            item = result["alignments"][0]
+
+            self.assertEqual(item["text"], "嗯，为什么我每次一抬头就总感觉背后好像有人盯着我？")
+            self.assertLess(item["start_ms"], 10000)
+            self.assertEqual(item["end_ms"], 12920)
+            self.assertEqual(item["timing_check"]["alignment"], "anchor_prefix_match")
+            self.assertTrue(str(item["timing_check"]["anchor_text"]).startswith("为什么"))
+            self.assertGreater(item["timing_check"]["anchor_similarity"], 0.7)
+            self.assertEqual(item["timing_check"]["qwen_unmatched_prefix"], "嗯，")
+            self.assertEqual(item["timing_check"]["qwen_unmatched_suffix"], "")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_hybrid_qwen3_text_whisper_timeline_rejects_weak_opening_anchor(self) -> None:
+        temp_dir = settings.data_dir / "tmp-tests" / "asr-hybrid-anchor-reject"
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            wav_path = temp_dir / "sample.wav"
+            wav_path.write_bytes(b"RIFFdemo")
+            engine = ASREngine()
+
+            async def fake_whisper(_: object, *, language: str = "auto"):
+                return (
+                    "为什么我每次一抬头就总感觉有人盯着我呢",
+                    [
+                        {
+                            "start": 10.0,
+                            "end": 13.2,
+                            "text": "为什么我每次一抬头就总感觉有人盯着我呢",
+                            "words": [
+                                {"start": 10.000, "end": 10.300, "word": "为什么"},
+                                {"start": 10.320, "end": 10.460, "word": "我"},
+                                {"start": 10.500, "end": 10.760, "word": "每次"},
+                                {"start": 10.820, "end": 11.120, "word": "一抬头"},
+                                {"start": 11.180, "end": 11.360, "word": "就"},
+                                {"start": 11.420, "end": 11.780, "word": "总感觉"},
+                                {"start": 11.840, "end": 12.100, "word": "有人"},
+                                {"start": 12.160, "end": 12.460, "word": "盯着"},
+                                {"start": 12.520, "end": 12.680, "word": "我"},
+                                {"start": 12.700, "end": 12.920, "word": "呢"},
+                            ],
+                        }
+                    ],
+                    "faster-whisper",
+                )
+
+            async def fake_qwen(
+                _: object,
+                *,
+                enable_timestamps_override=None,
+                language_override=None,
+                split_on_punctuation=False,
+                max_line_length=None,
+            ):
+                return (
+                    "嗯，为什么会突然觉得有人站在旁边看我？",
+                    [{"text": "嗯，为什么会突然觉得有人站在旁边看我？"}],
+                    "qwen3_crispasr",
+                )
+
+            engine._transcribe_whisper_segments = fake_whisper  # type: ignore[assignment]
+            engine._transcribe_crispasr_segments = fake_qwen  # type: ignore[assignment]
+            engine._probe_audio_duration_seconds = lambda _path: 14.0  # type: ignore[method-assign]
+            engine._detect_silence_ranges = lambda _path: []  # type: ignore[method-assign]
+
+            result = asyncio.run(engine.transcribe(str(wav_path), backend=HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND))
+            item = result["alignments"][0]
+
+            self.assertEqual(item["text"], "嗯，为什么会突然觉得有人站在旁边看我？")
+            self.assertEqual(item["timing_check"]["alignment"], "timeline_cursor_ratio_fallback")
+            self.assertNotIn("anchor_text", item["timing_check"])
+            self.assertTrue(any("未精确匹配" in warning for warning in result["warnings"]))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 

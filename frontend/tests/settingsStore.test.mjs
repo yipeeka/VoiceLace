@@ -67,6 +67,19 @@ test("settings store preserves ASR vocal separation config fields", () => {
   assert.equal(payload.asr_vocal_separation_device, "cuda:1");
 });
 
+test("settings store preserves Qwen3 ASR preview line length", () => {
+  const normalized = normalizeOrchestratorConfig({
+    qwen3_asr_preview_max_line_length: 18,
+  });
+
+  assert.equal(normalized.qwen3_asr_preview_max_line_length, 18);
+
+  const payload = toOrchestratorPayload(normalized);
+  assert.equal(payload.qwen3_asr_preview_max_line_length, 18);
+  assert.equal(toOrchestratorPayload({ qwen3_asr_preview_max_line_length: 1 }).qwen3_asr_preview_max_line_length, 2);
+  assert.equal(toOrchestratorPayload({ qwen3_asr_preview_max_line_length: 120 }).qwen3_asr_preview_max_line_length, 50);
+});
+
 test("model lifecycle maps workflow pages to unload endpoints", () => {
   assert.equal(getPageUnloadEndpoint("speech"), "/system/unload-asr");
   assert.equal(getPageUnloadEndpoint("text"), "/system/unload-llm");

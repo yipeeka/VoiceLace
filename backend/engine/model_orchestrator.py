@@ -118,6 +118,7 @@ class OrchestratorConfig:
     qwen3_asr_threads: int = settings.default_qwen3_asr_threads
     qwen3_asr_language: str = settings.default_qwen3_asr_language
     qwen3_asr_enable_timestamps: bool = settings.default_qwen3_asr_enable_timestamps
+    qwen3_asr_preview_max_line_length: int = settings.default_qwen3_asr_preview_max_line_length
     firered_asr_model_path: str = ""
     firered_asr_threads: int = 0
     firered_asr_language: str = "auto"
@@ -221,6 +222,13 @@ class ModelOrchestrator:
             config.qwen3_asr_threads = 0
         config.qwen3_asr_language = str(getattr(config, "qwen3_asr_language", "auto") or "auto").strip() or "auto"
         config.qwen3_asr_enable_timestamps = bool(getattr(config, "qwen3_asr_enable_timestamps", False))
+        try:
+            config.qwen3_asr_preview_max_line_length = min(
+                50,
+                max(2, int(getattr(config, "qwen3_asr_preview_max_line_length", 20) or 20)),
+            )
+        except Exception:
+            config.qwen3_asr_preview_max_line_length = 20
         return config
 
     @classmethod

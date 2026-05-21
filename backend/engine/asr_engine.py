@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from difflib import SequenceMatcher
 import gc
 import math
 from pathlib import Path
@@ -24,6 +25,7 @@ QWEN3_SHORT_TIMING_EDGE_PAD_SEC = 0.2
 SILENCE_AWARE_MIN_SILENCE_MS = 1000
 SILENCE_AWARE_SEEK_STEP_MS = 20
 SILENCE_AWARE_THRESHOLD_DBFS = -45
+HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND = "qwen3_text_whisper_timeline"
 
 
 class ASREngine:
@@ -38,6 +40,7 @@ class ASREngine:
         self.qwen3_threads = int(settings.default_qwen3_asr_threads)
         self.qwen3_language = settings.default_qwen3_asr_language
         self.qwen3_enable_timestamps = bool(settings.default_qwen3_asr_enable_timestamps)
+        self.qwen3_preview_max_line_length = int(settings.default_qwen3_asr_preview_max_line_length)
         self.pyannote_model_id = settings.default_pyannote_model_id
         self.pyannote_auth_token = settings.default_pyannote_auth_token
         self.pyannote_device = settings.default_pyannote_device
@@ -119,6 +122,7 @@ class ASREngine:
         speaker_labels: bool = False,
         enable_timestamps: bool | None = None,
         silence_aware_split: bool = True,
+        qwen3_preview_max_line_length: int | None = None,
     ) -> dict[str, Any]:
         target = Path(audio_path)
         if not target.exists():
@@ -128,6 +132,14 @@ class ASREngine:
         target_backend = self._normalize_backend(requested_backend)
         requested_language = str(language or "auto").strip().lower() or "auto"
         requested_speaker_labels = bool(speaker_labels)
+        if target_backend == HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND:
+            return await self._transcribe_qwen3_text_whisper_timeline(
+                target,
+                language=requested_language,
+                speaker_labels=requested_speaker_labels,
+                silence_aware_split=silence_aware_split,
+                preview_max_line_length=qwen3_preview_max_line_length,
+            )
         if target_backend == "whisper":
             try:
                 raw_text, segments, backend_used = await self._transcribe_whisper_segments(target, language=requested_language)
@@ -259,6 +271,12 @@ class ASREngine:
 
     def _build_model_files(self, backend_name: str) -> dict[str, str]:
         backend = str(backend_name or "").strip().lower()
+        if backend == HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND:
+            return {
+                "main_model_path": str(self.model_path or ""),
+                "qwen3_model_path": str(Path(self.qwen3_model_path or "").expanduser()) if self.qwen3_model_path else "",
+                "crispasr_exe": str(Path(self.crispasr_exe or "").expanduser()) if self.crispasr_exe else "",
+            }
         if backend == "qwen3_crispasr":
             return {
                 "main_model_path": str(Path(self.qwen3_model_path or "").expanduser()) if self.qwen3_model_path else "",
@@ -269,6 +287,126 @@ class ASREngine:
             }
         return {
             "main_model_path": str(self.model_path or ""),
+        }
+
+    async def _transcribe_qwen3_text_whisper_timeline(
+        self,
+        target: Path,
+        *,
+        language: str,
+        speaker_labels: bool,
+        silence_aware_split: bool,
+        preview_max_line_length: int | None = None,
+    ) -> dict[str, Any]:
+        warnings: list[str] = []
+        timeline_repairs: list[dict[str, Any]] = []
+
+        try:
+            _, whisper_segments, whisper_backend = await self._transcribe_whisper_segments(target, language=language)
+        except TypeError as exc:
+            if "language" not in str(exc) or "unexpected keyword" not in str(exc):
+                raise
+            _, whisper_segments, whisper_backend = await self._transcribe_whisper_segments(target)
+
+        whisper_aligned = [dict(segment or {}) for segment in (whisper_segments or [])]
+        silence_ranges: list[dict[str, float]] = []
+        if silence_aware_split:
+            try:
+                silence_ranges = self._detect_silence_ranges(target)
+            except Exception as exc:
+                warnings.append(f"长静音检测失败，已回退词间切分：{exc}")
+        whisper_aligned, split_count, silence_split_count = self._split_segments_by_word_gaps(
+            whisper_aligned,
+            silence_ranges=silence_ranges if silence_aware_split else None,
+        )
+        if split_count:
+            warnings.append(f"Whisper 时间轴已按词间静音自动拆分 {split_count} 个识别片段。")
+        if silence_split_count:
+            warnings.append(f"Whisper 时间轴已避开 {silence_split_count} 段长静音区域切分识别片段。")
+        audio_duration_sec = self._probe_audio_duration_seconds(target)
+        whisper_aligned, corrected_count = self._correct_segment_timings(
+            whisper_aligned,
+            audio_duration_sec=audio_duration_sec,
+        )
+        if corrected_count:
+            warnings.append(f"Whisper 时间轴已矫正 {corrected_count} 个异常过长或过宽的识别片段。")
+
+        preview_max_line_length = min(50, max(2, int(preview_max_line_length or getattr(self, "qwen3_preview_max_line_length", 20) or 20)))
+        qwen_raw_text, qwen_segments, _ = await self._transcribe_crispasr_segments(
+            target,
+            enable_timestamps_override=False,
+            language_override=language,
+            split_on_punctuation=True,
+            max_line_length=preview_max_line_length,
+        )
+        qwen_text_segments = self._build_qwen_text_segments(
+            qwen_raw_text,
+            qwen_segments,
+            max_line_length=preview_max_line_length,
+        )
+        if not qwen_text_segments:
+            raise RuntimeError("Qwen3-ASR 未返回可用文本分句。")
+
+        if speaker_labels:
+            has_timestamps = any(
+                isinstance(seg.get("start"), (int, float)) and isinstance(seg.get("end"), (int, float))
+                for seg in whisper_aligned
+            )
+            if has_timestamps:
+                turns = await self._run_diarization(target)
+                _, whisper_aligned, _ = self._label_segments_with_turns(whisper_aligned, "", turns, warnings)
+            else:
+                warnings.append("Whisper 时间轴缺少稳定时间戳，已跳过说话人分离。")
+
+        fused_segments, fusion_warnings = self._fuse_qwen_text_with_whisper_timeline(
+            qwen_text_segments,
+            whisper_aligned,
+            audio_duration_sec=audio_duration_sec,
+        )
+        warnings.extend(fusion_warnings)
+
+        plain_text = "\n".join(str(seg.get("text", "")).strip() for seg in fused_segments if str(seg.get("text", "")).strip()).strip()
+        speaker_map: dict[str, str] = {}
+        labeled_lines: list[str] = []
+        alignments: list[dict[str, Any]] = []
+        for idx, seg in enumerate(fused_segments, start=1):
+            text = str(seg.get("text", "")).strip()
+            if not text:
+                continue
+            speaker = str(seg.get("speaker", "") or "").strip()
+            if speaker:
+                speaker_map[speaker] = speaker
+                labeled_lines.append(f"{speaker}：{text}")
+            else:
+                labeled_lines.append(text)
+            start_ms = int(seg.get("start_ms") or 0)
+            end_ms = int(seg.get("end_ms") or start_ms + 1)
+            if end_ms <= start_ms:
+                end_ms = start_ms + 1
+            alignments.append(
+                {
+                    "id": f"asr-seg-{idx}",
+                    "start_ms": start_ms,
+                    "end_ms": end_ms,
+                    "text": text,
+                    "speaker": speaker,
+                    "timing_check": dict(seg.get("timing_check") or {}),
+                }
+            )
+
+        return {
+            "text": plain_text,
+            "labeled_text": "\n".join(labeled_lines).strip() if speaker_labels else plain_text,
+            "backend": HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND,
+            "speaker_labels": bool(speaker_labels),
+            "alignments": alignments,
+            "speaker_map": speaker_map,
+            "warnings": warnings,
+            "timeline_repairs": timeline_repairs,
+            "model_files": {
+                **self._build_model_files(HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND),
+                "whisper_backend": whisper_backend,
+            },
         }
 
     def _validate_qwen3_speaker_label_requirements(self) -> None:
@@ -929,6 +1067,634 @@ class ASREngine:
         return merged
 
     @classmethod
+    def _normalize_alignment_text(cls, text: str) -> str:
+        chars: list[str] = []
+        for char in str(text or "").lower():
+            if re.match(r"[\u4e00-\u9fffA-Za-z0-9]", char):
+                chars.append(char)
+        return "".join(chars)
+
+    @classmethod
+    def _text_for_normalized_range(cls, text: str, start: int, end: int) -> str:
+        normalized_index = 0
+        out: list[str] = []
+        for char in str(text or ""):
+            is_text_char = bool(re.match(r"[\u4e00-\u9fffA-Za-z0-9]", char.lower()))
+            if is_text_char:
+                if normalized_index >= end:
+                    break
+                if normalized_index >= start:
+                    out.append(char)
+                normalized_index += 1
+                continue
+            if start <= normalized_index <= end:
+                out.append(char)
+        return "".join(out)
+
+    @staticmethod
+    def _estimate_unmatched_edge_ms(text: str) -> int:
+        raw = str(text or "").strip()
+        if not raw:
+            return 0
+        cjk_count = len(re.findall(r"[\u4e00-\u9fff]", raw))
+        latin_chars = sum(len(token) for token in re.findall(r"[A-Za-z0-9']+", raw))
+        punctuation_count = len(re.findall(r"[，。！？；,.!?;:、]", raw))
+        estimated = cjk_count * 210 + latin_chars * 55 + punctuation_count * 110
+        return max(0, min(1500, int(round(estimated))))
+
+    @classmethod
+    def _best_fuzzy_timeline_match(
+        cls,
+        qwen_norm: str,
+        stream: str,
+        cursor: int,
+    ) -> dict[str, Any] | None:
+        if not qwen_norm or not stream or cursor >= len(stream):
+            return None
+        exact_at = stream.find(qwen_norm, cursor)
+        if exact_at >= 0:
+            return {
+                "stream_start": exact_at,
+                "stream_end": exact_at + len(qwen_norm),
+                "qwen_start": 0,
+                "qwen_end": len(qwen_norm),
+                "score": 1.0,
+                "matched_chars": len(qwen_norm),
+                "kind": "word_match",
+            }
+
+        remaining = stream[cursor:]
+        matcher = SequenceMatcher(None, qwen_norm, remaining, autojunk=False)
+        blocks = [block for block in matcher.get_matching_blocks() if block.size > 0]
+        if not blocks:
+            return None
+
+        best: dict[str, Any] | None = None
+        for left in range(len(blocks)):
+            matched_chars = 0
+            q_start = blocks[left].a
+            q_end = blocks[left].a + blocks[left].size
+            w_start = blocks[left].b
+            w_end = blocks[left].b + blocks[left].size
+            for right in range(left, len(blocks)):
+                block = blocks[right]
+                if right > left:
+                    q_gap = block.a - q_end
+                    w_gap = block.b - w_end
+                    if q_gap < 0 or w_gap < 0 or q_gap > 3 or w_gap > 4:
+                        break
+                    q_end = block.a + block.size
+                    w_end = block.b + block.size
+                matched_chars += block.size
+                q_span = max(1, q_end - q_start)
+                w_span = max(1, w_end - w_start)
+                coverage = matched_chars / max(1, len(qwen_norm))
+                density = matched_chars / max(q_span, w_span)
+                score = coverage * 0.72 + density * 0.28
+                candidate = {
+                    "stream_start": cursor + w_start,
+                    "stream_end": cursor + w_end,
+                    "qwen_start": q_start,
+                    "qwen_end": q_end,
+                    "score": score,
+                    "matched_chars": matched_chars,
+                    "kind": "fuzzy_word_match",
+                }
+                if best is None or candidate["score"] > best["score"]:
+                    best = candidate
+
+        if best is None:
+            return None
+        min_coverage = 0.55 if len(qwen_norm) >= 8 else 0.65
+        if best["matched_chars"] / max(1, len(qwen_norm)) < min_coverage:
+            return None
+        return best
+
+    @classmethod
+    def _split_plain_text_sentences(cls, text: str) -> list[str]:
+        raw = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+        if not raw:
+            return []
+        pieces: list[str] = []
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            matches = re.findall(r"[^。！？!?\n]+[。！？!?][”\"'’）)]}》】]*|[^。！？!?\n]+", line)
+            pieces.extend(item.strip() for item in matches if item.strip())
+        return pieces or [raw]
+
+    @classmethod
+    def _preview_line_text_length(cls, text: str) -> int:
+        return len(cls._normalize_alignment_text(text))
+
+    @classmethod
+    def _repair_leading_closing_punctuation_rows(cls, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        repaired: list[dict[str, Any]] = []
+        closing_marks = set("”\"'’）)]}》】」』")
+        sentence_end_marks = set("。！？!?")
+        for row in rows:
+            text = str(row.get("text", "") or "").strip()
+            if repaired:
+                close_end = 0
+                if text[:1] in sentence_end_marks:
+                    index = 0
+                    while index < len(text) and text[index] in sentence_end_marks:
+                        index += 1
+                    close_index = index
+                    while close_index < len(text) and text[close_index] in closing_marks:
+                        close_index += 1
+                    if close_index > index:
+                        close_end = close_index
+                else:
+                    while close_end < len(text) and text[close_end] in closing_marks:
+                        close_end += 1
+
+                if close_end:
+                    close_text = text[:close_end]
+                    rest_text = text[close_end:].strip()
+                    repaired[-1] = {
+                        **repaired[-1],
+                        "text": cls._join_tokens_for_language(str(repaired[-1].get("text", "")).strip(), close_text),
+                    }
+                    if not rest_text:
+                        continue
+                    row = {**row, "text": rest_text}
+            repaired.append(row)
+        return repaired
+
+    @classmethod
+    def _split_preview_text_by_weak_breaks(cls, text: str, max_line_length: int) -> list[str]:
+        limit = max(1, int(max_line_length or 1))
+        raw = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+        if not raw:
+            return []
+
+        weak_break_marks = set("，,、；;")
+        punctuation_or_quote_marks = set("，,、；;。！？!?:：、…\"'“”‘’（）()[]{}《》【】「」『』")
+
+        def split_standalone_weak_breaks(source: str) -> list[str]:
+            clauses: list[str] = []
+            start = 0
+            for index, char in enumerate(source):
+                if char not in weak_break_marks:
+                    continue
+                next_index = index + 1
+                while next_index < len(source) and source[next_index].isspace():
+                    next_index += 1
+                if next_index < len(source) and source[next_index] in punctuation_or_quote_marks:
+                    continue
+                clause = source[start : index + 1].strip()
+                if clause:
+                    clauses.append(clause)
+                start = index + 1
+            tail = source[start:].strip()
+            if tail:
+                clauses.append(tail)
+            return clauses
+
+        lines: list[str] = []
+        for source_line in raw.splitlines():
+            source_line = source_line.strip()
+            if not source_line:
+                continue
+            if cls._preview_line_text_length(source_line) <= limit:
+                lines.append(source_line)
+                continue
+
+            clauses = split_standalone_weak_breaks(source_line)
+            if len(clauses) <= 1:
+                lines.append(source_line)
+                continue
+
+            current = ""
+            for clause in clauses:
+                if not current:
+                    current = clause
+                    continue
+                candidate = cls._join_tokens_for_language(current, clause)
+                current_len = cls._preview_line_text_length(current)
+                clause_len = cls._preview_line_text_length(clause)
+                if cls._preview_line_text_length(candidate) <= limit or current_len <= 3 or clause_len <= 3:
+                    current = candidate
+                    continue
+                lines.append(current)
+                current = clause
+            if current:
+                lines.append(current)
+
+        return lines or [raw]
+
+    @classmethod
+    def _split_preview_text_by_natural_breaks(cls, text: str, max_line_length: int) -> list[str]:
+        raw = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+        if not raw:
+            return []
+        lines: list[str] = []
+        for strong_sentence in cls._split_plain_text_sentences(raw):
+            if cls._preview_line_text_length(strong_sentence) <= max_line_length:
+                lines.append(strong_sentence)
+            else:
+                lines.extend(cls._split_preview_text_by_weak_breaks(strong_sentence, max_line_length))
+        return lines or [raw]
+
+    @classmethod
+    def _build_qwen_text_segments(
+        cls,
+        raw_text: str,
+        segments: list[dict[str, Any]],
+        *,
+        max_line_length: int | None = None,
+    ) -> list[dict[str, Any]]:
+        rows = [
+            {"text": str(segment.get("text", "")).strip(), "speaker": str(segment.get("speaker", "") or "").strip()}
+            for segment in (segments or [])
+            if str(segment.get("text", "")).strip()
+        ]
+        if max_line_length is None:
+            if len(rows) > 1:
+                return rows
+            source = "\n".join(row["text"] for row in rows).strip() or str(raw_text or "").strip()
+            return [{"text": text, "speaker": ""} for text in cls._split_plain_text_sentences(source)]
+
+        if rows:
+            split_rows: list[dict[str, Any]] = []
+            for row in rows:
+                if cls._preview_line_text_length(row["text"]) <= max_line_length:
+                    split_rows.append(row)
+                    continue
+                for text in cls._split_preview_text_by_weak_breaks(row["text"], max_line_length):
+                    split_rows.append({"text": text, "speaker": row["speaker"]})
+            if split_rows:
+                return cls._repair_leading_closing_punctuation_rows(split_rows)
+
+        source = "\n".join(row["text"] for row in rows).strip() or str(raw_text or "").strip()
+        split_rows = [{"text": text, "speaker": ""} for text in cls._split_preview_text_by_natural_breaks(source, max_line_length)]
+        if split_rows:
+            return split_rows
+        if len(rows) > 1:
+            return rows
+        return [{"text": text, "speaker": ""} for text in cls._split_plain_text_sentences(source)]
+
+    @classmethod
+    def _build_timeline_char_stream(cls, segments: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]], list[int]]:
+        stream_chars: list[str] = []
+        units: list[dict[str, Any]] = []
+        char_to_unit: list[int] = []
+
+        for segment_index, segment in enumerate(segments or []):
+            seg_start = cls._coerce_finite_seconds(segment.get("start"))
+            seg_end = cls._coerce_finite_seconds(segment.get("end"))
+            if seg_start is None or seg_end is None or seg_end <= seg_start:
+                continue
+            words = cls._normalize_word_items(segment.get("words"))
+            if words:
+                for word in words:
+                    normalized = cls._normalize_alignment_text(str(word.get("text", "")))
+                    if not normalized:
+                        continue
+                    unit_index = len(units)
+                    units.append(
+                        {
+                            "start": float(word["start"]),
+                            "end": float(word["end"]),
+                            "text": str(word.get("text", "")),
+                            "segment_index": segment_index,
+                        }
+                    )
+                    for char in normalized:
+                        stream_chars.append(char)
+                        char_to_unit.append(unit_index)
+                continue
+
+            normalized = cls._normalize_alignment_text(str(segment.get("text", "")))
+            if not normalized:
+                continue
+            duration = max(0.001, seg_end - seg_start)
+            step = duration / max(1, len(normalized))
+            for index, char in enumerate(normalized):
+                unit_index = len(units)
+                start = seg_start + step * index
+                end = seg_start + step * (index + 1)
+                units.append({"start": start, "end": end, "text": char, "segment_index": segment_index})
+                stream_chars.append(char)
+                char_to_unit.append(unit_index)
+
+        return "".join(stream_chars), units, char_to_unit
+
+    @classmethod
+    def _best_anchor_timeline_match(
+        cls,
+        qwen_norm: str,
+        stream: str,
+        cursor: int,
+        units: list[dict[str, Any]],
+        char_to_unit: list[int],
+    ) -> dict[str, Any] | None:
+        if not qwen_norm or not stream or cursor >= len(stream) or not units or not char_to_unit:
+            return None
+
+        regions: list[tuple[int, int]] = []
+        scan = max(0, cursor)
+        while scan < len(stream) and len(regions) < 4:
+            segment_index = units[char_to_unit[scan]].get("segment_index")
+            region_start = scan
+            region_end = scan + 1
+            while (
+                region_end < len(char_to_unit)
+                and units[char_to_unit[region_end]].get("segment_index") == segment_index
+            ):
+                region_end += 1
+            if region_end > region_start:
+                regions.append((region_start, region_end))
+            scan = region_end
+
+        max_prefix_chars = min(8, max(0, len(qwen_norm) - 2))
+        best: dict[str, Any] | None = None
+        for qwen_start in range(0, max_prefix_chars + 1):
+            qwen_tail = qwen_norm[qwen_start:]
+            if len(qwen_tail) < 2:
+                continue
+            min_anchor_len = 3 if len(qwen_tail) >= 6 else 2
+            for region_start, region_end in regions:
+                local = stream[region_start:region_end]
+                if not local:
+                    continue
+                matcher = SequenceMatcher(None, qwen_tail, local, autojunk=False)
+                blocks = [block for block in matcher.get_matching_blocks() if block.size > 0]
+                matched_chars = sum(block.size for block in blocks)
+                similarity = matcher.ratio()
+                qwen_coverage = matched_chars / max(1, len(qwen_tail))
+                whisper_coverage = matched_chars / max(1, len(local))
+                min_similarity = 0.72 if len(qwen_tail) >= 10 else 0.80
+                if similarity < min_similarity or qwen_coverage < 0.68 or whisper_coverage < 0.58:
+                    continue
+
+                first_block = next(
+                    (
+                        block
+                        for block in blocks
+                        if block.size >= min_anchor_len and block.a <= 4 and block.b <= 6
+                    ),
+                    None,
+                )
+                if first_block is None:
+                    continue
+                found_at = region_start + first_block.b
+                qwen_anchor_start = qwen_start + first_block.a
+                stream_end = region_end
+                if stream_end <= found_at:
+                    continue
+                anchor = qwen_norm[qwen_anchor_start : qwen_anchor_start + first_block.size]
+                prefix_penalty = min(0.18, qwen_anchor_start * 0.018)
+                distance_penalty = min(0.12, max(0, found_at - cursor) * 0.004)
+                anchor_bonus = min(0.16, first_block.size * 0.018)
+                score = max(
+                    0.0,
+                    min(
+                        0.92,
+                        similarity * 0.64
+                        + qwen_coverage * 0.24
+                        + whisper_coverage * 0.12
+                        + anchor_bonus
+                        - prefix_penalty
+                        - distance_penalty,
+                    ),
+                )
+                candidate = {
+                    "stream_start": found_at,
+                    "stream_end": stream_end,
+                    "qwen_start": qwen_anchor_start,
+                    "qwen_end": len(qwen_norm),
+                    "score": score,
+                    "matched_chars": matched_chars,
+                    "anchor_text": anchor,
+                    "anchor_region_text": local,
+                    "anchor_similarity": similarity,
+                    "anchor_qwen_coverage": qwen_coverage,
+                    "anchor_whisper_coverage": whisper_coverage,
+                    "kind": "anchor_prefix_match",
+                }
+                if best is None or candidate["score"] > best["score"]:
+                    best = candidate
+
+        return best
+
+    @classmethod
+    def _timeline_bounds(cls, segments: list[dict[str, Any]]) -> tuple[float, float]:
+        starts: list[float] = []
+        ends: list[float] = []
+        for segment in segments or []:
+            start = cls._coerce_finite_seconds(segment.get("start"))
+            end = cls._coerce_finite_seconds(segment.get("end"))
+            if start is None or end is None or end <= start:
+                continue
+            starts.append(start)
+            ends.append(end)
+        if not starts or not ends:
+            return 0.0, 0.001
+        return min(starts), max(ends)
+
+    @classmethod
+    def _pick_speaker_for_range(cls, start_sec: float, end_sec: float, segments: list[dict[str, Any]]) -> str:
+        best_speaker = ""
+        best_overlap = 0.0
+        midpoint = (start_sec + end_sec) / 2.0
+        nearest_speaker = ""
+        nearest_distance = float("inf")
+        for segment in segments or []:
+            speaker = str(segment.get("speaker", "") or "").strip()
+            if not speaker:
+                continue
+            seg_start = cls._coerce_finite_seconds(segment.get("start"))
+            seg_end = cls._coerce_finite_seconds(segment.get("end"))
+            if seg_start is None or seg_end is None or seg_end <= seg_start:
+                continue
+            overlap = max(0.0, min(end_sec, seg_end) - max(start_sec, seg_start))
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_speaker = speaker
+            center = (seg_start + seg_end) / 2.0
+            distance = abs(center - midpoint)
+            if distance < nearest_distance:
+                nearest_distance = distance
+                nearest_speaker = speaker
+        return best_speaker or nearest_speaker
+
+    @classmethod
+    def _fuse_qwen_text_with_whisper_timeline(
+        cls,
+        qwen_segments: list[dict[str, Any]],
+        whisper_segments: list[dict[str, Any]],
+        *,
+        audio_duration_sec: float | None,
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        stream, units, char_to_unit = cls._build_timeline_char_stream(whisper_segments)
+        timeline_start, timeline_end = cls._timeline_bounds(whisper_segments)
+        audio_end_ms = None
+        audio_duration = cls._coerce_finite_seconds(audio_duration_sec)
+        if audio_duration is not None:
+            audio_end_ms = int(round(audio_duration * 1000))
+            timeline_end = min(timeline_end, audio_duration)
+        total_duration = max(0.001, timeline_end - timeline_start)
+        qwen_char_lengths = [
+            max(1, len(cls._normalize_alignment_text(str(seg.get("text", "")))))
+            for seg in qwen_segments
+        ]
+        total_qwen_chars = sum(qwen_char_lengths) or 1
+        consumed_qwen_chars = 0
+        cursor = 0
+        previous_end_ms = -1
+        fallback_count = 0
+        fused: list[dict[str, Any]] = []
+
+        for index, segment in enumerate(qwen_segments):
+            text = str(segment.get("text", "")).strip()
+            if not text:
+                continue
+            normalized = cls._normalize_alignment_text(text)
+            current_qwen_chars = qwen_char_lengths[index] if index < len(qwen_char_lengths) else max(1, len(normalized))
+            matched = False
+            timing_check: dict[str, Any] = {"source": HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND}
+            start_sec = timeline_start
+            end_sec = timeline_start + max(0.001, cls._estimate_speaking_seconds(text))
+
+            if normalized and stream and units and char_to_unit:
+                match = cls._best_fuzzy_timeline_match(normalized, stream, cursor)
+                anchor_match = cls._best_anchor_timeline_match(normalized, stream, cursor, units, char_to_unit)
+                if anchor_match and (
+                    match is None
+                    or (
+                        str(match.get("kind") or "") != "word_match"
+                        and float(match.get("score") or 0.0) < 0.82
+                    )
+                ):
+                    match = anchor_match
+                if match:
+                    stream_start = int(match["stream_start"])
+                    stream_end = int(match["stream_end"])
+                    first_unit = units[char_to_unit[stream_start]]
+                    last_unit = units[char_to_unit[min(len(char_to_unit) - 1, stream_end - 1)]]
+                    start_sec = float(first_unit["start"])
+                    end_sec = float(last_unit["end"])
+                    qwen_start = int(match.get("qwen_start") or 0)
+                    qwen_end = int(match.get("qwen_end") or len(normalized))
+                    prefix_text = cls._text_for_normalized_range(text, 0, qwen_start) if qwen_start > 0 else ""
+                    qwen_suffix_text = cls._text_for_normalized_range(text, qwen_end, len(normalized)) if qwen_end < len(normalized) else ""
+                    prefix_ms = cls._estimate_unmatched_edge_ms(prefix_text)
+                    suffix_ms = cls._estimate_unmatched_edge_ms(qwen_suffix_text)
+                    if prefix_ms:
+                        start_sec = max(0.0, start_sec - prefix_ms / 1000.0)
+                    if suffix_ms:
+                        end_sec = min(timeline_end, end_sec + suffix_ms / 1000.0)
+                    match_kind = str(match.get("kind") or "fuzzy_word_match")
+                    boundary_suffix = ""
+                    boundary_relaxed_ms = 0
+                    if stream_end < len(stream):
+                        suffix_unit = units[char_to_unit[stream_end]]
+                        boundary_unit_text = str(suffix_unit.get("text", ""))
+                        suffix_start = float(suffix_unit.get("start", end_sec) or end_sec)
+                        suffix_end = float(suffix_unit.get("end", suffix_start) or suffix_start)
+                        suffix_norm = cls._normalize_alignment_text(boundary_unit_text)
+                        suffix_gap_ms = int(round(max(0.0, suffix_start - end_sec) * 1000))
+                        suffix_duration_ms = int(round(max(0.0, suffix_end - suffix_start) * 1000))
+                        if (
+                            suffix_norm in {"呢", "吗", "啊", "呀", "吧", "嘛", "啦", "了", "么"}
+                            and suffix_gap_ms <= 180
+                            and suffix_duration_ms <= 450
+                        ):
+                            previous_end_sec = end_sec
+                            end_sec = min(timeline_end, max(end_sec, suffix_end))
+                            boundary_suffix = suffix_norm
+                            boundary_relaxed_ms = int(round(max(0.0, end_sec - previous_end_sec) * 1000))
+                        elif match_kind != "word_match" and suffix_gap_ms <= 120:
+                            previous_end_sec = end_sec
+                            end_sec = min(timeline_end, end_sec + 0.08)
+                            boundary_relaxed_ms = int(round(max(0.0, end_sec - previous_end_sec) * 1000))
+                    cursor = max(cursor, stream_end)
+                    matched = True
+                    timing_check["alignment"] = match_kind
+                    timing_check["match_score"] = round(float(match.get("score") or 0.0), 3)
+                    if match.get("anchor_text"):
+                        timing_check["anchor_text"] = str(match.get("anchor_text") or "")
+                        timing_check["anchor_similarity"] = round(float(match.get("anchor_similarity") or 0.0), 3)
+                        timing_check["anchor_qwen_coverage"] = round(float(match.get("anchor_qwen_coverage") or 0.0), 3)
+                        timing_check["anchor_whisper_coverage"] = round(float(match.get("anchor_whisper_coverage") or 0.0), 3)
+                    timing_check["qwen_unmatched_prefix"] = prefix_text
+                    timing_check["qwen_unmatched_suffix"] = qwen_suffix_text
+                    timing_check["whisper_boundary_suffix"] = boundary_suffix
+                    timing_check["expanded_before_ms"] = prefix_ms
+                    timing_check["expanded_after_ms"] = suffix_ms
+                    timing_check["end_boundary_relaxed_ms"] = boundary_relaxed_ms
+
+            if not matched:
+                fallback_count += 1
+                remaining_qwen_chars = sum(qwen_char_lengths[index:]) or current_qwen_chars
+                if stream and units and char_to_unit and cursor < len(stream):
+                    stream_start = cursor
+                    remaining_stream_chars = max(1, len(stream) - stream_start)
+                    advance_chars = max(1, int(round(remaining_stream_chars * current_qwen_chars / max(1, remaining_qwen_chars))))
+                    stream_end = min(len(stream), stream_start + advance_chars)
+                    first_unit = units[char_to_unit[min(len(char_to_unit) - 1, stream_start)]]
+                    last_unit = units[char_to_unit[min(len(char_to_unit) - 1, max(stream_start, stream_end - 1))]]
+                    start_sec = float(first_unit["start"])
+                    end_sec = float(last_unit["end"])
+                    cursor = max(cursor, stream_end)
+                    timing_check["alignment"] = "timeline_cursor_ratio_fallback"
+                    timing_check["fallback_stream_start"] = stream_start
+                    timing_check["fallback_stream_end"] = stream_end
+                else:
+                    remaining_end_sec = timeline_end
+                    if audio_end_ms is not None:
+                        remaining_end_sec = min(remaining_end_sec, audio_end_ms / 1000.0)
+                    start_floor = (previous_end_ms + 1) / 1000.0 if previous_end_ms >= 0 else timeline_start
+                    start_sec = max(timeline_start, start_floor)
+                    available_sec = max(0.001, remaining_end_sec - start_sec)
+                    end_sec = min(
+                        remaining_end_sec,
+                        start_sec + available_sec * current_qwen_chars / max(1, remaining_qwen_chars),
+                    )
+                    timing_check["alignment"] = "timeline_remaining_ratio_fallback"
+
+            consumed_qwen_chars += current_qwen_chars
+            start_ms = int(round(start_sec * 1000))
+            end_ms = int(round(end_sec * 1000))
+            if start_ms <= previous_end_ms:
+                start_ms = previous_end_ms + 1
+            if audio_end_ms is not None and start_ms >= audio_end_ms:
+                start_ms = max(0, audio_end_ms - 1)
+            if audio_end_ms is not None:
+                end_ms = min(end_ms, audio_end_ms)
+            if end_ms <= start_ms:
+                estimated_ms = max(1, int(round(cls._estimate_speaking_seconds(text) * 1000)))
+                end_ms = start_ms + estimated_ms
+                if audio_end_ms is not None:
+                    end_ms = min(end_ms, audio_end_ms)
+                if end_ms <= start_ms:
+                    end_ms = start_ms + 1
+            previous_end_ms = end_ms
+
+            speaker = cls._pick_speaker_for_range(start_ms / 1000.0, end_ms / 1000.0, whisper_segments)
+            fused.append(
+                {
+                    "text": text,
+                    "speaker": speaker,
+                    "start_ms": start_ms,
+                    "end_ms": end_ms,
+                    "timing_check": {
+                        **timing_check,
+                        "qwen_segment_index": index,
+                        "matched": matched,
+                    },
+                }
+            )
+
+        warnings: list[str] = []
+        if fallback_count:
+            warnings.append(f"混合时间轴有 {fallback_count} 个 Qwen3 分句未精确匹配 Whisper 词流，已按时间比例估算。")
+        return fused, warnings
+
+    @classmethod
     def _merge_qwen3_trailing_fragments(cls, segments: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]]]:
         merged: list[dict[str, Any]] = []
         merge_count = 0
@@ -1256,6 +2022,8 @@ class ASREngine:
         *,
         enable_timestamps_override: bool | None = None,
         language_override: str | None = None,
+        split_on_punctuation: bool = False,
+        max_line_length: int | None = None,
     ) -> tuple[str, list[dict[str, Any]], str]:
         if not self.is_loaded or self._backend != "qwen3_crispasr":
             await self.load_model(self.model_path, self.device, backend="qwen3_crispasr")
@@ -1314,6 +2082,11 @@ class ASREngine:
                 cmd.extend(["-t", str(threads)])
             if language:
                 cmd.extend(["-l", language])
+            if split_on_punctuation:
+                cmd.append("--split-on-punct")
+            if max_line_length is not None:
+                line_length = max(1, int(max_line_length or 1))
+                cmd.extend(["-ml", str(line_length)])
             if use_timestamps and forced_aligner:
                 forced_aligner_path = Path(forced_aligner).expanduser()
                 if not forced_aligner_path.exists() or not forced_aligner_path.is_file():
@@ -1321,7 +2094,8 @@ class ASREngine:
                 cmd.extend(["-am", str(forced_aligner_path)])
             if use_timestamps:
                 cmd.extend(["-osrt"])
-                cmd.extend(["-ml", "1"])
+                if max_line_length is None:
+                    cmd.extend(["-ml", "1"])
 
             try:
                 proc = await asyncio.to_thread(
@@ -1597,6 +2371,13 @@ class ASREngine:
             return "whisper"
         if val in {"qwen3_crispasr", "qwen3_asr", "qwen3-asr"}:
             return "qwen3_crispasr"
+        if val in {
+            HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND,
+            "qwen3-whisper",
+            "qwen3_whisper",
+            "qwen3_text_whisper",
+        }:
+            return HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND
         return val
 
     @staticmethod

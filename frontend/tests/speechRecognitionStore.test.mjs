@@ -21,3 +21,25 @@ test("speech recognition store normalizes vocal separation model", () => {
   assert.equal(useSpeechRecognitionStore.getState().vocalSeparationModel, "htdemucs");
   assert.equal(useSpeechRecognitionStore.getState().silenceAwareSplit, false);
 });
+
+test("speech recognition store keeps hybrid qwen whisper timeline backend", () => {
+  useSpeechRecognitionStore.getState().setAsrBackend("qwen3_text_whisper_timeline");
+  assert.equal(useSpeechRecognitionStore.getState().asrBackend, "qwen3_text_whisper_timeline");
+
+  useSpeechRecognitionStore.getState().setAsrBackend("qwen3_crispasr");
+  assert.equal(useSpeechRecognitionStore.getState().asrBackend, "qwen3_crispasr");
+
+  useSpeechRecognitionStore.getState().setAsrBackend("unknown");
+  assert.equal(useSpeechRecognitionStore.getState().asrBackend, "whisper");
+});
+
+test("speech recognition store clamps hybrid preview max line length", () => {
+  useSpeechRecognitionStore.getState().setQwen3PreviewMaxLineLength(18);
+  assert.equal(useSpeechRecognitionStore.getState().qwen3PreviewMaxLineLength, 18);
+
+  useSpeechRecognitionStore.getState().setQwen3PreviewMaxLineLength(0);
+  assert.equal(useSpeechRecognitionStore.getState().qwen3PreviewMaxLineLength, 2);
+
+  useSpeechRecognitionStore.getState().setQwen3PreviewMaxLineLength(120);
+  assert.equal(useSpeechRecognitionStore.getState().qwen3PreviewMaxLineLength, 50);
+});
