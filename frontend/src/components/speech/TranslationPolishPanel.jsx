@@ -1,6 +1,7 @@
 import { FolderPlus, Languages } from "lucide-react";
 import { useId } from "react";
 
+import { SPEECH_TRANSLATION_TARGET_LANGUAGE_OPTIONS } from "../../constants/speechTranslationOptions";
 import Button from "../ui/Button";
 
 export default function TranslationPolishPanel({
@@ -64,9 +65,9 @@ export default function TranslationPolishPanel({
         <div className="formGroup">
           <label className="formLabel" htmlFor={targetLanguageSelectId}>目标语言</label>
           <select id={targetLanguageSelectId} className="textInput" value={translationTargetLanguage} onChange={(event) => setTranslationTargetLanguage(event.target.value)} disabled={translationMode !== "translate_polish" || controlsDisabled}>
-            <option value="中文">中文</option>
-            <option value="英文">英文</option>
-            <option value="日文">日文</option>
+            {SPEECH_TRANSLATION_TARGET_LANGUAGE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
           </select>
         </div>
       </div>

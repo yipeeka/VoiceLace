@@ -1,0 +1,17 @@
+export const SPEECH_TRANSLATION_TARGET_LANGUAGE_OPTIONS = [
+  { value: "中文", label: "中文" },
+  { value: "英文", label: "英文" },
+  { value: "日文", label: "日文" },
+  { value: "韩文", label: "韩文" },
+  { value: "法文", label: "法文" },
+  { value: "德文", label: "德文" },
+  { value: "西班牙文", label: "西班牙文" },
+  { value: "葡萄牙文", label: "葡萄牙文" },
+  { value: "意大利文", label: "意大利文" },
+  { value: "俄文", label: "俄文" },
+  { value: "阿拉伯文", label: "阿拉伯文" },
+  { value: "越南文", label: "越南文" },
+  { value: "泰文", label: "泰文" },
+  { value: "印尼文", label: "印尼文" },
+  { value: "印地文", label: "印地文" },
+];
