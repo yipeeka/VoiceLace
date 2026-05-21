@@ -22,9 +22,9 @@ test("speech recognition store normalizes vocal separation model", () => {
   assert.equal(useSpeechRecognitionStore.getState().silenceAwareSplit, false);
 });
 
-test("speech recognition store keeps hybrid qwen whisper timeline backend", () => {
-  useSpeechRecognitionStore.getState().setAsrBackend("qwen3_text_whisper_timeline");
-  assert.equal(useSpeechRecognitionStore.getState().asrBackend, "qwen3_text_whisper_timeline");
+test("speech recognition store rejects unsupported asr backends", () => {
+  useSpeechRecognitionStore.getState().setAsrBackend("unsupported_backend");
+  assert.equal(useSpeechRecognitionStore.getState().asrBackend, "whisper");
 
   useSpeechRecognitionStore.getState().setAsrBackend("qwen3_crispasr");
   assert.equal(useSpeechRecognitionStore.getState().asrBackend, "qwen3_crispasr");
@@ -33,7 +33,7 @@ test("speech recognition store keeps hybrid qwen whisper timeline backend", () =
   assert.equal(useSpeechRecognitionStore.getState().asrBackend, "whisper");
 });
 
-test("speech recognition store clamps hybrid preview max line length", () => {
+test("speech recognition store clamps qwen preview max line length", () => {
   useSpeechRecognitionStore.getState().setQwen3PreviewMaxLineLength(-1);
   assert.equal(useSpeechRecognitionStore.getState().qwen3PreviewMaxLineLength, -1);
 

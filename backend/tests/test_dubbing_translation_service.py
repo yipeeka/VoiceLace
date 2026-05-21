@@ -120,6 +120,41 @@ class DubbingTranslationServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["segments"][0]["text"], "评论区聊聊。")
         self.assertGreater(result["segments"][0]["end_ms"], result["segments"][0]["start_ms"])
 
+    async def test_polish_only_ignores_different_target_language(self) -> None:
+        class RecordingPolishEngine(_FakeTranslationEngine):
+            def __init__(self):
+                self.prompts: list[str] = []
+
+            async def generate_text(self, *, text, system_prompt, llm_options):
+                prompt = str(system_prompt or "")
+                self.prompts.append(prompt)
+                if "配音预处理助手" in prompt:
+                    return "术语：保持原文规范写法"
+                if "JSON 数组" in prompt:
+                    rows = json.loads(text)
+                    return json.dumps([{"id": row["id"], "text": f"{row['text']}润色"} for row in rows], ensure_ascii=False)
+                return f"{text}润色"
+
+        engine = RecordingPolishEngine()
+        state = _build_state()
+        state.translation_llm_engine = engine
+
+        result = await translate_dubbing_segments_for_state(
+            state=state,
+            source="secondary_local",
+            mode="polish_only",
+            target_language="英文",
+            segments=[{"id": "a", "speaker": "narrator", "text": "你好世界", "start_ms": 0, "end_ms": 5000}],
+        )
+
+        self.assertEqual(result["target_language"], "原语言")
+        self.assertEqual(result["segments"][0]["text"], "你好世界润色")
+        joined_prompts = "\n".join(engine.prompts)
+        self.assertIn("保持原语言", joined_prompts)
+        self.assertNotIn("目标语言：英文", joined_prompts)
+        self.assertNotIn("翻译为目标语言", joined_prompts)
+        self.assertNotIn("建议译法", joined_prompts)
+
     async def test_legacy_speed_window_does_not_emit_speed_override(self) -> None:
         state = _build_state()
         result = await translate_dubbing_segments_for_state(

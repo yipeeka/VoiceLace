@@ -66,10 +66,6 @@ export const useSpeechRecognitionStore = create((set) => ({
       set({ asrBackend: "qwen3_crispasr" });
       return;
     }
-    if (val === "qwen3_text_whisper_timeline") {
-      set({ asrBackend: "qwen3_text_whisper_timeline" });
-      return;
-    }
     set({ asrBackend: "whisper" });
   },
   setAsrLanguage: (asrLanguage) => {

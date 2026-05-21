@@ -12,7 +12,6 @@ from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
 from backend.api.llm_routes import enqueue_parse_task
-from backend.engine.asr_engine import HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND
 from backend.services import create_project_from_audio, parse_speaker_map_form
 from backend.services.audio_vocal_separation_service import normalize_demucs_model, prepare_vocal_audio_for_asr
 from backend.state import get_app_state
@@ -80,13 +79,6 @@ def _normalize_preview_asr_backend(value: str | None, *, default: str = "whisper
     normalized = str(value or "").strip().lower() or str(default or "whisper").strip().lower() or "whisper"
     if normalized in {"qwen3_asr", "qwen3-asr"}:
         return "qwen3_crispasr"
-    if normalized in {
-        HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND,
-        "qwen3-whisper",
-        "qwen3_whisper",
-        "qwen3_text_whisper",
-    }:
-        return HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND
     return normalized
 
 
@@ -108,7 +100,7 @@ async def _transcribe_with_optional_language(
         "enable_timestamps": enable_timestamps,
         "silence_aware_split": silence_aware_split,
     }
-    if backend in {"qwen3_crispasr", HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND} and qwen3_preview_max_line_length is not None:
+    if backend == "qwen3_crispasr" and qwen3_preview_max_line_length is not None:
         kwargs["qwen3_preview_max_line_length"] = qwen3_preview_max_line_length
     try:
         return await engine.transcribe(audio_path, **kwargs)
@@ -248,7 +240,7 @@ async def transcribe_file(
         backend,
         default=str(getattr(state.orchestrator.config, "asr_backend", "whisper") or "whisper"),
     )
-    if normalized_backend not in {"whisper", "qwen3_crispasr", HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND}:
+    if normalized_backend not in {"whisper", "qwen3_crispasr"}:
         raise HTTPException(status_code=400, detail=f"Unsupported ASR backend: {backend}")
     effective_speaker_labels = _parse_bool_form(speaker_labels, default=False)
     timestamp_default = bool(getattr(state.orchestrator.config, "qwen3_asr_enable_timestamps", False)) if normalized_backend == "qwen3_crispasr" else False
@@ -258,10 +250,8 @@ async def transcribe_file(
         if effective_speaker_labels:
             effective_timestamps = True
         effective_silence_aware_split = False
-    if normalized_backend == HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND:
-        effective_timestamps = False
     effective_preview_max_line_length = None
-    if normalized_backend in {"qwen3_crispasr", HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND}:
+    if normalized_backend == "qwen3_crispasr":
         try:
             configured_preview_max_line_length = int(getattr(state.asr_engine, "qwen3_preview_max_line_length", -1))
         except Exception:
@@ -294,8 +284,7 @@ async def transcribe_file(
             work_dir=separation_work_dir,
         )
         state.asr_vocal_separation_error = " | ".join(separation.warnings)
-        ready_backend = "whisper" if normalized_backend == HYBRID_QWEN3_TEXT_WHISPER_TIMELINE_BACKEND else normalized_backend
-        await state.orchestrator.ensure_asr_ready(backend=ready_backend)
+        await state.orchestrator.ensure_asr_ready(backend=normalized_backend)
         result = await _transcribe_with_optional_language(
             state.asr_engine,
             str(separation.audio_path),

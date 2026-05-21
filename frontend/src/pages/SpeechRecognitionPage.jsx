@@ -59,7 +59,6 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const abortRef = useRef(null);
   const translateAbortRef = useRef(null);
   const subtitleTranslateAbortRef = useRef(null);
-  const qwen3PreviewMaxLineLengthHydratedRef = useRef(false);
   const archiveInputRef = useRef(null);
   const projectFileInputRef = useRef(null);
   const speakerLabels = useSpeechRecognitionStore((state) => state.speakerLabels);
@@ -95,8 +94,6 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const setAsrLanguage = useSpeechRecognitionStore((state) => state.setAsrLanguage);
   const asrEnableTimestamps = useSpeechRecognitionStore((state) => state.asrEnableTimestamps);
   const setAsrEnableTimestamps = useSpeechRecognitionStore((state) => state.setAsrEnableTimestamps);
-  const qwen3PreviewMaxLineLength = useSpeechRecognitionStore((state) => state.qwen3PreviewMaxLineLength);
-  const setQwen3PreviewMaxLineLength = useSpeechRecognitionStore((state) => state.setQwen3PreviewMaxLineLength);
   const silenceAwareSplit = useSpeechRecognitionStore((state) => state.silenceAwareSplit);
   const setSilenceAwareSplit = useSpeechRecognitionStore((state) => state.setSilenceAwareSplit);
   const vocalSeparationEnabled = useSpeechRecognitionStore((state) => state.vocalSeparationEnabled);
@@ -243,7 +240,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       .join("\n");
   }, [remappedAlignments, formatTimestamp, speakerLabels]);
 
-  const asrBackendConfigured = ["qwen3_crispasr", "qwen3_text_whisper_timeline"].includes(asrBackend)
+  const asrBackendConfigured = ["qwen3_crispasr"].includes(asrBackend)
     ? asrBackend
     : "whisper";
   const asrLanguageOptions = useMemo(() => [
@@ -267,8 +264,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   const canInsert = useMemo(() => Boolean((previewText || "").trim()), [previewText]);
   const canInsertTranslation = useMemo(() => Boolean((translationResult || "").trim()), [translationResult]);
   const isQwen3Backend = asrBackendConfigured === "qwen3_crispasr";
-  const isHybridTimelineBackend = asrBackendConfigured === "qwen3_text_whisper_timeline";
-  const needsQwen3Asr = isQwen3Backend || isHybridTimelineBackend;
+  const needsQwen3Asr = isQwen3Backend;
   const qwen3Ready = Boolean(systemStatus?.qwen3_asr_ready);
   const asrUnavailableReason = useMemo(() => {
     if (!needsQwen3Asr) return "";
@@ -290,11 +286,6 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     ? (vocalSeparationRepoConfigured ? "Demucs 模型目录不可用，识别时会回退原音频。" : "请在系统设置配置 Demucs 本地模型目录。")
     : "";
   const speakerLabelHint = useMemo(() => {
-    if (isHybridTimelineBackend) {
-      return speakerLabels
-        ? "混合模式使用 Qwen3 文本分句、Whisper 时间轴，并用 pyannote 按 Whisper 时间轴对齐说话人。"
-        : "混合模式会把 Qwen3 文本分句对齐到 Whisper 稳定时间轴。";
-    }
     if (asrBackendConfigured === "qwen3_crispasr") {
       if (!qwen3AlignerConfigured) {
         return "Qwen3-ASR 说话人标签需要先在系统设置配置 Qwen3-ForcedAligner GGUF。";
@@ -305,7 +296,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
     }
     if (!speakerLabels) return "";
     return "Whisper + pyannote 会自动使用时间轴进行说话人标签对齐。";
-  }, [speakerLabels, asrBackendConfigured, qwen3AlignerConfigured, isHybridTimelineBackend]);
+  }, [speakerLabels, asrBackendConfigured, qwen3AlignerConfigured]);
   const canBuildDubbingProject = useMemo(
     () => canBuildDubbingProjectFromAlignments({
       translationMode,
@@ -366,18 +357,6 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       previewText: editedPreviewText,
     });
   }, [editedPreviewText, remappedAlignments]);
-
-  useEffect(() => {
-    if (qwen3PreviewMaxLineLengthHydratedRef.current) return;
-    if (qwen3PreviewMaxLineLength !== -1) {
-      qwen3PreviewMaxLineLengthHydratedRef.current = true;
-      return;
-    }
-    const configuredLength = Number(systemStatus?.qwen3_asr_preview_max_line_length);
-    if (!Number.isFinite(configuredLength)) return;
-    qwen3PreviewMaxLineLengthHydratedRef.current = true;
-    setQwen3PreviewMaxLineLength(configuredLength);
-  }, [qwen3PreviewMaxLineLength, systemStatus?.qwen3_asr_preview_max_line_length, setQwen3PreviewMaxLineLength]);
 
   useEffect(() => {
     if (isQwen3Backend) {
@@ -849,9 +828,6 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       formData.append("speaker_labels", String(Boolean(speakerLabels)));
       formData.append("enable_timestamps", String(Boolean(effectiveAsrEnableTimestamps)));
       formData.append("silence_aware_split", String(!isQwen3Backend && Boolean(silenceAwareSplit)));
-      if (isQwen3Backend || isHybridTimelineBackend) {
-        formData.append("qwen3_preview_max_line_length", String(qwen3PreviewMaxLineLength));
-      }
       formData.append("vocal_separation", String(Boolean(vocalSeparationEnabled)));
       formData.append("vocal_separation_model", vocalSeparationModel || "htdemucs");
       const controller = new AbortController();
@@ -887,9 +863,6 @@ export default function SpeechRecognitionPage({ onNavigate }) {
       setBackendUsed(String(payload?.backend || "whisper"));
       setModelFiles(payload?.model_files || null);
       setProjectTask({ status: "", failedChunks: [], warnings: [], chunkProgress: null, parseTaskId: "" });
-      if (String(payload?.backend || "") === "qwen3_text_whisper_timeline" && nextAlignments.length) {
-        setShowTimeline(true);
-      }
       if (!nextPlainText && !nextLabeledText) {
         setError("识别结果为空，请重试。");
       } else {
@@ -1224,7 +1197,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
         body: JSON.stringify({
           text: input,
           mode: translationMode,
-          target_language: translationTargetLanguage,
+          target_language: translationMode === "translate_polish" ? translationTargetLanguage : "原语言",
           source: translationSource,
         }),
       });
@@ -1289,7 +1262,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
         body: JSON.stringify({
           source: translationSource,
           mode: translationMode,
-          target_language: translationTargetLanguage,
+          target_language: translationMode === "translate_polish" ? translationTargetLanguage : "原语言",
           min_speed: 0.8,
           max_speed: 1.2,
           max_concurrency: ["openai", "openai_compatible", "gemini"].includes(translationSource) ? 4 : 1,
@@ -1409,7 +1382,7 @@ export default function SpeechRecognitionPage({ onNavigate }) {
         title: target.createNew ? finalProjectName : (target.projectName || project.name || nextProjectName),
         translationMode,
         translationSource,
-        translationTargetLanguage,
+        translationTargetLanguage: translationMode === "translate_polish" ? translationTargetLanguage : "原语言",
         translatedSegments,
       });
 
@@ -1461,10 +1434,6 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   async function handleCreateProjectFromAudio() {
     if (!pendingAudio?.blob) {
       setError("请先上传或录制音频。");
-      return;
-    }
-    if (isHybridTimelineBackend) {
-      setError("混合模式用于识别预览。请先点击“开始识别”，确认时间轴预览后再创建配音项目。");
       return;
     }
     setIsCreatingProject(true);
@@ -1932,7 +1901,6 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           onAsrBackendChange={setAsrBackend}
           onAsrEnableTimestampsChange={setAsrEnableTimestamps}
           onAsrLanguageChange={setAsrLanguage}
-          onQwen3PreviewMaxLineLengthChange={setQwen3PreviewMaxLineLength}
           onRecognize={handleRecognize}
           onSpeakerLabelsChange={setSpeakerLabels}
           onSilenceAwareSplitChange={setSilenceAwareSplit}
@@ -1945,7 +1913,6 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           audioClipRange={audioClipRange}
           pendingAudio={pendingAudio}
           projectTask={projectTask}
-          qwen3PreviewMaxLineLength={qwen3PreviewMaxLineLength}
           qwen3AlignerConfigured={qwen3AlignerConfigured}
           qwen3DefaultTimestamps={qwen3DefaultTimestamps}
           qwen3TimestampsRequested={asrEnableTimestamps}

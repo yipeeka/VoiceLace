@@ -248,6 +248,12 @@ def _build_translate_prompt(*, mode: str, target_language: str) -> str:
     )
 
 
+def _effective_translate_target_language(*, mode: str, target_language: str) -> str:
+    if (mode or "").strip().lower() == "translate_polish":
+        return (target_language or "").strip() or "中文"
+    return "原语言"
+
+
 @router.post("/translate-polish")
 async def translate_polish(payload: TranslatePolishRequest, state=Depends(get_app_state)):
     source = (payload.source or "").strip().lower()
@@ -258,12 +264,16 @@ async def translate_polish(payload: TranslatePolishRequest, state=Depends(get_ap
         raise HTTPException(status_code=400, detail="text is required")
     if payload.mode == "translate_polish" and not (payload.target_language or "").strip():
         raise HTTPException(status_code=400, detail="target_language is required for translate_polish mode")
+    effective_target_language = _effective_translate_target_language(
+        mode=payload.mode,
+        target_language=payload.target_language,
+    )
     if payload.mode == "passthrough":
         return {
             "text": text,
             "source": source,
             "mode": payload.mode,
-            "target_language": payload.target_language,
+            "target_language": effective_target_language,
             "backend": "passthrough",
         }
 
@@ -274,7 +284,7 @@ async def translate_polish(payload: TranslatePolishRequest, state=Depends(get_ap
         )
 
     config = _build_translation_config(state, source)
-    prompt = _build_translate_prompt(mode=payload.mode, target_language=payload.target_language)
+    prompt = _build_translate_prompt(mode=payload.mode, target_language=effective_target_language)
     try:
         output = await state.translation_llm_engine.generate_text(
             text=text,
@@ -290,7 +300,7 @@ async def translate_polish(payload: TranslatePolishRequest, state=Depends(get_ap
         "text": output,
         "source": source,
         "mode": payload.mode,
-        "target_language": payload.target_language,
+        "target_language": effective_target_language,
         "backend": state.translation_llm_engine.backend_name,
     }
 

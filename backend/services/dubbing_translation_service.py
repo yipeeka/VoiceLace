@@ -53,6 +53,12 @@ def safe_duration_from_ms(start_ms: int | None, end_ms: int | None) -> float | N
     return max(TARGET_DURATION_MIN_SEC, min(TARGET_DURATION_MAX_SEC, delta / 1000.0))
 
 
+def _effective_dubbing_target_language(*, mode: str, target_language: str) -> str:
+    if (mode or "").strip().lower() == "polish_only":
+        return "原语言"
+    return (target_language or "").strip() or "中文"
+
+
 def build_dubbing_translate_prompt(
     *,
     mode: str,
@@ -84,6 +90,13 @@ def build_dubbing_translate_prompt(
 
 def build_dubbing_compress_prompt(*, target_language: str, target_duration_sec: float) -> str:
     lang = (target_language or "").strip() or "中文"
+    if lang == "原语言":
+        return (
+            "你是配音文本压缩编辑。请在保持原语言、原意和事实不变的前提下，把文本压缩为更短的口播版本。"
+            "要求：自然顺口，不要翻译，不要丢失关键信息，不要解释。必要时可加入适量停顿标点（如逗号、省略号）帮助语速控制。"
+            f"\n目标口播时长：约 {target_duration_sec:.2f} 秒"
+            "\n只输出压缩后的正文。"
+        )
     return (
         "你是配音文本压缩编辑。请在保持原意的前提下，把文本压缩为更短的口播版本。"
         "要求：自然顺口，不要丢失关键信息，不要解释。必要时可加入适量停顿标点（如逗号、省略号）帮助语速控制。"
@@ -118,6 +131,13 @@ def build_dubbing_batch_translate_prompt(*, mode: str, target_language: str, con
 
 def build_dubbing_batch_compress_prompt(*, target_language: str) -> str:
     lang = (target_language or "").strip() or "中文"
+    if lang == "原语言":
+        return (
+            "你是配音文本压缩编辑。用户会给出 JSON 数组，每项包含 id、text、target_duration_sec。"
+            "请在保持原语言、原意和事实不变的前提下压缩 text，使其更适合目标口播时长。"
+            "要求自然顺口，不要翻译，不要解释。"
+            '\n只输出 JSON 数组，格式：[{"id":"原 id","text":"压缩后文本"}]'
+        )
     return (
         "你是配音文本压缩编辑。用户会给出 JSON 数组，每项包含 id、text、target_duration_sec。"
         "请在保持原意前提下压缩 text，使其更适合目标口播时长。"
@@ -127,8 +147,17 @@ def build_dubbing_batch_compress_prompt(*, target_language: str) -> str:
     )
 
 
-def build_context_hints_prompt(*, target_language: str) -> str:
+def build_context_hints_prompt(*, target_language: str, mode: str = "translate_polish") -> str:
     lang = (target_language or "").strip() or "中文"
+    if (mode or "").strip().lower() == "polish_only" or lang == "原语言":
+        return (
+            "你是配音预处理助手。请基于给定文本做全局理解，输出精简参考："
+            "\n1) 固定短语/专有名词的原文保留或规范写法；"
+            "\n2) 可能的 ASR 错漏与更合理写法；"
+            "\n3) 语气与风格建议（用于保持段落一致性）。"
+            "\n重要：这是仅润色任务，必须保持原语言，不要给出译法，不要建议翻译成其他语言。"
+            "\n输出要求：每行一条，最多 12 条，不要输出 JSON，不要解释。"
+        )
     return (
         "你是配音预处理助手。请基于给定文本做全局理解，输出精简参考："
         "\n1) 固定短语/专有名词建议译法；"
@@ -197,6 +226,7 @@ async def _collect_context_hints(
     config: dict[str, Any],
     normalized_segments: list[dict[str, Any]],
     target_language: str,
+    mode: str = "translate_polish",
 ) -> str:
     if not normalized_segments:
         return ""
@@ -212,6 +242,7 @@ async def _collect_context_hints(
         {
             "version": PROMPT_VERSION,
             "kind": "context_hints",
+            "mode": mode,
             "backend": config.get("backend"),
             "model": config.get("model_path") or config.get("api_model") or "",
             "target_language": target_language,
@@ -230,7 +261,7 @@ async def _collect_context_hints(
     if cache_key in _CONTEXT_HINTS_CACHE:
         return _CONTEXT_HINTS_CACHE[cache_key]
 
-    prompt = build_context_hints_prompt(target_language=target_language)
+    prompt = build_context_hints_prompt(target_language=target_language, mode=mode)
     chunk_payloads = _chunk_lines(numbered_lines, max_chars=2800)
     if not chunk_payloads:
         return ""
@@ -575,6 +606,11 @@ async def translate_dubbing_segments_for_state(
     if min_speed > max_speed:
         min_speed = max_speed
 
+    effective_target_language = _effective_dubbing_target_language(
+        mode=mode,
+        target_language=target_language,
+    )
+
     if mode != "passthrough" and (not state.translation_llm_engine.is_loaded or state.translation_engine_source != source):
         raise HTTPException(
             status_code=400,
@@ -609,7 +645,7 @@ async def translate_dubbing_segments_for_state(
         return {
             "source": source or "passthrough",
             "mode": mode,
-            "target_language": target_language,
+            "target_language": effective_target_language,
             "backend": "passthrough",
             "max_concurrency": 1,
             "normalized_segment_count": len(normalized_segments),
@@ -638,7 +674,8 @@ async def translate_dubbing_segments_for_state(
         state=state,
         config=config,
         normalized_segments=normalized_segments,
-        target_language=target_language,
+        target_language=effective_target_language,
+        mode=mode,
     )
 
     async def translate_one(row: dict[str, Any]) -> dict[str, Any]:
@@ -647,7 +684,7 @@ async def translate_dubbing_segments_for_state(
         target_duration_sec = _target_duration_for_row(row)
         prompt = build_dubbing_translate_prompt(
             mode=mode,
-            target_language=target_language,
+            target_language=effective_target_language,
             target_duration_sec=target_duration_sec,
             context_hints=context_hints,
         )
@@ -669,7 +706,7 @@ async def translate_dubbing_segments_for_state(
         _check_canceled(cancel_check)
         prompt = build_dubbing_batch_translate_prompt(
             mode=mode,
-            target_language=target_language,
+            target_language=effective_target_language,
             context_hints=context_hints,
         )
         output = await state.translation_llm_engine.generate_text(
@@ -704,7 +741,7 @@ async def translate_dubbing_segments_for_state(
         try:
             output = await state.translation_llm_engine.generate_text(
                 text=json.dumps(payload, ensure_ascii=False, indent=2),
-                system_prompt=build_dubbing_batch_compress_prompt(target_language=target_language),
+                system_prompt=build_dubbing_batch_compress_prompt(target_language=effective_target_language),
                 llm_options=config["options"],
             )
             parsed = _json_array_from_model_output(output)
@@ -734,7 +771,7 @@ async def translate_dubbing_segments_for_state(
         key = _segment_cache_key(
             source=source,
             mode=mode,
-            target_language=target_language,
+            target_language=effective_target_language,
             config=config,
             context_hints=context_hints,
             row=row,
@@ -881,7 +918,7 @@ async def translate_dubbing_segments_for_state(
     return {
         "source": source,
         "mode": mode,
-        "target_language": target_language,
+        "target_language": effective_target_language,
         "backend": state.translation_llm_engine.backend_name,
         "max_concurrency": effective_concurrency,
         "normalized_segment_count": len(normalized_segments),

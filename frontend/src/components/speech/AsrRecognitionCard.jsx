@@ -34,7 +34,6 @@ export default function AsrRecognitionCard({
   onAudioClipError,
   onAudioClipRangeChange,
   onAsrLanguageChange,
-  onQwen3PreviewMaxLineLengthChange,
   onRecognize,
   onSpeakerLabelsChange,
   onSilenceAwareSplitChange,
@@ -46,7 +45,6 @@ export default function AsrRecognitionCard({
   onVocalSeparationModelChange,
   pendingAudio,
   projectTask,
-  qwen3PreviewMaxLineLength,
   qwen3AlignerConfigured,
   qwen3DefaultTimestamps,
   qwen3TimestampsRequested,
@@ -64,17 +62,13 @@ export default function AsrRecognitionCard({
   const uploadInputRef = useRef(null);
   const backendSelectId = `${generatedId}-asr-backend`;
   const languageSelectId = `${generatedId}-asr-language`;
-  const previewMaxLineLengthId = `${generatedId}-qwen3-preview-max-line-length`;
   const demucsSelectId = `${generatedId}-demucs-model`;
   const isBusy = isTranscribing || isRecording || isExtractingAudio || isCreatingProject;
   const uploadDisabled = isTranscribing || isExtractingAudio || isCreatingProject;
   const speakerLabelsDisabled = isTranscribing || isRecording || isCreatingProject || (isQwen3Backend && !qwen3AlignerConfigured);
-  const isHybridTimelineBackend = asrBackendConfigured === "qwen3_text_whisper_timeline";
   const backendLabel = asrBackendConfigured === "qwen3_crispasr"
     ? "Qwen3-ASR (CrispASR)"
-    : asrBackendConfigured === "qwen3_text_whisper_timeline"
-      ? "Qwen3 分句 + Whisper 时间轴"
-      : "Whisper / Faster-Whisper";
+    : "Whisper / Faster-Whisper";
 
   return (
     <GlassCard>
@@ -99,7 +93,6 @@ export default function AsrRecognitionCard({
           >
             <option value="whisper">Whisper / Faster-Whisper</option>
             <option value="qwen3_crispasr">Qwen3-ASR (CrispASR)</option>
-            <option value="qwen3_text_whisper_timeline">Qwen3 分句 + Whisper 时间轴</option>
           </select>
         </div>
         <div className="formGroup">
@@ -118,27 +111,6 @@ export default function AsrRecognitionCard({
           </select>
         </div>
       </div>
-
-      {isQwen3Backend || isHybridTimelineBackend ? (
-        <div className="editorGrid three speechAsrGrid">
-          <div className="formGroup">
-            <label className="formLabel" htmlFor={previewMaxLineLengthId}>预览分行长度 -ml（-1 不传）</label>
-            <input
-              id={previewMaxLineLengthId}
-              name="qwen3_preview_max_line_length"
-              className="textInput"
-              type="number"
-              min="-1"
-              max="50"
-              step="1"
-              value={qwen3PreviewMaxLineLength}
-              onChange={(event) => onQwen3PreviewMaxLineLengthChange(event.target.value)}
-              disabled={isBusy}
-            />
-          </div>
-          <div className="muted speechAsrHint">用于 Qwen3-ASR 的 CrispASR 分句分行；Whisper 不受影响。</div>
-        </div>
-      ) : null}
 
       <div className="editorGrid three speechAsrGrid speechAsrOptionsGrid">
         <div className="speechAsrToggleStack">

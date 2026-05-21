@@ -521,19 +521,6 @@ class ApiSmokeTest(unittest.TestCase):
             response = self.client.post(
                 "/api/v1/asr/transcribe-file",
                 data={
-                    "backend": "qwen3_text_whisper_timeline",
-                    "speaker_labels": "false",
-                    "qwen3_preview_max_line_length": "17",
-                },
-                files={"file": ("sample.wav", b"RIFFdemo", "audio/wav")},
-            )
-            self.assertEqual(response.status_code, 200)
-            self.assertEqual(captured["backend"], "qwen3_text_whisper_timeline")
-            self.assertEqual(captured["preview_max_line_length"], 17)
-
-            response = self.client.post(
-                "/api/v1/asr/transcribe-file",
-                data={
                     "backend": "qwen3_crispasr",
                     "speaker_labels": "false",
                     "qwen3_preview_max_line_length": "30",
@@ -560,7 +547,7 @@ class ApiSmokeTest(unittest.TestCase):
             response = self.client.post(
                 "/api/v1/asr/transcribe-file",
                 data={
-                    "backend": "qwen3_text_whisper_timeline",
+                    "backend": "qwen3_crispasr",
                     "speaker_labels": "false",
                     "qwen3_preview_max_line_length": "120",
                 },
@@ -572,7 +559,7 @@ class ApiSmokeTest(unittest.TestCase):
             response = self.client.post(
                 "/api/v1/asr/transcribe-file",
                 data={
-                    "backend": "qwen3_text_whisper_timeline",
+                    "backend": "qwen3_crispasr",
                     "speaker_labels": "false",
                     "qwen3_preview_max_line_length": "1",
                 },
@@ -689,6 +676,7 @@ class ApiSmokeTest(unittest.TestCase):
         original_is_loaded = engine.is_loaded
         original_backend_name = engine.backend_name
         original_model_name = engine.model_name
+        generated_prompts: list[str] = []
         try:
             async def fake_load_model(*args, **kwargs):
                 engine.is_loaded = True
@@ -704,6 +692,7 @@ class ApiSmokeTest(unittest.TestCase):
             async def fake_generate_text(*, text: str, system_prompt: str, llm_options: dict | None = None):
                 self.assertTrue(text)
                 self.assertTrue(system_prompt)
+                generated_prompts.append(system_prompt)
                 return "翻译润色后的文本"
 
             engine.load_model = fake_load_model
@@ -727,6 +716,22 @@ class ApiSmokeTest(unittest.TestCase):
             body = trans_resp.json()
             self.assertEqual(body["text"], "翻译润色后的文本")
             self.assertEqual(body["source"], "secondary_local")
+            self.assertEqual(body["target_language"], "中文")
+
+            polish_resp = self.client.post(
+                "/api/v1/llm/translate-polish",
+                json={
+                    "text": "hello world",
+                    "mode": "polish_only",
+                    "target_language": "英文",
+                    "source": "secondary_local",
+                },
+            )
+            self.assertEqual(polish_resp.status_code, 200)
+            polish_body = polish_resp.json()
+            self.assertEqual(polish_body["target_language"], "原语言")
+            self.assertNotIn("目标语言：英文", generated_prompts[-1])
+            self.assertNotIn("翻译为目标语言", generated_prompts[-1])
 
             mismatch_resp = self.client.post(
                 "/api/v1/llm/translate-polish",
