@@ -26,6 +26,8 @@ from pathlib import Path
 
 
 PUNCT_ONLY_RE = re.compile(r"^[\s，。！？；：、“”‘’\"'（）()\[\]《》…—-]+$")
+CLOSING_QUOTE_PREFIX_RE = re.compile(r"^([”’」』》）)\]]+)(.+)$")
+DEFAULT_SHORT_PUNCT_MS = 300
 
 
 @dataclass
@@ -199,6 +201,7 @@ def finalize_entries(
     original: list[Entry],
     entries: list[Entry],
     audio_duration_ms: int | None,
+    short_punct_ms: int,
 ) -> tuple[list[Entry], list[str]]:
     final: list[Entry] = []
     changes: list[str] = []
@@ -277,7 +280,76 @@ def finalize_entries(
 
         final.append(Entry(start=start, end=end, text=text))
 
+    final, quote_changes = move_leading_closing_quotes(final)
+    final, punctuation_changes = merge_short_punctuation_entries(final, short_punct_ms)
+    changes.extend(quote_changes)
+    changes.extend(punctuation_changes)
+
     return final, changes
+
+
+def move_leading_closing_quotes(entries: list[Entry]) -> tuple[list[Entry], list[str]]:
+    fixed: list[Entry] = []
+    changes: list[str] = []
+
+    for number, entry in enumerate(entries, 1):
+        text = entry.text
+        match = CLOSING_QUOTE_PREFIX_RE.match(text)
+
+        if match and fixed:
+            quote_prefix, remainder = match.groups()
+            fixed[-1].text = fixed[-1].text.rstrip() + quote_prefix
+            text = remainder.lstrip()
+            changes.append(
+                f"#{number}: moved leading closing quote(s) into previous: {quote_prefix}"
+            )
+
+        fixed.append(Entry(start=entry.start, end=entry.end, text=text))
+
+    return fixed, changes
+
+
+def merge_short_punctuation_entries(
+    entries: list[Entry],
+    max_duration_ms: int,
+) -> tuple[list[Entry], list[str]]:
+    if max_duration_ms <= 0:
+        return entries, []
+
+    merged: list[Entry] = []
+    changes: list[str] = []
+    pending_prefix = ""
+
+    for number, entry in enumerate(entries, 1):
+        text = pending_prefix + entry.text
+        pending_prefix = ""
+        duration = entry.end - entry.start
+
+        if PUNCT_ONLY_RE.match(entry.text) and duration <= max_duration_ms:
+            if merged:
+                merged[-1].text = merged[-1].text.rstrip() + entry.text
+                merged[-1].end = max(merged[-1].end, entry.end)
+                changes.append(
+                    f"#{number}: merged short punctuation-only cue into previous "
+                    f"({duration}ms): {entry.text}"
+                )
+            else:
+                pending_prefix = entry.text
+                changes.append(
+                    f"#{number}: queued leading short punctuation-only cue "
+                    f"({duration}ms): {entry.text}"
+                )
+            continue
+
+        merged.append(Entry(start=entry.start, end=entry.end, text=text))
+
+    if pending_prefix and merged:
+        merged[-1].text = merged[-1].text.rstrip() + pending_prefix
+        changes.append(
+            f"trailing queued short punctuation-only cue merged into final entry: {pending_prefix}"
+        )
+
+    return merged, changes
 
 
 def count_zero_or_negative(entries: list[Entry]) -> int:
@@ -322,6 +394,16 @@ def main() -> int:
         type=Path,
         help="Optional repair report path. Defaults to <out>.report.txt",
     )
+    parser.add_argument(
+        "--merge-short-punct-ms",
+        type=int,
+        default=DEFAULT_SHORT_PUNCT_MS,
+        help=(
+            "Merge punctuation-only cues shorter than this many milliseconds "
+            "into the previous subtitle. Use 0 to disable. Default: "
+            f"{DEFAULT_SHORT_PUNCT_MS}."
+        ),
+    )
     args = parser.parse_args()
 
     report_path = args.report or args.out.with_suffix(args.out.suffix + ".report.txt")
@@ -341,7 +423,10 @@ def main() -> int:
         original_entries, words
     )
     final_entries, changes = finalize_entries(
-        original_entries, json_timed_entries, audio_duration_ms
+        original_entries,
+        json_timed_entries,
+        audio_duration_ms,
+        args.merge_short_punct_ms,
     )
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -363,6 +448,7 @@ def main() -> int:
         f"overlap_before={count_overlaps(original_entries)}",
         f"overlap_after={count_overlaps(final_entries)}",
         f"out_of_audio_after={count_out_of_audio(final_entries, audio_duration_ms)}",
+        f"merge_short_punct_ms={args.merge_short_punct_ms}",
         "",
         "changes:",
         *changes,

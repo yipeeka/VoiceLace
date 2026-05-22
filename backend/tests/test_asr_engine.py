@@ -671,6 +671,52 @@ class AsrEngineTest(unittest.TestCase):
         self.assertTrue(all(item.get("qwen3_json_srt_repaired") for item in repaired))
         self.assertTrue(all(item.get("preserve_timing_boundaries") for item in repaired))
 
+    def test_qwen3_json_srt_repair_moves_quotes_and_merges_short_punctuation(self) -> None:
+        segments = [
+            {"start": 0.0, "end": 1.0, "text": "他说：“开始"},
+            {"start": 1.0, "end": 2.0, "text": "”继续"},
+            {"start": 2.0, "end": 2.2, "text": "。"},
+            {"start": 2.2, "end": 3.0, "text": "下一句"},
+        ]
+
+        def char_words(text: str, start: float, end: float) -> list[dict[str, float | str]]:
+            compact = re.sub(r"\s+", "", text)
+            if not compact:
+                return []
+            step = (end - start) / len(compact) if end > start else 0.0
+            return [
+                {
+                    "text": char,
+                    "start": start + step * index,
+                    "end": start + step * (index + 1),
+                }
+                for index, char in enumerate(compact)
+            ]
+
+        raw_words: list[dict[str, float | str]] = []
+        for segment in segments:
+            raw_words.extend(char_words(str(segment["text"]), float(segment["start"]), float(segment["end"])))
+
+        repaired, report = ASREngine._repair_qwen3_srt_segments_from_json_words(
+            segments,
+            [{"qwen3_json_raw_words": raw_words}],
+            audio_duration_sec=3.2,
+        )
+
+        self.assertEqual(report["entries_before"], 4)
+        self.assertEqual(report["entries_after"], 3)
+        self.assertEqual(report["entries_matched_to_json_words"], 4)
+        self.assertEqual(report["unmatched_entries"], [])
+        self.assertEqual(report["zero_or_negative_after"], 0)
+        self.assertEqual(report["overlap_after"], 0)
+        self.assertEqual(report["out_of_audio_after"], 0)
+        self.assertEqual(report["merge_short_punct_ms"], 300)
+        self.assertEqual([item["text"] for item in repaired], ["他说：“开始”", "继续。", "下一句"])
+        self.assertAlmostEqual(float(repaired[1]["end"]), 2.2)
+        repair_kinds = [item.get("kind") for item in report.get("changes") or []]
+        self.assertIn("qwen3_leading_closing_quote_move", repair_kinds)
+        self.assertIn("qwen3_short_punctuation_merge", repair_kinds)
+
     def test_qwen3_preview_skips_extra_postprocessing_after_json_srt_repair(self) -> None:
         temp_dir = settings.data_dir / "tmp-tests" / "asr-qwen3-json-srt-skip-postprocess"
         shutil.rmtree(temp_dir, ignore_errors=True)

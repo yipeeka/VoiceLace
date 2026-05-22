@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from difflib import SequenceMatcher
 import gc
 import json
 import math
@@ -14,6 +13,9 @@ from typing import Any
 from backend.config import settings
 
 
+WHISPER_BACKEND = "whisper"
+QWEN3_CRISPASR_BACKEND = "qwen3_crispasr"
+QWEN3_BACKEND_ALIASES = {QWEN3_CRISPASR_BACKEND, "qwen3_asr", "qwen3-asr"}
 TIMELINE_WORD_PADDING_SEC = 0.08
 TIMELINE_TEXT_PADDING_SEC = 0.65
 TIMELINE_LONG_SEGMENT_MIN_DIFF_SEC = 2.0
@@ -23,6 +25,8 @@ TIMELINE_WORD_SPLIT_GAP_SEC = 0.7
 TIMELINE_WORD_SPLIT_PUNCTUATION_GAP_SEC = 0.7
 TIMELINE_MIN_SPLIT_SEGMENT_SEC = 0.7
 QWEN3_SHORT_TIMING_EDGE_PAD_SEC = 0.2
+QWEN3_JSON_REPAIR_SHORT_PUNCT_SEC = 0.3
+QWEN3_JSON_REPAIR_CLOSING_QUOTE_PREFIX_RE = re.compile(r"^([”’」』》）)\]]+)(.+)$")
 SILENCE_AWARE_MIN_SILENCE_MS = 1000
 SILENCE_AWARE_SEEK_STEP_MS = 20
 SILENCE_AWARE_THRESHOLD_DBFS = -45
@@ -130,89 +134,45 @@ class ASREngine:
         if not target.exists():
             raise FileNotFoundError(f"Audio file not found: {target}")
 
-        requested_backend = backend if str(backend or "").strip() else self.default_backend
-        target_backend = self._normalize_backend(requested_backend)
-        requested_language = str(language or "auto").strip().lower() or "auto"
-        requested_speaker_labels = bool(speaker_labels)
-        warnings: list[str] = []
-        if target_backend == "whisper":
-            try:
-                raw_text, segments, backend_used = await self._transcribe_whisper_segments(target, language=requested_language)
-            except TypeError as exc:
-                if "language" not in str(exc) or "unexpected keyword" not in str(exc):
-                    raise
-                raw_text, segments, backend_used = await self._transcribe_whisper_segments(target)
-        elif target_backend == "qwen3_crispasr":
-            qwen3_enable_timestamps = bool(enable_timestamps) if enable_timestamps is not None else None
-            qwen3_max_line_length = self._normalize_qwen3_preview_max_line_length(qwen3_preview_max_line_length)
-            if requested_speaker_labels:
-                self._validate_qwen3_speaker_label_requirements()
-                qwen3_enable_timestamps = True
-            raw_text, segments, backend_used = await self._transcribe_crispasr_segments(
-                target,
-                enable_timestamps_override=qwen3_enable_timestamps,
-                language_override=requested_language,
-                max_line_length=qwen3_max_line_length,
-            )
-            warnings = list(getattr(self, "_last_crispasr_warnings", []) or [])
-        else:
-            raise ValueError(f"Unsupported ASR backend: {backend}")
+        (
+            raw_text,
+            segments,
+            backend_used,
+            target_backend,
+            warnings,
+            qwen3_max_line_length,
+        ) = await self._transcribe_backend_segments(
+            target,
+            backend=backend,
+            language=language,
+            speaker_labels=speaker_labels,
+            enable_timestamps=enable_timestamps,
+            qwen3_preview_max_line_length=qwen3_preview_max_line_length,
+        )
         if not raw_text:
             raise RuntimeError("ASR returned empty transcript")
 
         timeline_repairs: list[dict[str, Any]] = []
-        if target_backend == "qwen3_crispasr":
+        if self._is_qwen3_backend(target_backend):
             timeline_repairs.extend(getattr(self, "_last_crispasr_timeline_repairs", []) or [])
-        aligned_segments = [dict(segment or {}) for segment in (segments or [])]
-        # Final safety net: if backend returned inline timestamp tokens as plain text,
-        # parse and merge them here so downstream alignment/speaker labeling can work.
+        aligned_segments = self._recover_inline_timestamp_segments(segments)
         if aligned_segments:
-            recovered_segments: list[dict[str, Any]] = []
-            for seg in aligned_segments:
-                text = str(seg.get("text", "") or "")
-                if "[" in text and "-->" in text and "]" in text:
-                    token_segments = self._parse_inline_timestamp_tokens(text)
-                    merged_segments = self._merge_timestamp_tokens(token_segments) if token_segments else []
-                    if merged_segments:
-                        recovered_segments.extend(merged_segments)
-                        continue
-                recovered_segments.append(seg)
-            aligned_segments = recovered_segments
-            if target_backend == "qwen3_crispasr":
-                qwen3_json_srt_repaired = any(bool(seg.get("qwen3_json_srt_repaired")) for seg in aligned_segments)
-                if qwen3_json_srt_repaired:
-                    aligned_segments = [dict(seg, preserve_timing_boundaries=True) for seg in aligned_segments]
-                else:
-                    aligned_segments, zero_count, zero_repairs = self._repair_qwen3_zero_duration_and_overlaps(aligned_segments)
-                    timeline_repairs.extend(zero_repairs)
-                    if zero_count:
-                        warnings.append(f"已修复 {zero_count} 个 Qwen3 零时长、引号或重叠时间轴片段。")
-                    aligned_segments, tail_merge_count, tail_repairs = self._merge_qwen3_trailing_fragments(aligned_segments)
-                    timeline_repairs.extend(tail_repairs)
-                    if tail_merge_count:
-                        warnings.append(f"已合并 {tail_merge_count} 个 Qwen3 时间轴尾随短片段。")
-                    aligned_segments, short_timing_count, short_timing_repairs = self._repair_qwen3_short_timings(aligned_segments)
-                    timeline_repairs.extend(short_timing_repairs)
-                    if short_timing_count:
-                        warnings.append(f"已修复 {short_timing_count} 个 Qwen3 过短时间轴片段。")
-                    aligned_segments, weak_split_count, weak_split_repairs = self._split_qwen3_long_segments_by_weak_punctuation(
-                        aligned_segments,
-                        max_line_length=qwen3_max_line_length,
-                    )
-                    timeline_repairs.extend(weak_split_repairs)
-                    if weak_split_count:
-                        warnings.append(f"已按弱标点拆分 {weak_split_count} 个 Qwen3 过长识别片段。")
-            if aligned_segments:
-                rebuilt_text = "\n".join(str(seg.get("text", "")).strip() for seg in aligned_segments if str(seg.get("text", "")).strip()).strip()
-                if rebuilt_text:
-                    raw_text = rebuilt_text
+            if self._is_qwen3_backend(target_backend):
+                qwen3_result = self._postprocess_qwen3_timeline_segments(
+                    aligned_segments,
+                    max_line_length=qwen3_max_line_length,
+                )
+                aligned_segments = qwen3_result["segments"]
+                warnings.extend(qwen3_result["warnings"])
+                timeline_repairs.extend(qwen3_result["repairs"])
+            raw_text = self._segments_to_text(aligned_segments) or raw_text
         silence_ranges: list[dict[str, float]] = []
-        if silence_aware_split and target_backend == "whisper":
+        if silence_aware_split and target_backend == WHISPER_BACKEND:
             try:
                 silence_ranges = self._detect_silence_ranges(target)
             except Exception as exc:
                 warnings.append(f"长静音检测失败，已回退词间切分：{exc}")
-        skip_word_gap_split = target_backend == "qwen3_crispasr" and any(
+        skip_word_gap_split = self._is_qwen3_backend(target_backend) and any(
             bool(seg.get("qwen3_json_srt_repaired")) for seg in aligned_segments
         )
         if skip_word_gap_split:
@@ -225,9 +185,7 @@ class ASREngine:
             )
         if split_count:
             warnings.append(f"已按词间静音自动拆分 {split_count} 个识别片段。")
-            rebuilt_text = "\n".join(str(seg.get("text", "")).strip() for seg in aligned_segments if str(seg.get("text", "")).strip()).strip()
-            if rebuilt_text:
-                raw_text = rebuilt_text
+            raw_text = self._segments_to_text(aligned_segments) or raw_text
         if silence_split_count:
             warnings.append(f"已避开 {silence_split_count} 段长静音区域切分识别片段。")
         audio_duration_sec = self._probe_audio_duration_seconds(target)
@@ -255,29 +213,8 @@ class ASREngine:
             labeled_text = raw_text
             plain_text = raw_text
 
-        alignments: list[dict[str, Any]] = []
-        for idx, seg in enumerate(aligned_segments, start=1):
-            text = str(seg.get("text", "")).strip()
-            if not text:
-                continue
-            start = seg.get("start")
-            end = seg.get("end")
-            start_ms = int(round(float(start) * 1000)) if isinstance(start, (int, float)) else 0
-            end_ms = int(round(float(end) * 1000)) if isinstance(end, (int, float)) else start_ms
-            if isinstance(start, (int, float)) and isinstance(end, (int, float)) and end_ms <= start_ms:
-                end_ms = start_ms + 1
-            elif end_ms < start_ms:
-                end_ms = start_ms
-            alignments.append(
-                {
-                    "id": f"asr-seg-{idx}",
-                    "start_ms": start_ms,
-                    "end_ms": end_ms,
-                    "text": text,
-                    "speaker": str(seg.get("speaker", "") or ""),
-                }
-            )
-        if target_backend == "qwen3_crispasr":
+        alignments = self._build_alignments_from_segments(aligned_segments)
+        if self._is_qwen3_backend(target_backend):
             alignments, final_clamp_report = self._finalize_qwen3_preview_alignments_with_audio_bounds(
                 alignments,
                 audio_duration_sec=audio_duration_sec,
@@ -311,9 +248,137 @@ class ASREngine:
             "model_files": self._build_model_files(backend_used),
         }
 
+    async def _transcribe_backend_segments(
+        self,
+        target: Path,
+        *,
+        backend: str | None,
+        language: str | None,
+        speaker_labels: bool,
+        enable_timestamps: bool | None,
+        qwen3_preview_max_line_length: int | None,
+    ) -> tuple[str, list[dict[str, Any]], str, str, list[str], int | None]:
+        requested_backend = backend if str(backend or "").strip() else self.default_backend
+        target_backend = self._normalize_backend(requested_backend)
+        requested_language = str(language or "auto").strip().lower() or "auto"
+
+        if target_backend == WHISPER_BACKEND:
+            try:
+                raw_text, segments, backend_used = await self._transcribe_whisper_segments(target, language=requested_language)
+            except TypeError as exc:
+                if "language" not in str(exc) or "unexpected keyword" not in str(exc):
+                    raise
+                raw_text, segments, backend_used = await self._transcribe_whisper_segments(target)
+            return raw_text, segments, backend_used, target_backend, [], None
+
+        if self._is_qwen3_backend(target_backend):
+            qwen3_enable_timestamps = bool(enable_timestamps) if enable_timestamps is not None else None
+            qwen3_max_line_length = self._normalize_qwen3_preview_max_line_length(qwen3_preview_max_line_length)
+            if speaker_labels:
+                self._validate_qwen3_speaker_label_requirements()
+                qwen3_enable_timestamps = True
+            raw_text, segments, backend_used = await self._transcribe_crispasr_segments(
+                target,
+                enable_timestamps_override=qwen3_enable_timestamps,
+                language_override=requested_language,
+                max_line_length=qwen3_max_line_length,
+            )
+            warnings = list(getattr(self, "_last_crispasr_warnings", []) or [])
+            return raw_text, segments, backend_used, target_backend, warnings, qwen3_max_line_length
+
+        raise ValueError(f"Unsupported ASR backend: {backend}")
+
+    def _recover_inline_timestamp_segments(self, segments: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+        output: list[dict[str, Any]] = []
+        for segment in segments or []:
+            item = dict(segment or {})
+            text = str(item.get("text", "") or "")
+            if "[" in text and "-->" in text and "]" in text:
+                token_segments = self._parse_inline_timestamp_tokens(text)
+                merged_segments = self._merge_timestamp_tokens(token_segments) if token_segments else []
+                if merged_segments:
+                    output.extend(merged_segments)
+                    continue
+            output.append(item)
+        return output
+
+    def _postprocess_qwen3_timeline_segments(
+        self,
+        segments: list[dict[str, Any]],
+        *,
+        max_line_length: int | None,
+    ) -> dict[str, Any]:
+        warnings: list[str] = []
+        repairs: list[dict[str, Any]] = []
+        if any(bool(seg.get("qwen3_json_srt_repaired")) for seg in segments):
+            return {
+                "segments": [dict(seg, preserve_timing_boundaries=True) for seg in segments],
+                "warnings": warnings,
+                "repairs": repairs,
+            }
+
+        output, zero_count, zero_repairs = self._repair_qwen3_zero_duration_and_overlaps(segments)
+        repairs.extend(zero_repairs)
+        if zero_count:
+            warnings.append(f"已修复 {zero_count} 个 Qwen3 零时长、引号或重叠时间轴片段。")
+
+        output, tail_merge_count, tail_repairs = self._merge_qwen3_trailing_fragments(output)
+        repairs.extend(tail_repairs)
+        if tail_merge_count:
+            warnings.append(f"已合并 {tail_merge_count} 个 Qwen3 时间轴尾随短片段。")
+
+        output, short_timing_count, short_timing_repairs = self._repair_qwen3_short_timings(output)
+        repairs.extend(short_timing_repairs)
+        if short_timing_count:
+            warnings.append(f"已修复 {short_timing_count} 个 Qwen3 过短时间轴片段。")
+
+        output, weak_split_count, weak_split_repairs = self._split_qwen3_long_segments_by_weak_punctuation(
+            output,
+            max_line_length=max_line_length,
+        )
+        repairs.extend(weak_split_repairs)
+        if weak_split_count:
+            warnings.append(f"已按弱标点拆分 {weak_split_count} 个 Qwen3 过长识别片段。")
+
+        return {"segments": output, "warnings": warnings, "repairs": repairs}
+
+    @staticmethod
+    def _segments_to_text(segments: list[dict[str, Any]]) -> str:
+        return "\n".join(
+            str(segment.get("text", "")).strip()
+            for segment in segments
+            if str(segment.get("text", "")).strip()
+        ).strip()
+
+    @staticmethod
+    def _build_alignments_from_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        alignments: list[dict[str, Any]] = []
+        for idx, seg in enumerate(segments, start=1):
+            text = str(seg.get("text", "")).strip()
+            if not text:
+                continue
+            start = seg.get("start")
+            end = seg.get("end")
+            start_ms = int(round(float(start) * 1000)) if isinstance(start, (int, float)) else 0
+            end_ms = int(round(float(end) * 1000)) if isinstance(end, (int, float)) else start_ms
+            if isinstance(start, (int, float)) and isinstance(end, (int, float)) and end_ms <= start_ms:
+                end_ms = start_ms + 1
+            elif end_ms < start_ms:
+                end_ms = start_ms
+            alignments.append(
+                {
+                    "id": f"asr-seg-{idx}",
+                    "start_ms": start_ms,
+                    "end_ms": end_ms,
+                    "text": text,
+                    "speaker": str(seg.get("speaker", "") or ""),
+                }
+            )
+        return alignments
+
     def _build_model_files(self, backend_name: str) -> dict[str, str]:
         backend = str(backend_name or "").strip().lower()
-        if backend == "qwen3_crispasr":
+        if self._is_qwen3_backend(backend):
             return {
                 "main_model_path": str(Path(self.qwen3_model_path or "").expanduser()) if self.qwen3_model_path else "",
                 "crispasr_exe": str(Path(self.crispasr_exe or "").expanduser()) if self.crispasr_exe else "",
@@ -1112,85 +1177,7 @@ class ASREngine:
                 out.append(char)
         return "".join(out)
 
-    @staticmethod
-    def _estimate_unmatched_edge_ms(text: str) -> int:
-        raw = str(text or "").strip()
-        if not raw:
-            return 0
-        cjk_count = len(re.findall(r"[\u4e00-\u9fff]", raw))
-        latin_chars = sum(len(token) for token in re.findall(r"[A-Za-z0-9']+", raw))
-        punctuation_count = len(re.findall(r"[，。！？；,.!?;:、]", raw))
-        estimated = cjk_count * 210 + latin_chars * 55 + punctuation_count * 110
-        return max(0, min(1500, int(round(estimated))))
-
-    @classmethod
-    def _best_fuzzy_timeline_match(
-        cls,
-        qwen_norm: str,
-        stream: str,
-        cursor: int,
-    ) -> dict[str, Any] | None:
-        if not qwen_norm or not stream or cursor >= len(stream):
-            return None
-        exact_at = stream.find(qwen_norm, cursor)
-        if exact_at >= 0:
-            return {
-                "stream_start": exact_at,
-                "stream_end": exact_at + len(qwen_norm),
-                "qwen_start": 0,
-                "qwen_end": len(qwen_norm),
-                "score": 1.0,
-                "matched_chars": len(qwen_norm),
-                "kind": "word_match",
-            }
-
-        remaining = stream[cursor:]
-        matcher = SequenceMatcher(None, qwen_norm, remaining, autojunk=False)
-        blocks = [block for block in matcher.get_matching_blocks() if block.size > 0]
-        if not blocks:
-            return None
-
-        best: dict[str, Any] | None = None
-        for left in range(len(blocks)):
-            matched_chars = 0
-            q_start = blocks[left].a
-            q_end = blocks[left].a + blocks[left].size
-            w_start = blocks[left].b
-            w_end = blocks[left].b + blocks[left].size
-            for right in range(left, len(blocks)):
-                block = blocks[right]
-                if right > left:
-                    q_gap = block.a - q_end
-                    w_gap = block.b - w_end
-                    if q_gap < 0 or w_gap < 0 or q_gap > 3 or w_gap > 4:
-                        break
-                    q_end = block.a + block.size
-                    w_end = block.b + block.size
-                matched_chars += block.size
-                q_span = max(1, q_end - q_start)
-                w_span = max(1, w_end - w_start)
-                coverage = matched_chars / max(1, len(qwen_norm))
-                density = matched_chars / max(q_span, w_span)
-                score = coverage * 0.72 + density * 0.28
-                candidate = {
-                    "stream_start": cursor + w_start,
-                    "stream_end": cursor + w_end,
-                    "qwen_start": q_start,
-                    "qwen_end": q_end,
-                    "score": score,
-                    "matched_chars": matched_chars,
-                    "kind": "fuzzy_word_match",
-                }
-                if best is None or candidate["score"] > best["score"]:
-                    best = candidate
-
-        if best is None:
-            return None
-        min_coverage = 0.55 if len(qwen_norm) >= 8 else 0.65
-        if best["matched_chars"] / max(1, len(qwen_norm)) < min_coverage:
-            return None
-        return best
-
+#    @staticmethod
     @classmethod
     def _split_plain_text_sentences(cls, text: str) -> list[str]:
         raw = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
@@ -1319,221 +1306,7 @@ class ASREngine:
                 lines.extend(cls._split_preview_text_by_weak_breaks(strong_sentence, max_line_length))
         return lines or [raw]
 
-    @classmethod
-    def _build_qwen_text_segments(
-        cls,
-        raw_text: str,
-        segments: list[dict[str, Any]],
-        *,
-        max_line_length: int | None = None,
-    ) -> list[dict[str, Any]]:
-        rows = [
-            {"text": str(segment.get("text", "")).strip(), "speaker": str(segment.get("speaker", "") or "").strip()}
-            for segment in (segments or [])
-            if str(segment.get("text", "")).strip()
-        ]
-        if max_line_length is None:
-            if len(rows) > 1:
-                return rows
-            source = "\n".join(row["text"] for row in rows).strip() or str(raw_text or "").strip()
-            return [{"text": text, "speaker": ""} for text in cls._split_plain_text_sentences(source)]
-
-        if rows:
-            split_rows: list[dict[str, Any]] = []
-            for row in rows:
-                if cls._preview_line_text_length(row["text"]) <= max_line_length:
-                    split_rows.append(row)
-                    continue
-                for text in cls._split_preview_text_by_weak_breaks(row["text"], max_line_length):
-                    split_rows.append({"text": text, "speaker": row["speaker"]})
-            if split_rows:
-                return cls._repair_leading_closing_punctuation_rows(split_rows)
-
-        source = "\n".join(row["text"] for row in rows).strip() or str(raw_text or "").strip()
-        split_rows = [{"text": text, "speaker": ""} for text in cls._split_preview_text_by_natural_breaks(source, max_line_length)]
-        if split_rows:
-            return split_rows
-        if len(rows) > 1:
-            return rows
-        return [{"text": text, "speaker": ""} for text in cls._split_plain_text_sentences(source)]
-
-    @classmethod
-    def _build_timeline_char_stream(cls, segments: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]], list[int]]:
-        stream_chars: list[str] = []
-        units: list[dict[str, Any]] = []
-        char_to_unit: list[int] = []
-
-        for segment_index, segment in enumerate(segments or []):
-            seg_start = cls._coerce_finite_seconds(segment.get("start"))
-            seg_end = cls._coerce_finite_seconds(segment.get("end"))
-            if seg_start is None or seg_end is None or seg_end <= seg_start:
-                continue
-            words = cls._normalize_word_items(segment.get("words"))
-            if words:
-                for word in words:
-                    normalized = cls._normalize_alignment_text(str(word.get("text", "")))
-                    if not normalized:
-                        continue
-                    unit_index = len(units)
-                    units.append(
-                        {
-                            "start": float(word["start"]),
-                            "end": float(word["end"]),
-                            "text": str(word.get("text", "")),
-                            "segment_index": segment_index,
-                        }
-                    )
-                    for char in normalized:
-                        stream_chars.append(char)
-                        char_to_unit.append(unit_index)
-                continue
-
-            normalized = cls._normalize_alignment_text(str(segment.get("text", "")))
-            if not normalized:
-                continue
-            duration = max(0.001, seg_end - seg_start)
-            step = duration / max(1, len(normalized))
-            for index, char in enumerate(normalized):
-                unit_index = len(units)
-                start = seg_start + step * index
-                end = seg_start + step * (index + 1)
-                units.append({"start": start, "end": end, "text": char, "segment_index": segment_index})
-                stream_chars.append(char)
-                char_to_unit.append(unit_index)
-
-        return "".join(stream_chars), units, char_to_unit
-
-    @classmethod
-    def _best_anchor_timeline_match(
-        cls,
-        qwen_norm: str,
-        stream: str,
-        cursor: int,
-        units: list[dict[str, Any]],
-        char_to_unit: list[int],
-        coarse_match: dict[str, Any] | None = None,
-    ) -> dict[str, Any] | None:
-        if not qwen_norm or not stream or cursor >= len(stream) or not units or not char_to_unit:
-            return None
-
-        regions: list[tuple[int, int, str]] = []
-        if isinstance(coarse_match, dict) and str(coarse_match.get("kind") or "") != "word_match":
-            coarse_start = int(coarse_match.get("stream_start") or cursor)
-            coarse_end = int(coarse_match.get("stream_end") or coarse_start)
-            coarse_start = max(cursor, min(coarse_start, len(stream)))
-            coarse_end = max(coarse_start, min(coarse_end, len(stream)))
-            if coarse_end > coarse_start:
-                regions.append((coarse_start, coarse_end, "coarse_fuzzy_match"))
-
-        scan = max(0, cursor)
-        while scan < len(stream) and len(regions) < 4:
-            segment_index = units[char_to_unit[scan]].get("segment_index")
-            region_start = scan
-            region_end = scan + 1
-            while (
-                region_end < len(char_to_unit)
-                and units[char_to_unit[region_end]].get("segment_index") == segment_index
-            ):
-                region_end += 1
-            if region_end > region_start:
-                regions.append((region_start, region_end, "whisper_segment"))
-            scan = region_end
-
-        max_prefix_chars = min(8, max(0, len(qwen_norm) - 2))
-        best: dict[str, Any] | None = None
-        for qwen_start in range(0, max_prefix_chars + 1):
-            qwen_tail = qwen_norm[qwen_start:]
-            if len(qwen_tail) < 2:
-                continue
-            min_anchor_len = 3 if len(qwen_tail) >= 6 else 2
-            for region_start, region_end, region_kind in regions:
-                local = stream[region_start:region_end]
-                if not local:
-                    continue
-                matcher = SequenceMatcher(None, qwen_tail, local, autojunk=False)
-                blocks = [block for block in matcher.get_matching_blocks() if block.size > 0]
-                matched_chars = sum(block.size for block in blocks)
-                similarity = matcher.ratio()
-                qwen_coverage = matched_chars / max(1, len(qwen_tail))
-                whisper_coverage = matched_chars / max(1, len(local))
-                min_similarity = 0.72 if len(qwen_tail) >= 10 else 0.80
-                if similarity < min_similarity or qwen_coverage < 0.68 or whisper_coverage < 0.58:
-                    continue
-
-                anchor_block_candidates = [
-                    (block_index, block)
-                    for block_index, block in enumerate(blocks)
-                    if block.size >= min_anchor_len and block.a <= 4 and block.b <= 6
-                ]
-                first_block_index = None
-                first_block = None
-                if anchor_block_candidates:
-                    first_block_index, first_block = max(
-                        anchor_block_candidates,
-                        key=lambda item: (item[1].size, -item[1].a, -item[1].b),
-                    )
-                if first_block_index is None:
-                    continue
-                found_at = region_start + first_block.b
-                qwen_anchor_start = qwen_start + first_block.a
-                chain_q_start = first_block.a
-                chain_q_end = first_block.a + first_block.size
-                chain_w_start = first_block.b
-                chain_w_end = first_block.b + first_block.size
-                chain_matched_chars = first_block.size
-                for block in blocks[first_block_index + 1 :]:
-                    if block.a < chain_q_end or block.b < chain_w_end:
-                        continue
-                    q_gap = block.a - chain_q_end
-                    w_gap = block.b - chain_w_end
-                    if q_gap > 6 or w_gap > 8:
-                        break
-                    chain_q_end = block.a + block.size
-                    chain_w_end = block.b + block.size
-                    chain_matched_chars += block.size
-                stream_end = region_start + chain_w_end
-                if stream_end <= found_at:
-                    continue
-                anchor = qwen_norm[qwen_anchor_start : qwen_anchor_start + first_block.size]
-                local_window_len = max(1, chain_w_end - chain_w_start)
-                qwen_window_len = max(1, chain_q_end - chain_q_start)
-                chain_density = chain_matched_chars / max(qwen_window_len, local_window_len)
-                prefix_penalty = min(0.18, qwen_anchor_start * 0.018)
-                distance_penalty = min(0.12, max(0, found_at - cursor) * 0.004)
-                anchor_bonus = min(0.16, first_block.size * 0.018)
-                score = max(
-                    0.0,
-                    min(
-                        0.92,
-                        qwen_coverage * 0.40
-                        + whisper_coverage * 0.24
-                        + chain_density * 0.18
-                        + similarity * 0.18
-                        + anchor_bonus
-                        - prefix_penalty
-                        - distance_penalty,
-                    ),
-                )
-                candidate = {
-                    "stream_start": found_at,
-                    "stream_end": stream_end,
-                    "qwen_start": qwen_anchor_start,
-                    "qwen_end": qwen_start + chain_q_end,
-                    "score": score,
-                    "matched_chars": chain_matched_chars,
-                    "anchor_text": anchor,
-                    "anchor_region_text": local[chain_w_start:chain_w_end],
-                    "anchor_region_kind": region_kind,
-                    "anchor_similarity": similarity,
-                    "anchor_qwen_coverage": qwen_coverage,
-                    "anchor_whisper_coverage": whisper_coverage,
-                    "kind": "anchor_prefix_match",
-                }
-                if best is None or candidate["score"] > best["score"]:
-                    best = candidate
-
-        return best
-
+#    @classmethod
     @classmethod
     def _timeline_bounds(cls, segments: list[dict[str, Any]]) -> tuple[float, float]:
         starts: list[float] = []
@@ -1575,215 +1348,7 @@ class ASREngine:
                 nearest_speaker = speaker
         return best_speaker or nearest_speaker
 
-    @classmethod
-    def _fuse_text_segments_with_timeline_stream(
-        cls,
-        text_segments: list[dict[str, Any]],
-        timeline_segments: list[dict[str, Any]],
-        *,
-        audio_duration_sec: float | None,
-        source: str,
-        speaker_source_segments: list[dict[str, Any]] | None = None,
-        fallback_warning: str | None = None,
-    ) -> tuple[list[dict[str, Any]], list[str]]:
-        stream, units, char_to_unit = cls._build_timeline_char_stream(timeline_segments)
-        timeline_start, timeline_end = cls._timeline_bounds(timeline_segments)
-        audio_end_ms = None
-        audio_duration = cls._coerce_finite_seconds(audio_duration_sec)
-        if audio_duration is not None:
-            audio_end_ms = int(round(audio_duration * 1000))
-            timeline_end = min(timeline_end, audio_duration)
-        total_duration = max(0.001, timeline_end - timeline_start)
-        qwen_char_lengths = [
-            max(1, len(cls._normalize_alignment_text(str(seg.get("text", "")))))
-            for seg in text_segments
-        ]
-        total_qwen_chars = sum(qwen_char_lengths) or 1
-        consumed_qwen_chars = 0
-        cursor = 0
-        previous_end_ms = -1
-        fallback_count = 0
-        fused: list[dict[str, Any]] = []
-
-        for index, segment in enumerate(text_segments):
-            text = str(segment.get("text", "")).strip()
-            if not text:
-                continue
-            normalized = cls._normalize_alignment_text(text)
-            current_qwen_chars = qwen_char_lengths[index] if index < len(qwen_char_lengths) else max(1, len(normalized))
-            matched = False
-            timing_check: dict[str, Any] = {"source": source}
-            start_sec = timeline_start
-            end_sec = timeline_start + max(0.001, cls._estimate_speaking_seconds(text))
-            matched_words: list[dict[str, Any]] = []
-
-            if normalized and stream and units and char_to_unit:
-                match = cls._best_fuzzy_timeline_match(normalized, stream, cursor)
-                anchor_match = cls._best_anchor_timeline_match(
-                    normalized,
-                    stream,
-                    cursor,
-                    units,
-                    char_to_unit,
-                    coarse_match=match,
-                )
-                if anchor_match and (
-                    match is None
-                    or str(match.get("kind") or "") != "word_match"
-                ):
-                    match = anchor_match
-                if match:
-                    stream_start = int(match["stream_start"])
-                    stream_end = int(match["stream_end"])
-                    first_unit = units[char_to_unit[stream_start]]
-                    last_unit = units[char_to_unit[min(len(char_to_unit) - 1, stream_end - 1)]]
-                    unit_indexes = sorted(set(char_to_unit[stream_start:stream_end]))
-                    matched_words = [
-                        {
-                            "start": float(units[unit_index]["start"]),
-                            "end": float(units[unit_index]["end"]),
-                            "text": str(units[unit_index].get("text", "")),
-                        }
-                        for unit_index in unit_indexes
-                        if 0 <= unit_index < len(units)
-                    ]
-                    start_sec = float(first_unit["start"])
-                    end_sec = float(last_unit["end"])
-                    qwen_start = int(match.get("qwen_start") or 0)
-                    qwen_end = int(match.get("qwen_end") or len(normalized))
-                    prefix_text = cls._text_for_normalized_range(text, 0, qwen_start) if qwen_start > 0 else ""
-                    qwen_suffix_text = cls._text_for_normalized_range(text, qwen_end, len(normalized)) if qwen_end < len(normalized) else ""
-                    prefix_ms = cls._estimate_unmatched_edge_ms(prefix_text)
-                    suffix_ms = cls._estimate_unmatched_edge_ms(qwen_suffix_text)
-                    if prefix_ms:
-                        start_sec = max(0.0, start_sec - prefix_ms / 1000.0)
-                    if suffix_ms:
-                        end_sec = min(timeline_end, end_sec + suffix_ms / 1000.0)
-                    match_kind = str(match.get("kind") or "fuzzy_word_match")
-                    boundary_suffix = ""
-                    boundary_relaxed_ms = 0
-                    if stream_end < len(stream):
-                        suffix_unit = units[char_to_unit[stream_end]]
-                        boundary_unit_text = str(suffix_unit.get("text", ""))
-                        suffix_start = float(suffix_unit.get("start", end_sec) or end_sec)
-                        suffix_end = float(suffix_unit.get("end", suffix_start) or suffix_start)
-                        suffix_norm = cls._normalize_alignment_text(boundary_unit_text)
-                        suffix_gap_ms = int(round(max(0.0, suffix_start - end_sec) * 1000))
-                        suffix_duration_ms = int(round(max(0.0, suffix_end - suffix_start) * 1000))
-                        if (
-                            suffix_norm in {"呢", "吗", "啊", "呀", "吧", "嘛", "啦", "了", "么"}
-                            and suffix_gap_ms <= 180
-                            and suffix_duration_ms <= 450
-                        ):
-                            previous_end_sec = end_sec
-                            end_sec = min(timeline_end, max(end_sec, suffix_end))
-                            boundary_suffix = suffix_norm
-                            boundary_relaxed_ms = int(round(max(0.0, end_sec - previous_end_sec) * 1000))
-                        elif match_kind != "word_match" and suffix_gap_ms <= 120:
-                            previous_end_sec = end_sec
-                            end_sec = min(timeline_end, end_sec + 0.08)
-                            boundary_relaxed_ms = int(round(max(0.0, end_sec - previous_end_sec) * 1000))
-                    cursor = max(cursor, stream_end)
-                    matched = True
-                    timing_check["alignment"] = match_kind
-                    timing_check["match_score"] = round(float(match.get("score") or 0.0), 3)
-                    if match.get("anchor_text"):
-                        timing_check["anchor_text"] = str(match.get("anchor_text") or "")
-                        timing_check["anchor_similarity"] = round(float(match.get("anchor_similarity") or 0.0), 3)
-                        timing_check["anchor_qwen_coverage"] = round(float(match.get("anchor_qwen_coverage") or 0.0), 3)
-                        timing_check["anchor_whisper_coverage"] = round(float(match.get("anchor_whisper_coverage") or 0.0), 3)
-                    timing_check["qwen_unmatched_prefix"] = prefix_text
-                    timing_check["qwen_unmatched_suffix"] = qwen_suffix_text
-                    timing_check["whisper_boundary_suffix"] = boundary_suffix
-                    timing_check["expanded_before_ms"] = prefix_ms
-                    timing_check["expanded_after_ms"] = suffix_ms
-                    timing_check["end_boundary_relaxed_ms"] = boundary_relaxed_ms
-
-            if not matched:
-                fallback_count += 1
-                remaining_qwen_chars = sum(qwen_char_lengths[index:]) or current_qwen_chars
-                if stream and units and char_to_unit and cursor < len(stream):
-                    stream_start = cursor
-                    remaining_stream_chars = max(1, len(stream) - stream_start)
-                    advance_chars = max(1, int(round(remaining_stream_chars * current_qwen_chars / max(1, remaining_qwen_chars))))
-                    stream_end = min(len(stream), stream_start + advance_chars)
-                    first_unit = units[char_to_unit[min(len(char_to_unit) - 1, stream_start)]]
-                    last_unit = units[char_to_unit[min(len(char_to_unit) - 1, max(stream_start, stream_end - 1))]]
-                    unit_indexes = sorted(set(char_to_unit[stream_start:stream_end]))
-                    matched_words = [
-                        {
-                            "start": float(units[unit_index]["start"]),
-                            "end": float(units[unit_index]["end"]),
-                            "text": str(units[unit_index].get("text", "")),
-                        }
-                        for unit_index in unit_indexes
-                        if 0 <= unit_index < len(units)
-                    ]
-                    start_sec = float(first_unit["start"])
-                    end_sec = float(last_unit["end"])
-                    cursor = max(cursor, stream_end)
-                    timing_check["alignment"] = "timeline_cursor_ratio_fallback"
-                    timing_check["fallback_stream_start"] = stream_start
-                    timing_check["fallback_stream_end"] = stream_end
-                else:
-                    remaining_end_sec = timeline_end
-                    if audio_end_ms is not None:
-                        remaining_end_sec = min(remaining_end_sec, audio_end_ms / 1000.0)
-                    start_floor = (previous_end_ms + 1) / 1000.0 if previous_end_ms >= 0 else timeline_start
-                    start_sec = max(timeline_start, start_floor)
-                    available_sec = max(0.001, remaining_end_sec - start_sec)
-                    end_sec = min(
-                        remaining_end_sec,
-                        start_sec + available_sec * current_qwen_chars / max(1, remaining_qwen_chars),
-                    )
-                    timing_check["alignment"] = "timeline_remaining_ratio_fallback"
-
-            consumed_qwen_chars += current_qwen_chars
-            start_ms = int(round(start_sec * 1000))
-            end_ms = int(round(end_sec * 1000))
-            if start_ms <= previous_end_ms:
-                start_ms = previous_end_ms + 1
-            if audio_end_ms is not None and start_ms >= audio_end_ms:
-                start_ms = max(0, audio_end_ms - 1)
-            if audio_end_ms is not None:
-                end_ms = min(end_ms, audio_end_ms)
-            if end_ms <= start_ms:
-                estimated_ms = max(1, int(round(cls._estimate_speaking_seconds(text) * 1000)))
-                end_ms = start_ms + estimated_ms
-                if audio_end_ms is not None:
-                    end_ms = min(end_ms, audio_end_ms)
-                if end_ms <= start_ms:
-                    end_ms = start_ms + 1
-            previous_end_ms = end_ms
-
-            speaker = cls._pick_speaker_for_range(
-                start_ms / 1000.0,
-                end_ms / 1000.0,
-                speaker_source_segments or [],
-            )
-            fused_item: dict[str, Any] = {
-                "text": text,
-                "speaker": speaker,
-                "start_ms": start_ms,
-                "end_ms": end_ms,
-                "timing_check": {
-                    **timing_check,
-                    "qwen_segment_index": index,
-                    "matched": matched,
-                },
-            }
-            if matched_words:
-                fused_item["words"] = matched_words
-            fused.append(fused_item)
-
-        warnings: list[str] = []
-        if fallback_count:
-            if fallback_warning:
-                warnings.append(fallback_warning.format(count=fallback_count))
-            else:
-                warnings.append(f"时间轴有 {fallback_count} 个文本分句未精确匹配词流，已按时间比例估算。")
-        return fused, warnings
-
+#    @classmethod
     @classmethod
     def _merge_qwen3_trailing_fragments(cls, segments: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]]]:
         merged: list[dict[str, Any]] = []
@@ -2224,47 +1789,8 @@ class ASREngine:
         json_segments: list[dict[str, Any]],
     ) -> tuple[list[dict[str, Any]], list[str]]:
         srt_segments = [dict(segment or {}) for segment in segments]
-        text_segments = [
-            {"text": str(segment.get("text", "")).strip(), "speaker": str(segment.get("speaker", "") or "").strip()}
-            for segment in srt_segments
-            if str(segment.get("text", "")).strip()
-        ]
-        if not text_segments:
-            return srt_segments, []
-
-        stream, units, char_to_unit = cls._build_timeline_char_stream(json_segments)
-        if not stream or not units or not char_to_unit:
-            return srt_segments, ["Qwen3-ASR JSON full 未提供可用词时间流，已回退到 CrispASR SRT 时间轴。"]
-
-        fused, warnings = cls._fuse_text_segments_with_timeline_stream(
-            text_segments,
-            json_segments,
-            audio_duration_sec=None,
-            source="qwen3_crispasr_json_timeline",
-            fallback_warning="Qwen3-ASR JSON 时间轴有 {count} 个 SRT 分句未精确匹配词流，已按时间比例估算。",
-        )
-        output: list[dict[str, Any]] = []
-        for item in fused:
-            text = str(item.get("text", "")).strip()
-            if not text:
-                continue
-            start_ms = int(item.get("start_ms") or 0)
-            end_ms = int(item.get("end_ms") or start_ms + 1)
-            if end_ms <= start_ms:
-                end_ms = start_ms + 1
-            segment: dict[str, Any] = {
-                "start": start_ms / 1000.0,
-                "end": end_ms / 1000.0,
-                "text": text,
-            }
-            words = cls._normalize_word_items(item.get("words"))
-            if words:
-                segment["words"] = words
-            timing_check = item.get("timing_check")
-            if isinstance(timing_check, dict):
-                segment["timing_check"] = dict(timing_check)
-            output.append(segment)
-        return output or srt_segments, warnings
+        _ = json_segments
+        return srt_segments, ["Qwen3-ASR JSON full 词流融合已临时禁用，已回退到 CrispASR SRT 时间轴。"]
 
     @classmethod
     def _load_crispasr_qwen3_json_segments(
@@ -2343,6 +1869,7 @@ class ASREngine:
             "overlap_before": cls._count_timing_overlaps(original),
             "overlap_after": cls._count_timing_overlaps(original),
             "out_of_audio_after": cls._count_timing_out_of_audio(original, audio_duration_sec),
+            "merge_short_punct_ms": int(round(QWEN3_JSON_REPAIR_SHORT_PUNCT_SEC * 1000)),
         }
         if not original or not words:
             return original, report
@@ -2519,7 +2046,105 @@ class ASREngine:
             item.pop("degenerate_json_span", None)
             final.append(item)
 
+        final, quote_repairs = cls._move_qwen3_leading_closing_quotes(final)
+        final, punctuation_repairs = cls._merge_qwen3_short_punctuation_entries(
+            final,
+            max_duration_sec=QWEN3_JSON_REPAIR_SHORT_PUNCT_SEC,
+        )
+        repairs.extend(quote_repairs)
+        repairs.extend(punctuation_repairs)
+
         return final, repairs
+
+    @classmethod
+    def _move_qwen3_leading_closing_quotes(cls, segments: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        fixed: list[dict[str, Any]] = []
+        repairs: list[dict[str, Any]] = []
+        for number, segment in enumerate(segments or [], start=1):
+            item = dict(segment or {})
+            text = str(item.get("text") or "")
+            match = QWEN3_JSON_REPAIR_CLOSING_QUOTE_PREFIX_RE.match(text)
+            if match and fixed:
+                quote_prefix, remainder = match.groups()
+                fixed[-1]["text"] = str(fixed[-1].get("text") or "").rstrip() + quote_prefix
+                item["text"] = remainder.lstrip()
+                repairs.append(
+                    {
+                        "kind": "qwen3_leading_closing_quote_move",
+                        "entry": number,
+                        "moved_text": quote_prefix,
+                        "direction": "previous",
+                    }
+                )
+            fixed.append(item)
+        return fixed, repairs
+
+    @classmethod
+    def _merge_qwen3_short_punctuation_entries(
+        cls,
+        segments: list[dict[str, Any]],
+        *,
+        max_duration_sec: float,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        if max_duration_sec <= 0:
+            return [dict(segment or {}) for segment in segments or []], []
+
+        merged: list[dict[str, Any]] = []
+        repairs: list[dict[str, Any]] = []
+        pending_prefix = ""
+        for number, segment in enumerate(segments or [], start=1):
+            item = dict(segment or {})
+            text = str(item.get("text") or "")
+            if pending_prefix:
+                item["text"] = pending_prefix + text
+                pending_prefix = ""
+
+            start = cls._coerce_finite_seconds(item.get("start"))
+            end = cls._coerce_finite_seconds(item.get("end"))
+            duration = (end - start) if start is not None and end is not None else 0.0
+            original_text = text
+            if cls._qwen3_srt_repair_is_punctuation_only(original_text) and duration <= max_duration_sec:
+                if merged:
+                    cls._append_qwen3_repaired_segment_text(merged[-1], original_text)
+                    previous_end = cls._coerce_finite_seconds(merged[-1].get("end"))
+                    if end is not None and (previous_end is None or end > previous_end):
+                        merged[-1]["end"] = end
+                    cls._append_qwen3_repaired_segment_words(merged[-1], item)
+                    repairs.append(
+                        {
+                            "kind": "qwen3_short_punctuation_merge",
+                            "entry": number,
+                            "moved_text": original_text,
+                            "duration_ms": int(round(max(0.0, duration) * 1000)),
+                            "direction": "previous",
+                        }
+                    )
+                else:
+                    pending_prefix = original_text
+                    repairs.append(
+                        {
+                            "kind": "qwen3_short_punctuation_prefix_queue",
+                            "entry": number,
+                            "moved_text": original_text,
+                            "duration_ms": int(round(max(0.0, duration) * 1000)),
+                            "direction": "next",
+                        }
+                    )
+                continue
+
+            merged.append(item)
+
+        if pending_prefix and merged:
+            cls._append_qwen3_repaired_segment_text(merged[-1], pending_prefix)
+            repairs.append(
+                {
+                    "kind": "qwen3_short_punctuation_merge",
+                    "moved_text": pending_prefix,
+                    "direction": "final",
+                }
+            )
+
+        return merged, repairs
 
     @classmethod
     def _append_qwen3_repaired_segment_text(cls, target: dict[str, Any], text: str) -> None:
@@ -3243,11 +2868,15 @@ class ASREngine:
     @staticmethod
     def _normalize_backend(backend: str | None) -> str:
         val = (backend or "").strip().lower()
-        if val in {"", "whisper"}:
-            return "whisper"
-        if val in {"qwen3_crispasr", "qwen3_asr", "qwen3-asr"}:
-            return "qwen3_crispasr"
+        if val in {"", WHISPER_BACKEND}:
+            return WHISPER_BACKEND
+        if val in QWEN3_BACKEND_ALIASES:
+            return QWEN3_CRISPASR_BACKEND
         return val
+
+    @classmethod
+    def _is_qwen3_backend(cls, backend: str | None) -> bool:
+        return cls._normalize_backend(backend) == QWEN3_CRISPASR_BACKEND
 
     @staticmethod
     def _strip_speaker_labels(text: str) -> str:
