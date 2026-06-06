@@ -3204,20 +3204,6 @@ select.textInput option {
   display: none;
 }
 
-.workspaceModelReady {
-  min-height: 32px;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 0 12px;
-  border: 1px solid rgba(74, 222, 128, 0.24);
-  border-radius: 8px;
-  background: rgba(74, 222, 128, 0.08);
-  color: color-mix(in srgb, var(--success) 82%, white);
-  font-size: 12.5px;
-  font-weight: 700;
-}
-
 .workspaceBody {
   flex: 1;
   display: grid;
@@ -3726,12 +3712,36 @@ select.textInput option {
     flex: 1 1 auto;
   }
 
+  .mainArea,
+  .workspaceBody,
   .pageContent {
-    padding: var(--content-padding-mobile);
+    min-height: 0;
+  }
+
+  .mainArea {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .workspaceBody {
+    display: flex;
+    flex: 1 1 auto;
+    overflow: hidden;
+  }
+
+  .pageContent {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
   }
 
   .productionFlowPanel {
-    padding: 14px;
+    display: none;
+  }
+
+  .pageContent {
+    padding: var(--content-padding-mobile);
   }
 }
 

@@ -77,7 +77,7 @@ function writePageToLocation(page, { replace = false } = {}) {
 
 export default function App() {
   const [activePage, setActivePage] = useState(readPageFromLocation);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const activePageRef = useRef(activePage);
   const navigationTokenRef = useRef(0);
   const prefersReducedMotion = useReducedMotion();

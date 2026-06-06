@@ -204,12 +204,12 @@ export default function WorkspaceHeader({ activePage, onNavigate }) {
 
   const moreMenuItems = [
     {
-      label: "新项目",
+      label: "新建",
       icon: Plus,
       onSelect: handleCreateProject,
     },
     {
-      label: "打开项目",
+      label: "打开",
       icon: FolderOpen,
       onSelect: handleOpenProjectFileClick,
     },
@@ -304,7 +304,7 @@ export default function WorkspaceHeader({ activePage, onNavigate }) {
             className="workspaceDesktopAction"
             onClick={handleCreateProject}
           >
-            新项目
+            新建
           </Button>
           <Button
             variant="secondary"
@@ -313,7 +313,7 @@ export default function WorkspaceHeader({ activePage, onNavigate }) {
             className="workspaceDesktopAction"
             onClick={handleOpenProjectFileClick}
           >
-            打开项目
+            打开
           </Button>
           <Button
             variant="secondary"
