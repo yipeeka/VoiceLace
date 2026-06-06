@@ -1,4 +1,4 @@
-import { MoreHorizontal, Pencil, Play, Plus, RefreshCw, Save, Trash2, X, GripVertical } from "lucide-react";
+import { MoreHorizontal, Pencil, Play, Plus, RefreshCw, Save, Scissors, Trash2, X, GripVertical } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -12,6 +12,16 @@ import { getStoredSegmentDurationMismatch } from "../../utils/segmentTiming";
 
 const STATUS_ICON = { done: "✅", running: "⏳", pending: "⬜", error: "❌", skipped: "⏭", stale: "🟨", missing: "⚠", failed: "❌" };
 const STATUS_ROW_CLS = { done: "done", running: "running", pending: "pending", error: "error", stale: "stale", missing: "missing", failed: "error" };
+const STATUS_LABELS = {
+  done: "已同步",
+  running: "生成中",
+  pending: "待生成",
+  skipped: "已跳过",
+  stale: "需处理",
+  missing: "缺失",
+  failed: "失败",
+  error: "失败",
+};
 
 function formatSourceTimelineMs(value) {
   const ms = Number(value);
@@ -21,6 +31,12 @@ function formatSourceTimelineMs(value) {
   const seconds = Math.floor((totalMs % 60000) / 1000);
   const millis = totalMs % 1000;
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(millis).padStart(3, "0")}`;
+}
+
+function formatCompactDurationMs(value) {
+  const ms = Number(value);
+  if (!Number.isFinite(ms) || ms <= 0) return "";
+  return `${(ms / 1000).toFixed(ms >= 10000 ? 1 : 2)}s`;
 }
 
 function isInteractiveRowTarget(target) {
@@ -51,10 +67,14 @@ export default function SegmentTimelineRow({
   beginEditSegment,
   cancelEditSegment,
   saveEditedSegment,
+  onSegmentCursorChange,
+  onSplitAtCursor,
   handleSingleSegmentSynthesis,
   handleDeleteSegment,
   setInsertAfterSegmentId,
   onLocateFullAudioSegment,
+  insertPickMode = false,
+  onPickInsertAfter,
   playFrom,
   pushToast,
 }) {
@@ -78,11 +98,22 @@ export default function SegmentTimelineRow({
   const sourceStartMs = Number(seg?.source_start_ms);
   const sourceEndMs = Number(seg?.source_end_ms);
   const hasSourceTimeline = Number.isFinite(sourceStartMs) && Number.isFinite(sourceEndMs) && sourceStartMs >= 0 && sourceEndMs > sourceStartMs;
-  const timeBadgeText = hasSourceTimeline
-    ? `${formatSourceTimelineMs(sourceStartMs)} - ${formatSourceTimelineMs(sourceEndMs)}`
-    : segmentTiming
-      ? `${formatTimeMs(segmentTiming.start)} - ${formatTimeMs(segmentTiming.end)}`
+  const timingStartMs = Number(segmentTiming?.start);
+  const timingEndMs = Number(segmentTiming?.end);
+  const hasPlaybackTiming = Number.isFinite(timingStartMs) && Number.isFinite(timingEndMs) && timingEndMs > timingStartMs;
+  const startTimeText = hasSourceTimeline
+    ? formatSourceTimelineMs(sourceStartMs)
+    : hasPlaybackTiming
+      ? formatSourceTimelineMs(timingStartMs)
       : "";
+  const durationMs = hasSourceTimeline
+    ? sourceEndMs - sourceStartMs
+    : hasPlaybackTiming
+      ? timingEndMs - timingStartMs
+      : Number(seg?.duration_ms || 0);
+  const durationText = formatCompactDurationMs(durationMs);
+  const primaryStatusLabel = STATUS_LABELS[segStatus] || segStatus;
+  const secondaryStaleLabel = staleLabel && staleLabel !== primaryStatusLabel ? staleLabel : "";
 
   useEffect(() => {
     if (!actionsOpen) return undefined;
@@ -110,8 +141,12 @@ export default function SegmentTimelineRow({
       <div
         ref={setNodeRef}
         data-segment-id={seg.segment_id}
-        className={`synthSegmentRow ${STATUS_ROW_CLS[segStatus] ?? "pending"} ${currentSegmentId === seg.segment_id ? "active" : ""} ${durationMismatch?.isMismatch ? "durationMismatch" : ""} ${canLocateFullAudio ? "audioLinked" : ""} ${actionsOpen ? "actionsOpen" : ""} ${recentlyUpdatedSegmentId === seg.segment_id ? "updated" : ""}`}
+        className={`synthSegmentRow ${STATUS_ROW_CLS[segStatus] ?? "pending"} ${currentSegmentId === seg.segment_id ? "active" : ""} ${durationMismatch?.isMismatch ? "durationMismatch" : ""} ${canLocateFullAudio ? "audioLinked" : ""} ${insertPickMode ? "insertPickMode" : ""} ${isEditing ? "editing" : ""} ${actionsOpen ? "actionsOpen" : ""} ${recentlyUpdatedSegmentId === seg.segment_id ? "updated" : ""}`}
         onClick={(event) => {
+          if (insertPickMode && !isInteractiveRowTarget(event.target)) {
+            onPickInsertAfter?.(seg);
+            return;
+          }
           if (isEditing || !canLocateFullAudio || isInteractiveRowTarget(event.target)) {
             return;
           }
@@ -148,21 +183,28 @@ export default function SegmentTimelineRow({
         />
       </label>
       <span className="synthSegmentIndex">#{(seg.index ?? 0) + 1}</span>
+      {startTimeText ? (
+        <span className="synthSegmentStartCell">{startTimeText}</span>
+      ) : (
+        <span className="synthSegmentStartCell muted">--</span>
+      )}
+      {durationText ? (
+        <span className="synthSegmentDurationCell">{durationText}</span>
+      ) : (
+        <span className="synthSegmentDurationCell muted">--</span>
+      )}
       <div className="synthSegmentMeta" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
         <div className="synthSegmentSpeakerStack">
           <div className="synthSegmentSpeakerRow">
             <CharacterBadge name={seg.speaker} showDot />
           </div>
-          {segStatus === "done" && timeBadgeText ? (
-            <span className="synthSegmentTimeBadge">
-              {timeBadgeText}
-            </span>
-          ) : null}
         </div>
       </div>
-      {staleLabel || seg.draft_status === "unsaved" || durationMismatch?.isMismatch ? (
-        <div className="synthSegmentStateBadges">
-          {staleLabel ? <span className={`statusBadge ${staleTone}`}>{staleLabel}</span> : null}
+      <div className="synthSegmentStateBadges">
+          <span className={`statusBadge ${segStatus === "done" ? "success" : segStatus === "failed" || segStatus === "error" || segStatus === "missing" ? "danger" : "warning"}`}>
+            {primaryStatusLabel}
+          </span>
+          {secondaryStaleLabel ? <span className={`statusBadge ${staleTone}`}>{secondaryStaleLabel}</span> : null}
           {seg.draft_status === "unsaved" ? <span className="statusBadge warning">未保存改动</span> : null}
           {durationMismatch?.isMismatch ? (
             <span
@@ -172,17 +214,42 @@ export default function SegmentTimelineRow({
               可能差距过大
             </span>
           ) : null}
-        </div>
-      ) : null}
+      </div>
 
       {isEditing ? (
-        <div style={{ minWidth: 420, maxWidth: 760, flex: "1 1 560px" }}>
+        <div className="synthSegmentEditorPanel">
           <SegmentEditorFields
             draft={segmentDraft}
             includeAdvanced
             speakerOptions={speakerOptions}
             onFieldChange={(field, value) => setSegmentDraft((draft) => ({ ...(draft || {}), [field]: value }))}
+            onTextCursorChange={(cursor) => onSegmentCursorChange?.(seg.segment_id, cursor)}
+            textMinHeight={60}
           />
+          <div className="controlRow synthSegmentEditorActions">
+            <Button
+              variant="primary"
+              size="sm"
+              icon={Save}
+              disabled={isRunning || isScriptSaving || !segmentDraft?.text?.trim()}
+              onClick={() => saveEditedSegment(seg)}
+            >
+              应用到草稿
+            </Button>
+            <Button variant="ghost" size="sm" icon={X} disabled={isRunning || isScriptSaving} onClick={cancelEditSegment}>
+              取消
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={Scissors}
+              disabled={isRunning || isScriptSaving}
+              onClick={() => onSplitAtCursor?.(seg.segment_id)}
+              title="按当前光标位置拆分"
+            >
+              拆分
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="synthSegmentTextCell">
@@ -206,22 +273,13 @@ export default function SegmentTimelineRow({
           <AudioPlayer audioUrl={`${API_ORIGIN}${seg.audio_url}`} peaks={seg.peaks} peaksUrl={seg.peaks_url} height={32} compact showTime={false} />
         </div>
       )}
-      {isEditing ? (
-        <>
-          <Button
-            variant="primary"
-            size="sm"
-            icon={Save}
-            disabled={isRunning || isScriptSaving || !segmentDraft?.text?.trim()}
-            onClick={() => saveEditedSegment(seg)}
-          >
-            应用到草稿
-          </Button>
-          <Button variant="ghost" size="sm" icon={X} disabled={isRunning || isScriptSaving} onClick={cancelEditSegment}>
-            取消
-          </Button>
-        </>
-      ) : (
+      {!canPlaySegment && <div className="synthSegmentAudioCell synthSegmentAudioEmpty">--</div>}
+      <span className={`synthSegmentDrift ${durationMismatch?.isMismatch ? "warn" : "ok"}`}>
+        {durationMismatch?.isMismatch
+          ? `${durationMismatch.direction === "target_shorter" ? "+" : "-"}${Math.round(Number(durationMismatch.diffSec || 0) * 1000)}ms`
+          : segStatus === "done" ? "0ms" : "--"}
+      </span>
+      {isEditing ? null : (
         <div className="synthSegmentActions" ref={actionsRef}>
           <Button
             variant="ghost"

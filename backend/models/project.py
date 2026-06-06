@@ -36,6 +36,8 @@ class ChapterMarker(BaseModel):
 
 
 class PostprocessTrackConfig(BaseModel):
+    id: str = ""
+    label: str = ""
     relpath: str = ""
     gain_db: float = 0.0
     loop: bool = True
@@ -66,6 +68,8 @@ class SynthesisConfig(BaseModel):
     chapter_markers: list[ChapterMarker] = Field(default_factory=list)
     bgm_track: PostprocessTrackConfig = Field(default_factory=PostprocessTrackConfig)
     ambience_track: PostprocessTrackConfig = Field(default_factory=PostprocessTrackConfig)
+    music_tracks: list[PostprocessTrackConfig] = Field(default_factory=list)
+    effect_tracks: list[PostprocessTrackConfig] = Field(default_factory=list)
     tts_auto_retry: bool = True
     tts_retry_attempts: int = 2
     tts_segment_concurrency: int = 1
@@ -95,6 +99,10 @@ class SynthesisConfig(BaseModel):
         self.denoise = bool(self.omnivoice.denoise)
         if self.voxcpm2 is None:
             self.voxcpm2 = VoxCpm2SynthesisParams()
+        if self.music_tracks is None:
+            self.music_tracks = []
+        if self.effect_tracks is None:
+            self.effect_tracks = []
         return self
 
     def get_tts_backend(self) -> str:

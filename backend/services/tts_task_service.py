@@ -17,6 +17,8 @@ POSTPROCESS_CONFIG_KEYS = {
     "chapter_markers",
     "bgm_track",
     "ambience_track",
+    "music_tracks",
+    "effect_tracks",
 }
 
 

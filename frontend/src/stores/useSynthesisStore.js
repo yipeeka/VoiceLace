@@ -401,6 +401,8 @@ export const useSynthesisStore = create((set) => ({
       ducking_db: 8,
       offset_ms: 0,
     },
+    music_tracks: [],
+    effect_tracks: [],
     tts_auto_retry: true,
     tts_retry_attempts: 2,
     tts_segment_concurrency: 1,

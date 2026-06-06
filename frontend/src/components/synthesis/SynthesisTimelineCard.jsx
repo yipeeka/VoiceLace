@@ -1,7 +1,9 @@
 import { DndContext, closestCenter } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { useEffect, useRef } from "react";
+import { Plus, Search, Settings, SlidersHorizontal, Users, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import CharacterBadge from "../shared/CharacterBadge";
 import EmptyState from "../shared/EmptyState";
 import GlassCard from "../shared/GlassCard";
 import Button from "../ui/Button";
@@ -19,6 +21,15 @@ export default function SynthesisTimelineCard({
   activeStatusFilter,
   statusCounts,
   onStatusFilterChange,
+  characters = [],
+  totalSegments = 0,
+  onSelectSpeaker,
+  hasUnsavedChanges = false,
+  actionContent = null,
+  scriptError = "",
+  onRequestInsertSegment,
+  insertPickMode = false,
+  onCancelInsertPick,
   shouldShowSegmentTimeline,
   selectedSegmentIds,
   setSelectedSegmentIds,
@@ -43,6 +54,8 @@ export default function SynthesisTimelineCard({
   beginEditSegment,
   cancelEditSegment,
   saveEditedSegment,
+  onSegmentCursorChange,
+  onSplitAtCursor,
   handleSingleSegmentSynthesis,
   handleDeleteSegment,
   setInsertAfterSegmentId,
@@ -56,12 +69,20 @@ export default function SynthesisTimelineCard({
 }) {
   const timelineRef = useRef(null);
   const selectionAnchorSegmentIdRef = useRef(null);
+  const [showSelectedOnly, setShowSelectedOnly] = useState(false);
   const speakerOptions = [
     { value: "narrator", label: "narrator" },
     ...Array.from(new Set((segments || []).map((segment) => (segment.speaker || "").trim()).filter(Boolean)))
       .filter((name) => name !== "narrator")
       .map((name) => ({ value: name, label: name })),
   ];
+  const displaySegments = useMemo(() => {
+    if (!showSelectedOnly || !selectedSegmentIds.length) {
+      return segments;
+    }
+    const selectedSet = new Set(selectedSegmentIds);
+    return segments.filter((segment) => selectedSet.has(segment.segment_id));
+  }, [segments, selectedSegmentIds, showSelectedOnly]);
 
   useEffect(() => {
     if (!currentSegmentId || !timelineRef.current) {
@@ -79,14 +100,20 @@ export default function SynthesisTimelineCard({
     const rowRect = row.getBoundingClientRect();
     const targetTop = rowRect.top - containerRect.top + container.scrollTop;
     container.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
-  }, [currentSegmentId, segments]);
+  }, [currentSegmentId, displaySegments]);
 
   useEffect(() => {
-    const visibleIds = new Set((segments || []).map((segment) => segment.segment_id).filter(Boolean));
+    const visibleIds = new Set((displaySegments || []).map((segment) => segment.segment_id).filter(Boolean));
     if (selectionAnchorSegmentIdRef.current && !visibleIds.has(selectionAnchorSegmentIdRef.current)) {
       selectionAnchorSegmentIdRef.current = null;
     }
-  }, [segments]);
+  }, [displaySegments]);
+
+  useEffect(() => {
+    if (!selectedSegmentIds.length && showSelectedOnly) {
+      setShowSelectedOnly(false);
+    }
+  }, [selectedSegmentIds.length, showSelectedOnly]);
 
   function handleClearSelectedSegments() {
     setSelectedSegmentIds([]);
@@ -96,7 +123,7 @@ export default function SynthesisTimelineCard({
   function handleToggleSegmentSelected(segmentId, checked, shiftKey = false) {
     setSelectedSegmentIds((ids) => applySegmentSelectionClick({
       selectedIds: ids,
-      visibleSegments: segments,
+      visibleSegments: displaySegments,
       targetId: segmentId,
       checked,
       shiftKey,
@@ -105,58 +132,105 @@ export default function SynthesisTimelineCard({
     selectionAnchorSegmentIdRef.current = segmentId;
   }
 
+  function handlePickInsertAfter(segment) {
+    onRequestInsertSegment?.(segment.segment_id);
+  }
+
   return (
     <GlassCard className={className}>
-      <h2 className="cardTitle">
-        分段时间线
-        {totalVisibleSegments ? (
-          <span className="muted">
-            当前显示 {totalVisibleSegments} 段{activeSpeakerFilter !== "all" ? "（已按角色筛选）" : ""}
-          </span>
-        ) : null}
-      </h2>
-      {totalVisibleSegments && activeSpeakerFilter !== "all" ? (
-        <div className="controlRow" style={{ marginBottom: 10 }}>
-          <span className="muted">筛选状态下暂不支持拖拽排序</span>
+      <div className="segmentCommandHeader">
+        <div className="segmentStatusToolbar">
+          {[
+            ["all", "全部"],
+            ["missing", "待生成"],
+            ["stale", "需处理"],
+            ["done", "已完成"],
+            ["failed", "失败"],
+          ].map(([value, label]) => (
+            <Button
+              key={value}
+              variant={activeStatusFilter === value ? "primary" : "ghost"}
+              size="sm"
+              onClick={() => onStatusFilterChange(value)}
+            >
+              {label} {statusCounts?.[value] ?? 0}
+            </Button>
+          ))}
+          <label className="segmentSelectedOnlyToggle">
+            <input
+              type="checkbox"
+              checked={showSelectedOnly}
+              disabled={!selectedSegmentIds.length}
+              onChange={(event) => setShowSelectedOnly(event.target.checked)}
+            />
+            <span>仅显示选中 ({selectedSegmentIds.length})</span>
+          </label>
+          <div className="segmentSearchBox" aria-hidden="true">
+            <Search size={15} />
+            <span>搜索文本、说话人、标签...</span>
+          </div>
+          <Button variant="ghost" size="sm" icon={SlidersHorizontal} title="筛选" aria-label="筛选" />
+          <Button variant="ghost" size="sm" icon={Settings} title="列表设置" aria-label="列表设置" />
         </div>
-      ) : null}
-      <div className="controlRow" style={{ marginBottom: 10, gap: 8, flexWrap: "wrap" }}>
-        <span className="muted">状态筛选</span>
-        <Button
-          variant={activeStatusFilter === "all" ? "primary" : "ghost"}
-          size="sm"
-          onClick={() => onStatusFilterChange("all")}
-        >
-          全部 {statusCounts?.all ?? 0}
-        </Button>
-        <Button
-          variant={activeStatusFilter === "stale" ? "primary" : "ghost"}
-          size="sm"
-          onClick={() => onStatusFilterChange("stale")}
-        >
-          待修音 {statusCounts?.stale ?? 0}
-        </Button>
-        <Button
-          variant={activeStatusFilter === "done" ? "primary" : "ghost"}
-          size="sm"
-          onClick={() => onStatusFilterChange("done")}
-        >
-          已合成 {statusCounts?.done ?? 0}
-        </Button>
-        <Button
-          variant={activeStatusFilter === "missing" ? "primary" : "ghost"}
-          size="sm"
-          onClick={() => onStatusFilterChange("missing")}
-        >
-          缺音频 {statusCounts?.missing ?? 0}
-        </Button>
-        <Button
-          variant={activeStatusFilter === "failed" ? "primary" : "ghost"}
-          size="sm"
-          onClick={() => onStatusFilterChange("failed")}
-        >
-          失败 {statusCounts?.failed ?? 0}
-        </Button>
+
+        <div className="segmentSpeakerToolbar">
+          <button
+            type="button"
+            className={`segmentSpeakerChip ${activeSpeakerFilter === "all" ? "active" : ""}`}
+            onClick={() => onSelectSpeaker?.("all")}
+          >
+            <Users size={15} />
+            全部说话人 <strong>{characters.length || 0}</strong>
+          </button>
+          {characters.map(({ name, count }) => (
+            <button
+              type="button"
+              key={name}
+              className={`segmentSpeakerChip ${activeSpeakerFilter === name ? "active" : ""}`}
+              onClick={() => onSelectSpeaker?.(name)}
+              title={name}
+            >
+              <CharacterBadge name={name} showDot />
+              <strong>{count}</strong>
+            </button>
+          ))}
+        </div>
+
+        <div className="segmentListCommandRow">
+          <div className="controlRow">
+            <span className={`statusBadge ${hasUnsavedChanges ? "warning" : "success"}`}>
+              {hasUnsavedChanges ? "有未保存改动" : "已保存"}
+            </span>
+            {totalVisibleSegments ? (
+              <span className="muted">
+                当前显示 {totalVisibleSegments} / {totalSegments || statusCounts?.all || 0} 段
+                {activeSpeakerFilter !== "all" ? "（已按说话人筛选）" : ""}
+              </span>
+            ) : null}
+            {totalVisibleSegments && activeSpeakerFilter !== "all" ? (
+              <span className="muted">筛选状态下暂不支持拖拽排序</span>
+            ) : null}
+          </div>
+          <div className="controlRow segmentListActions">
+            {actionContent}
+            <Button
+              variant={insertPickMode ? "danger" : "primary"}
+              size="sm"
+              icon={insertPickMode ? X : Plus}
+              disabled={isScriptSaving}
+              onClick={insertPickMode ? onCancelInsertPick : () => onRequestInsertSegment?.()}
+            >
+              {insertPickMode ? "取消选择位置" : "新增片段"}
+            </Button>
+          </div>
+        </div>
+
+        {insertPickMode ? (
+          <div className="segmentInsertHint">
+            选择插入位置：点击任意片段，将在该片段之后新增并自动进入编辑状态。
+          </div>
+        ) : null}
+        {scriptError ? <div className="errorText">{scriptError}</div> : null}
       </div>
       {selectedSegmentIds.length ? (
         <div className="controlRow" style={{ marginBottom: 10 }}>
@@ -213,9 +287,22 @@ export default function SynthesisTimelineCard({
       ) : null}
       {segments.length && shouldShowSegmentTimeline ? (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onTimelineDragEnd}>
-          <SortableContext items={segments.map((seg) => seg.segment_id)} strategy={verticalListSortingStrategy}>
+          <SortableContext items={displaySegments.map((seg) => seg.segment_id)} strategy={verticalListSortingStrategy}>
+            <div className="synthesisTimelineHeaderRow" aria-hidden="true">
+              <span></span>
+              <span></span>
+              <span>#</span>
+              <span>开始时间</span>
+              <span>时长</span>
+              <span>说话人</span>
+              <span>状态</span>
+              <span>文本（点击编辑）</span>
+              <span>音频</span>
+              <span>差值</span>
+              <span>操作</span>
+            </div>
             <div className="synthesisTimeline" ref={timelineRef}>
-              {segments.map((seg) => {
+              {displaySegments.map((seg) => {
                 const selected = selectedSegmentIds.includes(seg.segment_id);
                 const staleItem = staleItemBySegmentId[seg.segment_id];
                 const staleLabel = getSegmentStaleLabel(staleItem);
@@ -244,10 +331,14 @@ export default function SynthesisTimelineCard({
                     beginEditSegment={beginEditSegment}
                     cancelEditSegment={cancelEditSegment}
                     saveEditedSegment={saveEditedSegment}
+                    onSegmentCursorChange={onSegmentCursorChange}
+                    onSplitAtCursor={onSplitAtCursor}
                     handleSingleSegmentSynthesis={handleSingleSegmentSynthesis}
                     handleDeleteSegment={handleDeleteSegment}
                     setInsertAfterSegmentId={setInsertAfterSegmentId}
                     onLocateFullAudioSegment={onLocateFullAudioSegment}
+                    insertPickMode={insertPickMode}
+                    onPickInsertAfter={handlePickInsertAfter}
                     playFrom={playFrom}
                     pushToast={pushToast}
                   />

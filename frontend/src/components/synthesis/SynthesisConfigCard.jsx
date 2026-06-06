@@ -1,5 +1,5 @@
-import { AudioLines, ChevronDown, ChevronUp, Download, Pause, Play, SlidersHorizontal, Square, Trash2, Upload, Wand2 } from "lucide-react";
-import { useId, useRef, useState } from "react";
+import { AudioLines, ChevronDown, ChevronUp, Pause, Play, SlidersHorizontal, Square, Trash2, Upload, Wand2 } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import GlassCard from "../shared/GlassCard";
 import Button from "../ui/Button";
@@ -9,11 +9,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/Tabs";
 
 function CollapsibleHeader({ expanded, onToggle, title, subtitle, icon: Icon }) {
   return (
-    <div className="sectionHeader">
+    <div className="sectionHeader synthesisConsoleHeader">
       <div className="sectionHeaderLeft">
         <button
           type="button"
-          className="btn btn-ghost btn-sm"
+          className="btn btn-ghost btn-sm synthesisConsoleTitleButton"
           style={{ justifyContent: "flex-start", paddingLeft: 0, paddingRight: 0 }}
           onClick={onToggle}
           aria-expanded={expanded}
@@ -62,12 +62,12 @@ export function SynthesisGenerateCard({
   };
 
   return (
-    <GlassCard>
+    <GlassCard className="synthesisConsolePanel synthesisGeneratePanel">
       <CollapsibleHeader
         expanded={expanded}
         onToggle={onToggle}
-        title="合成参数"
-        subtitle={expanded ? "设置 TTS 参数并执行整本合成。" : "已收起，点击展开。"}
+        title="合成控制"
+        subtitle={expanded ? "" : "已收起，点击展开。"}
         icon={SlidersHorizontal}
       />
       {!expanded ? (
@@ -307,9 +307,9 @@ export function SynthesisGenerateCard({
               disabled={!currentProject?.id || isRunning || !currentProject?.script?.segments?.length}
               onClick={onStart}
             >
-              {isRunning ? "合成中…" : "▶ 开始合成"}
+              {isRunning ? "合成中…" : "▶ 合成"}
             </Button>
-            {isRunning ? <Button variant="danger" icon={Square} onClick={onCancel}>停止</Button> : null}
+            {isRunning ? <Button variant="danger" icon={Square} onClick={onCancel}>取消任务</Button> : null}
             <span className="muted" style={{ marginLeft: "auto" }}>
               {currentProject ? currentProject.name : "未选择项目"}
             </span>
@@ -329,19 +329,20 @@ export function SynthesisPostprocessCard({
   currentProject,
   isRunning,
   isUploadingPostAsset,
-  bgmPreviewUrl,
-  ambiencePreviewUrl,
   onSetConfig,
   onStartPostprocess,
   onExtractBackground,
   onUploadPostprocessAsset,
   onClearPostprocessAsset,
+  selectedTrackId = "",
+  onSelectTrack,
+  API_ORIGIN = "",
 }) {
-  const bgmInputRef = useRef(null);
-  const ambienceInputRef = useRef(null);
-  const bgmAudioRef = useRef(null);
-  const ambienceAudioRef = useRef(null);
-  const [previewPlayingType, setPreviewPlayingType] = useState("");
+  const musicInputRef = useRef(null);
+  const effectInputRef = useRef(null);
+  const previewAudioRef = useRef(null);
+  const trackItemRefs = useRef({});
+  const [previewPlayingTrackId, setPreviewPlayingTrackId] = useState("");
   const chapterMarkers = Array.isArray(config.chapter_markers) ? config.chapter_markers : [];
   const hasRawFullAudio =
     Boolean(currentProject?.audio_assets?.full_wav_relpath) ||
@@ -349,12 +350,131 @@ export function SynthesisPostprocessCard({
   const hasSourceAudio =
     Boolean(currentProject?.audio_assets?.source_audio_wav_relpath) ||
     Boolean(currentProject?.audio_assets?.source_audio_mp3_relpath);
-  const ambienceRelpath = String(config.ambience_track?.relpath || "");
-  const ambienceDownloadLabel = ambienceRelpath.includes("ambience_from_source") ? "下载背景声" : "下载环境音";
   const segmentOptions = (segments || []).map((segment, index) => ({
     value: segment.id,
     label: `#${index + 1} ${(segment.text || "").slice(0, 18) || "空片段"}`,
   }));
+  const rawMusicTracks = Array.isArray(config.music_tracks) ? config.music_tracks : [];
+  const rawEffectTracks = Array.isArray(config.effect_tracks) ? config.effect_tracks : [];
+
+  function basename(relpath) {
+    const value = String(relpath || "");
+    return value.split(/[\\/]/).pop() || "";
+  }
+
+  function normalizeTrack(track, kind, index, legacyKey = "") {
+    const relpath = String(track?.relpath || "");
+    return {
+      ...(track || {}),
+      id: legacyKey || String(track?.id || `${kind}-${index + 1}`),
+      label: String(track?.label || basename(relpath).replace(/\.[^.]+$/, "") || `${kind === "music" ? "音乐" : "音效"} ${index + 1}`),
+      relpath,
+      gain_db: Number(track?.gain_db ?? 0),
+      ducking_enabled: Boolean(track?.ducking_enabled ?? false),
+      ducking_db: Number(track?.ducking_db ?? 8),
+      loop: Boolean(track?.loop ?? true),
+      offset_ms: Number(track?.offset_ms ?? 0),
+      legacyKey,
+    };
+  }
+
+  const musicTracks = [
+    ...(config.bgm_track?.relpath ? [normalizeTrack(config.bgm_track, "music", 0, "legacy-bgm")] : []),
+    ...rawMusicTracks.map((track, index) => normalizeTrack(track, "music", index)),
+  ];
+  const effectTracks = [
+    ...(config.ambience_track?.relpath ? [normalizeTrack(config.ambience_track, "effect", 0, "legacy-ambience")] : []),
+    ...rawEffectTracks.map((track, index) => normalizeTrack(track, "effect", index)),
+  ];
+
+  useEffect(() => {
+    if (!selectedTrackId) return;
+    trackItemRefs.current[selectedTrackId]?.scrollIntoView({
+      block: "nearest",
+      behavior: "smooth",
+    });
+  }, [selectedTrackId, expanded]);
+
+  function selectTrack(trackId) {
+    onSelectTrack?.(trackId);
+  }
+
+  function updateTrack(kind, trackId, patch) {
+    if (trackId === "legacy-bgm") {
+      onSetConfig({ bgm_track: { ...(config.bgm_track || {}), ...patch } });
+      return;
+    }
+    if (trackId === "legacy-ambience") {
+      onSetConfig({ ambience_track: { ...(config.ambience_track || {}), ...patch } });
+      return;
+    }
+    const key = kind === "music" ? "music_tracks" : "effect_tracks";
+    const sourceTracks = Array.isArray(config[key]) ? config[key] : [];
+    onSetConfig({
+      [key]: sourceTracks.map((track, index) => {
+        const id = String(track?.id || `${kind}-${index + 1}`);
+        return id === trackId ? { ...track, ...patch } : track;
+      }),
+    });
+  }
+
+  function removeTrack(kind, trackId) {
+    if (previewPlayingTrackId === trackId && previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      setPreviewPlayingTrackId("");
+    }
+    if (selectedTrackId === trackId) {
+      selectTrack("");
+    }
+    if (trackId === "legacy-bgm") {
+      onClearPostprocessAsset?.("bgm");
+      return;
+    }
+    if (trackId === "legacy-ambience") {
+      onClearPostprocessAsset?.("ambience");
+      return;
+    }
+    const key = kind === "music" ? "music_tracks" : "effect_tracks";
+    const sourceTracks = Array.isArray(config[key]) ? config[key] : [];
+    onSetConfig({
+      [key]: sourceTracks.filter((track, index) => String(track?.id || `${kind}-${index + 1}`) !== trackId),
+    });
+  }
+
+  function trackPreviewUrl(kind, track) {
+    if (!currentProject?.id || !track?.relpath) {
+      return "";
+    }
+    const query = new URLSearchParams({
+      type: kind,
+      track_id: track.id,
+      v: `${currentProject.updated_at || ""}:${track.relpath}`,
+    });
+    return `${API_ORIGIN}/api/v1/tts/projects/${currentProject.id}/postprocess/assets/preview?${query.toString()}`;
+  }
+
+  async function toggleTrackPreview(kind, track) {
+    const audio = previewAudioRef.current;
+    const url = trackPreviewUrl(kind, track);
+    if (!audio || !url) {
+      return;
+    }
+    if (previewPlayingTrackId === track.id && !audio.paused) {
+      audio.pause();
+      setPreviewPlayingTrackId("");
+      return;
+    }
+    audio.pause();
+    audio.src = url;
+    audio.currentTime = 0;
+    try {
+      await audio.play();
+      setPreviewPlayingTrackId(track.id);
+      selectTrack(track.id);
+    } catch {
+      setPreviewPlayingTrackId("");
+    }
+  }
 
   function updateChapterMarker(markerId, patch) {
     const next = chapterMarkers.map((item) => (item.id === markerId ? { ...item, ...patch } : item));
@@ -377,41 +497,144 @@ export function SynthesisPostprocessCard({
     onSetConfig({ chapter_markers: chapterMarkers.filter((item) => item.id !== markerId) });
   }
 
-  async function togglePreview(type) {
-    const isBgm = type === "bgm";
-    const audioRef = isBgm ? bgmAudioRef : ambienceAudioRef;
-    const otherRef = isBgm ? ambienceAudioRef : bgmAudioRef;
-    const audio = audioRef.current;
-    const otherAudio = otherRef.current;
-    if (!audio) return;
-
-    if (!audio.paused) {
-      audio.pause();
-      setPreviewPlayingType((current) => (current === type ? "" : current));
-      return;
-    }
-
-    if (otherAudio && !otherAudio.paused) {
-      otherAudio.pause();
-    }
-    if (otherAudio) {
-      otherAudio.currentTime = 0;
-    }
-    try {
-      await audio.play();
-      setPreviewPlayingType(type);
-    } catch {
-      setPreviewPlayingType("");
-    }
+  function renderTrackList(kind, tracks) {
+    const isMusic = kind === "music";
+    return (
+      <div className="postprocessTrackGroup">
+        <div className="postprocessTrackGroupHeader">
+          <div>
+            <strong>{isMusic ? "音乐" : "音效"}</strong>
+            <span>{tracks.length} 条</span>
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={Upload}
+            disabled={isUploadingPostAsset}
+            onClick={() => (isMusic ? musicInputRef : effectInputRef).current?.click()}
+          >
+            {isUploadingPostAsset ? "上传中…" : isMusic ? "添加音乐" : "添加音效"}
+          </Button>
+        </div>
+        {tracks.length ? (
+          <div className="postprocessTrackList">
+            {tracks.map((track) => (
+              <div
+                key={track.id}
+                ref={(node) => {
+                  if (node) {
+                    trackItemRefs.current[track.id] = node;
+                  } else {
+                    delete trackItemRefs.current[track.id];
+                  }
+                }}
+                className={`postprocessTrackItem ${selectedTrackId === track.id ? "active" : ""}`}
+                onClick={() => selectTrack(track.id)}
+              >
+                <div className="postprocessTrackItemHeader">
+                  <input
+                    className="input"
+                    value={track.label}
+                    onChange={(event) => updateTrack(kind, track.id, { label: event.target.value })}
+                    aria-label={`${isMusic ? "音乐" : "音效"}名称`}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={previewPlayingTrackId === track.id ? Pause : Play}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggleTrackPreview(kind, track);
+                    }}
+                    disabled={!currentProject?.id || !track.relpath}
+                  >
+                    {previewPlayingTrackId === track.id ? "暂停" : "试听"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={Trash2}
+                    onClick={() => removeTrack(kind, track.id)}
+                    disabled={isUploadingPostAsset}
+                  >
+                    删除
+                  </Button>
+                </div>
+                <span className="muted postprocessAssetPath" title={track.relpath || "未绑定"}>
+                  {track.relpath || "未绑定"}
+                </span>
+                <Slider
+                  label="增益 (dB)"
+                  value={[track.gain_db]}
+                  onValueChange={([v]) => updateTrack(kind, track.id, { gain_db: v })}
+                  min={-30}
+                  max={12}
+                  step={1}
+                />
+                <Slider
+                  label="偏移 (ms)"
+                  value={[track.offset_ms]}
+                  onValueChange={([v]) => updateTrack(kind, track.id, { offset_ms: v })}
+                  min={-30000}
+                  max={30000}
+                  step={50}
+                  unit="ms"
+                />
+                <div className="postprocessTrackFlags">
+                  <label className="controlRow" style={{ cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={track.loop}
+                      onChange={(event) => updateTrack(kind, track.id, { loop: event.target.checked })}
+                      style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
+                    />
+                    <span>循环</span>
+                  </label>
+                  {isMusic ? (
+                    <label className="controlRow" style={{ cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={track.ducking_enabled}
+                        onChange={(event) => updateTrack(kind, track.id, { ducking_enabled: event.target.checked })}
+                        style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
+                      />
+                      <span>Ducking</span>
+                    </label>
+                  ) : null}
+                </div>
+                {isMusic && track.ducking_enabled ? (
+                  <Slider
+                    label="Ducking 抑制 (dB)"
+                    value={[track.ducking_db]}
+                    onValueChange={([v]) => updateTrack(kind, track.id, { ducking_db: v })}
+                    min={0}
+                    max={24}
+                    step={1}
+                  />
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="postprocessTrackEmpty">未添加{isMusic ? "音乐" : "音效"}</div>
+        )}
+      </div>
+    );
   }
 
   return (
-    <GlassCard>
+    <GlassCard className="synthesisConsolePanel synthesisPostprocessPanel">
+      <audio
+        ref={previewAudioRef}
+        preload="metadata"
+        onEnded={() => setPreviewPlayingTrackId("")}
+        style={{ display: "none" }}
+      />
       <CollapsibleHeader
         expanded={expanded}
         onToggle={onToggle}
-        title="后期处理参数"
-        subtitle={expanded ? "对已合成整轨执行后期处理和章节导出。" : "已收起，点击展开。"}
+        title="后期处理"
+        subtitle={expanded ? "" : "已收起，点击展开。"}
         icon={Wand2}
       />
       {!expanded ? (
@@ -554,210 +777,49 @@ export function SynthesisPostprocessCard({
             </div>
           </div>
 
-          <div className="editorGrid">
-            <div className="formGroup">
-              <label className="formLabel">背景音乐</label>
-              <div className="controlRow">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  icon={Upload}
-                  onClick={() => bgmInputRef.current?.click()}
-                  disabled={isUploadingPostAsset}
-                >
-                  {isUploadingPostAsset ? "上传中…" : "上传 BGM"}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon={Trash2}
-                  onClick={() => onClearPostprocessAsset?.("bgm")}
-                  disabled={isUploadingPostAsset || !config.bgm_track?.relpath}
-                >
-                  删除
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon={previewPlayingType === "bgm" ? Pause : Play}
-                  onClick={() => togglePreview("bgm")}
-                  disabled={isUploadingPostAsset || !config.bgm_track?.relpath || !bgmPreviewUrl}
-                >
-                  {previewPlayingType === "bgm" ? "暂停" : "播放"}
-                </Button>
-                <span className="muted postprocessAssetPath" title={config.bgm_track?.relpath || "未绑定"}>
-                  {config.bgm_track?.relpath || "未绑定"}
-                </span>
-              </div>
-              <input
-                ref={bgmInputRef}
-                type="file"
-                name="bgm-upload"
-                aria-label="上传背景音乐"
-                accept="audio/*"
-                style={{ display: "none" }}
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = "";
-                  if (file) onUploadPostprocessAsset?.("bgm", file);
-                }}
-              />
-              <audio
-                ref={bgmAudioRef}
-                src={bgmPreviewUrl || ""}
-                preload="metadata"
-                onEnded={() => setPreviewPlayingType((current) => (current === "bgm" ? "" : current))}
-                style={{ display: "none" }}
-              />
-              <Slider
-                label="BGM 增益 (dB)"
-                value={[Number(config.bgm_track?.gain_db ?? 0)]}
-                onValueChange={([v]) => onSetConfig({ bgm_track: { ...(config.bgm_track || {}), gain_db: v } })}
-                min={-30}
-                max={12}
-                step={1}
-              />
-              <Slider
-                label="BGM 偏移 (ms)"
-                value={[Number(config.bgm_track?.offset_ms ?? 0)]}
-                onValueChange={([v]) => onSetConfig({ bgm_track: { ...(config.bgm_track || {}), offset_ms: v } })}
-                min={-5000}
-                max={5000}
-                step={50}
-                unit="ms"
-              />
-              <div className="editorGrid">
-                <label className="controlRow" style={{ cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    checked={Boolean(config.bgm_track?.loop ?? true)}
-                    onChange={(e) => onSetConfig({ bgm_track: { ...(config.bgm_track || {}), loop: e.target.checked } })}
-                    style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
-                  />
-                  <span style={{ fontSize: 13.5, color: "var(--text-secondary)" }}>循环</span>
-                </label>
-                <label className="controlRow" style={{ cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    checked={Boolean(config.bgm_track?.ducking_enabled ?? false)}
-                    onChange={(e) =>
-                      onSetConfig({ bgm_track: { ...(config.bgm_track || {}), ducking_enabled: e.target.checked } })
-                    }
-                    style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
-                  />
-                  <span style={{ fontSize: 13.5, color: "var(--text-secondary)" }}>启用 Ducking</span>
-                </label>
-              </div>
-              <Slider
-                label="Ducking 抑制 (dB)"
-                value={[Number(config.bgm_track?.ducking_db ?? 8)]}
-                onValueChange={([v]) => onSetConfig({ bgm_track: { ...(config.bgm_track || {}), ducking_db: v } })}
-                min={0}
-                max={24}
-                step={1}
-              />
+          <div className="formGroup">
+            <label className="formLabel">音乐和音效</label>
+            <div className="postprocessTrackActions">
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={AudioLines}
+                onClick={() => onExtractBackground?.()}
+                disabled={isRunning || !currentProject?.id || !hasSourceAudio}
+              >
+                提取为音效
+              </Button>
+              {!hasSourceAudio ? <span className="muted">没有可用原音频</span> : null}
             </div>
-
-            <div className="formGroup">
-              <label className="formLabel">环境音</label>
-              <div className="controlRow">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  icon={AudioLines}
-                  onClick={() => onExtractBackground?.()}
-                  disabled={isRunning || !currentProject?.id || !hasSourceAudio}
-                >
-                  提取背景声
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  icon={Upload}
-                  onClick={() => ambienceInputRef.current?.click()}
-                  disabled={isUploadingPostAsset}
-                >
-                  {isUploadingPostAsset ? "上传中…" : "上传环境音"}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon={Trash2}
-                  onClick={() => onClearPostprocessAsset?.("ambience")}
-                  disabled={isUploadingPostAsset || !config.ambience_track?.relpath}
-                >
-                  删除
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon={previewPlayingType === "ambience" ? Pause : Play}
-                  onClick={() => togglePreview("ambience")}
-                  disabled={isUploadingPostAsset || !config.ambience_track?.relpath || !ambiencePreviewUrl}
-                >
-                  {previewPlayingType === "ambience" ? "暂停" : "播放"}
-                </Button>
-                {ambiencePreviewUrl ? (
-                  <a
-                    className="btn btn-ghost btn-sm"
-                    href={ambiencePreviewUrl}
-                    download={ambienceRelpath.includes("ambience_from_source") ? "ambience_from_source.wav" : undefined}
-                  >
-                    <Download aria-hidden="true" focusable="false" size={13} />
-                    {ambienceDownloadLabel}
-                  </a>
-                ) : null}
-                <span className="muted postprocessAssetPath" title={config.ambience_track?.relpath || "未绑定"}>
-                  {config.ambience_track?.relpath || "未绑定"}
-                </span>
-              </div>
-              {!hasSourceAudio ? <div className="muted" style={{ fontSize: 12 }}>没有可用原音频</div> : null}
-              <input
-                ref={ambienceInputRef}
-                type="file"
-                name="ambience-upload"
-                aria-label="上传环境音"
-                accept="audio/*"
-                style={{ display: "none" }}
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = "";
-                  if (file) onUploadPostprocessAsset?.("ambience", file);
-                }}
-              />
-              <audio
-                ref={ambienceAudioRef}
-                src={ambiencePreviewUrl || ""}
-                preload="metadata"
-                onEnded={() => setPreviewPlayingType((current) => (current === "ambience" ? "" : current))}
-                style={{ display: "none" }}
-              />
-              <Slider
-                label="环境音增益 (dB)"
-                value={[Number(config.ambience_track?.gain_db ?? 0)]}
-                onValueChange={([v]) => onSetConfig({ ambience_track: { ...(config.ambience_track || {}), gain_db: v } })}
-                min={-30}
-                max={12}
-                step={1}
-              />
-              <Slider
-                label="环境音偏移 (ms)"
-                value={[Number(config.ambience_track?.offset_ms ?? 0)]}
-                onValueChange={([v]) => onSetConfig({ ambience_track: { ...(config.ambience_track || {}), offset_ms: v } })}
-                min={-5000}
-                max={5000}
-                step={50}
-                unit="ms"
-              />
-              <label className="controlRow" style={{ cursor: "pointer" }}>
-                <input
-                  type="checkbox"
-                  checked={Boolean(config.ambience_track?.loop ?? true)}
-                  onChange={(e) => onSetConfig({ ambience_track: { ...(config.ambience_track || {}), loop: e.target.checked } })}
-                  style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
-                />
-                <span style={{ fontSize: 13.5, color: "var(--text-secondary)" }}>循环</span>
-              </label>
+            <input
+              ref={musicInputRef}
+              type="file"
+              name="music-track-upload"
+              aria-label="上传音乐"
+              accept="audio/*"
+              style={{ display: "none" }}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (file) onUploadPostprocessAsset?.("music", file);
+              }}
+            />
+            <input
+              ref={effectInputRef}
+              type="file"
+              name="effect-track-upload"
+              aria-label="上传音效"
+              accept="audio/*"
+              style={{ display: "none" }}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (file) onUploadPostprocessAsset?.("effect", file);
+              }}
+            />
+            <div className="postprocessTrackBoard">
+              {renderTrackList("music", musicTracks)}
+              {renderTrackList("effect", effectTracks)}
             </div>
           </div>
 

@@ -3,7 +3,6 @@ import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, us
 import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { Redo2, Undo2 } from "lucide-react";
 
-import ScriptSidebarColumn from "../components/script/ScriptSidebarColumn";
 import ScriptDiffPreviewDialog from "../components/script/ScriptDiffPreviewDialog";
 import Button from "../components/ui/Button";
 import { SynthesisGenerateCard, SynthesisPostprocessCard } from "../components/synthesis/SynthesisConfigCard";
@@ -104,6 +103,9 @@ export default function SynthesisPage() {
   const [redoStack, setRedoStack] = useState([]);
   const [newSegment, setNewSegment] = useState(() => createSegmentDraft(0));
   const [insertAfterSegmentId, setInsertAfterSegmentId] = useState(null);
+  const [insertPickMode, setInsertPickMode] = useState(false);
+  const [draftInsertedSegmentIds, setDraftInsertedSegmentIds] = useState([]);
+  const [cursorBySegmentId, setCursorBySegmentId] = useState({});
   const [activeSpeakerFilter, setActiveSpeakerFilter] = useState(queryState.speaker);
   const [activeStatusFilter, setActiveStatusFilter] = useState(queryState.status);
   const [recentlyUpdatedSegmentId, setRecentlyUpdatedSegmentId] = useState(null);
@@ -115,12 +117,13 @@ export default function SynthesisPage() {
   const [arrangementEdited, setArrangementEdited] = useState(false);
   const [diffPreviewOpen, setDiffPreviewOpen] = useState(false);
   const [isUploadingPostAsset, setIsUploadingPostAsset] = useState(false);
+  const [selectedPostprocessTrackId, setSelectedPostprocessTrackId] = useState("");
   const [expandedSynthesisPanel, setExpandedSynthesisPanel] = useState(queryState.panel);
   const [systemRuntimeStatus, setSystemRuntimeStatus] = useState(null);
   const [exportWizardOpen, setExportWizardOpen] = useState(false);
   const updatedRowTimerRef = useRef(null);
   const synthesisConfigProjectIdRef = useRef(null);
-  const { saveScript, isSaving: isScriptSaving, error: scriptError, script, sourceText } = useScriptStore();
+  const { saveScript, splitSegment, isSaving: isScriptSaving, error: scriptError, script, sourceText } = useScriptStore();
   const setProjectSaveAction = useUiStore((state) => state.setProjectSaveAction);
   const clearProjectSaveAction = useUiStore((state) => state.clearProjectSaveAction);
   const pushToast = useUiStore.getState().pushToast;
@@ -187,6 +190,8 @@ export default function SynthesisPage() {
       ducking_db: 8,
       offset_ms: 0,
     },
+    music_tracks: [],
+    effect_tracks: [],
     tts_auto_retry: true,
     tts_retry_attempts: 2,
     tts_segment_concurrency: 1,
@@ -249,6 +254,9 @@ export default function SynthesisPage() {
       setEditingSegmentId(null);
       setSegmentDraft(null);
       setInsertAfterSegmentId(null);
+      setInsertPickMode(false);
+      setDraftInsertedSegmentIds([]);
+      setCursorBySegmentId({});
       setActiveSpeakerFilter("all");
       setActiveStatusFilter("all");
       setRecentlyUpdatedSegmentId(null);
@@ -855,11 +863,58 @@ export default function SynthesisPage() {
     }
     setEditingSegmentId(segment.segment_id);
     setSegmentDraft(buildSegmentEditorDraft(baseSegment, { segments: draftScript?.segments || [] }));
+    setCursorBySegmentId((current) => ({ ...current, [segment.segment_id]: -1 }));
   }
 
   function cancelEditSegment() {
+    const draftId = editingSegmentId;
+    const isTransientInsert = draftId && draftInsertedSegmentIds.includes(draftId) && !String(segmentDraft?.text || "").trim();
+    if (isTransientInsert) {
+      applyDraftMutation((current) => ({
+        ...current,
+        segments: (current.segments || [])
+          .filter((segment) => segment.id !== draftId)
+          .map((segment, index) => ({ ...segment, index })),
+      }));
+      setDraftInsertedSegmentIds((ids) => ids.filter((id) => id !== draftId));
+      setSelectedSegmentIds((ids) => ids.filter((id) => id !== draftId));
+    }
     setEditingSegmentId(null);
     setSegmentDraft(null);
+  }
+
+  function handleSegmentCursorChange(segmentId, cursor) {
+    setCursorBySegmentId((current) => ({
+      ...current,
+      [segmentId]: Number(cursor ?? -1),
+    }));
+  }
+
+  async function handleSplitAtCursor(segmentId) {
+    if (!currentProject?.id) {
+      return;
+    }
+    if (hasUnsavedChanges) {
+      pushToast({ title: "请先保存当前草稿后再执行拆分", tone: "warning" });
+      return;
+    }
+    const cursor = Number(cursorBySegmentId[segmentId] ?? -1);
+    if (cursor < 0) {
+      pushToast({ title: "请先在片段文本中点击定位光标", tone: "warning" });
+      return;
+    }
+    const updated = await splitSegment({
+      projectId: currentProject.id,
+      segmentId,
+      cursor,
+    });
+    const normalized = normalizeDraftScript(updated);
+    setSavedScript(normalized);
+    resetHistory(normalized);
+    setEditingSegmentId(null);
+    setSegmentDraft(null);
+    setCursorBySegmentId({});
+    await refreshCurrentProject(currentProject.id);
   }
 
   function saveEditedSegment(segment) {
@@ -878,6 +933,7 @@ export default function SynthesisPage() {
       ),
     }));
     setSelectedSegmentIds((ids) => (ids.includes(segment.segment_id) ? ids : [...ids, segment.segment_id]));
+    setDraftInsertedSegmentIds((ids) => ids.filter((id) => id !== segment.segment_id));
     pushToast({ title: "已加入草稿，点击“保存剧本”后生效", tone: "default" });
     cancelEditSegment();
   }
@@ -890,10 +946,55 @@ export default function SynthesisPage() {
         .map((segment, index) => ({ ...segment, index })),
     }));
     setSelectedSegmentIds((ids) => ids.filter((id) => id !== segmentId));
+    setDraftInsertedSegmentIds((ids) => ids.filter((id) => id !== segmentId));
     setEditingSegmentId((current) => (current === segmentId ? null : current));
     setSegmentDraft((current) => (current?.id === segmentId ? null : current));
     setInsertAfterSegmentId((current) => (current === segmentId ? null : current));
     pushToast({ title: "已加入草稿，点击“保存剧本”后生效", tone: "default" });
+  }
+
+  function handleRequestInsertSegment(afterSegmentId = null) {
+    if (!currentProject?.id || isScriptSaving) {
+      return;
+    }
+    const currentSegments = draftScript?.segments || [];
+    if (!afterSegmentId && currentSegments.length) {
+      setInsertPickMode(true);
+      setInsertAfterSegmentId(null);
+      pushToast({ title: "请选择插入位置：点击一个片段，将在其后新增。", tone: "default" });
+      return;
+    }
+    const anchorIndex = afterSegmentId
+      ? currentSegments.findIndex((segment) => segment.id === afterSegmentId)
+      : currentSegments.length - 1;
+    const insertIndex = anchorIndex >= 0 ? anchorIndex + 1 : currentSegments.length;
+    const anchor = anchorIndex >= 0 ? currentSegments[anchorIndex] : null;
+    const draft = {
+      ...createSegmentDraft(insertIndex),
+      speaker: anchor?.speaker || (activeSpeakerFilter !== "all" ? activeSpeakerFilter : "narrator"),
+      type: anchor?.type || "dialogue",
+      emotion: anchor?.emotion || "neutral",
+    };
+    const list = [...currentSegments];
+    list.splice(insertIndex, 0, draft);
+    const nextSegments = list.map((segment, index) => ({ ...segment, index }));
+    const inserted = nextSegments[insertIndex];
+    applyDraftMutation({
+      ...(draftScript || {}),
+      segments: nextSegments,
+    });
+    setInsertPickMode(false);
+    setInsertAfterSegmentId(afterSegmentId || null);
+    setDraftInsertedSegmentIds((ids) => [...ids.filter((id) => id !== inserted.id), inserted.id]);
+    setSelectedSegmentIds((ids) => (ids.includes(inserted.id) ? ids : [...ids, inserted.id]));
+    setEditingSegmentId(inserted.id);
+    setSegmentDraft(buildSegmentEditorDraft(inserted, { segments: nextSegments }));
+    pushToast({ title: "已新增空白片段，请填写文本后应用到草稿。", tone: "default" });
+  }
+
+  function handleCancelInsertPick() {
+    setInsertPickMode(false);
+    setInsertAfterSegmentId(null);
   }
 
   function handleAddSegment() {
@@ -1051,6 +1152,20 @@ export default function SynthesisPage() {
   }
 
   function buildRuntimeConfig(baseConfig) {
+    function normalizePostprocessTracks(tracks) {
+      return (Array.isArray(tracks) ? tracks : []).map((track, index) => ({
+        ...(track || {}),
+        id: String(track?.id || `track-${index + 1}`),
+        label: String(track?.label || ""),
+        relpath: String(track?.relpath || ""),
+        gain_db: Number(track?.gain_db ?? 0),
+        ducking_enabled: Boolean(track?.ducking_enabled ?? false),
+        ducking_db: Number(track?.ducking_db ?? 8),
+        loop: Boolean(track?.loop ?? true),
+        offset_ms: Number(track?.offset_ms ?? 0),
+      }));
+    }
+
     return {
       ...baseConfig,
       guidance_scale: Number(baseConfig.guidance_scale),
@@ -1078,6 +1193,8 @@ export default function SynthesisPage() {
         ducking_db: Number(baseConfig.ambience_track?.ducking_db || 8),
         offset_ms: Number(baseConfig.ambience_track?.offset_ms || 0),
       },
+      music_tracks: normalizePostprocessTracks(baseConfig.music_tracks),
+      effect_tracks: normalizePostprocessTracks(baseConfig.effect_tracks),
     };
   }
 
@@ -1119,7 +1236,24 @@ export default function SynthesisPage() {
         `/tts/projects/${currentProject.id}/postprocess/assets?type=${assetType}`,
         form,
       );
-      if (assetType === "bgm") {
+      if (assetType === "music" || assetType === "effect") {
+        const key = assetType === "music" ? "music_tracks" : "effect_tracks";
+        const fallbackLabel = file.name ? file.name.replace(/\.[^.]+$/, "") : (assetType === "music" ? "音乐" : "音效");
+        const nextTrack = {
+          id: result.track_id || `${assetType}-${Date.now()}`,
+          label: result.label || fallbackLabel,
+          relpath: result.relpath || "",
+          gain_db: 0,
+          loop: true,
+          ducking_enabled: false,
+          ducking_db: 8,
+          offset_ms: 0,
+        };
+        setConfig({
+          postprocess_enabled: true,
+          [key]: [...(Array.isArray(config[key]) ? config[key] : []), nextTrack],
+        });
+      } else if (assetType === "bgm") {
         setConfig({
           bgm_track: {
             ...(config.bgm_track || {}),
@@ -1135,12 +1269,22 @@ export default function SynthesisPage() {
         });
       }
       await refreshCurrentProject(currentProject.id);
-      pushToast({ title: `${assetType === "bgm" ? "背景音乐" : "环境音"}已绑定`, tone: "success" });
+      const assetLabel = assetType === "music" ? "音乐" : assetType === "effect" ? "音效" : assetType === "bgm" ? "背景音乐" : "环境音";
+      pushToast({ title: `${assetLabel}${assetType === "music" || assetType === "effect" ? "已添加" : "已绑定"}`, tone: "success" });
     } catch (uploadError) {
       pushToast({ title: `素材上传失败：${uploadError?.message || uploadError}`, tone: "error" });
     } finally {
       setIsUploadingPostAsset(false);
     }
+  }
+
+  function handleSelectPostprocessTrack(kind, trackId) {
+    if (!trackId) {
+      setSelectedPostprocessTrackId("");
+      return;
+    }
+    setSelectedPostprocessTrackId(trackId);
+    setExpandedSynthesisPanel("postprocess");
   }
 
   function handleClearPostprocessAsset(assetType) {
@@ -1286,9 +1430,125 @@ export default function SynthesisPage() {
 
   return (
     <div className="pageGrid synthesisPageViewportLayout" style={{ gap: 20 }}>
-      {/* Control row */}
-      <div className="pageGrid twoCols" style={{ alignItems: "stretch" }}>
-        <div className="listStack">
+      <div className="synthesisCommandCenter">
+        <div className="synthesisCommandMain">
+          <SynthesisFullAudioCard
+            className="synthesisFullAudioViewportCard"
+            currentProject={currentProject}
+            projectId={currentProject?.id}
+            fullAudioUrl={fullAudioUrl}
+            audioVariant={audioVariant}
+            segments={segments}
+            gapDurationMs={Number(config.gap_duration_ms || 300)}
+            useSourceTimeline={useSourceTimeline}
+            onCurrentTimeChange={setFullAudioCurrentTime}
+            seekToSeconds={fullAudioSeekSeconds}
+            seekSignal={fullAudioSeekSignal}
+            fullAudioCurrentTime={fullAudioCurrentTime}
+            segmentTimings={segmentTimings}
+            currentSegmentId={highlightedSegmentId}
+            onLocateFullAudioSegment={handleLocateFullAudioSegment}
+            arrangementDraft={arrangementDraft}
+            arrangementDirty={arrangementDirty}
+            arrangementWarnings={arrangementWarnings}
+            onArrangementDraftChange={handleArrangementDraftChange}
+            onApplyArrangementDraft={handleApplyArrangementDraft}
+            onResetArrangementDraft={handleResetArrangementDraft}
+            config={config}
+            onSetConfig={setConfig}
+            selectedPostprocessTrackId={selectedPostprocessTrackId}
+            onSelectPostprocessTrack={handleSelectPostprocessTrack}
+            isRunning={isRunning}
+            isUploadingPostAsset={isUploadingPostAsset}
+            bgmPreviewUrl={bgmPreviewUrl}
+            ambiencePreviewUrl={ambiencePreviewUrl}
+            onUploadPostprocessAsset={handleUploadPostprocessAsset}
+            onClearPostprocessAsset={handleClearPostprocessAsset}
+            onExtractBackground={handleExtractBackground}
+          />
+
+          <div className="synthesisSegmentCommandGrid">
+            <SynthesisTimelineCard
+              className="synthesisTimelineViewportCard synthesisCommandTimelineCard"
+              API_ORIGIN={API_ORIGIN}
+              sensors={sensors}
+              canReorderTimeline={canReorderTimeline}
+              onTimelineDragEnd={handleTimelineDragEnd}
+              segments={visibleSegments}
+              totalVisibleSegments={visibleSegments.length}
+              activeSpeakerFilter={activeSpeakerFilter}
+              activeStatusFilter={activeStatusFilter}
+              statusCounts={statusCounts}
+              onStatusFilterChange={setActiveStatusFilter}
+              characters={characters}
+              totalSegments={segments.length}
+              onSelectSpeaker={setActiveSpeakerFilter}
+              hasUnsavedChanges={hasUnsavedChanges}
+              scriptError={scriptError}
+              actionContent={
+                <>
+                  <Button variant="ghost" size="sm" icon={Undo2} onClick={handleUndo} disabled={!undoStack.length}>
+                    撤销
+                  </Button>
+                  <Button variant="ghost" size="sm" icon={Redo2} onClick={handleRedo} disabled={!redoStack.length}>
+                    重做
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={!currentProject?.id || isScriptSaving || !hasUnsavedChanges}
+                    onClick={handleSaveScript}
+                  >
+                    {isScriptSaving ? "保存中…" : hasUnsavedChanges ? "保存剧本" : "已保存"}
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setDiffPreviewOpen(true)} disabled={!hasUnsavedChanges}>
+                    查看差异
+                  </Button>
+                </>
+              }
+              onRequestInsertSegment={handleRequestInsertSegment}
+              insertPickMode={insertPickMode}
+              onCancelInsertPick={handleCancelInsertPick}
+              shouldShowSegmentTimeline={shouldShowSegmentTimeline}
+              selectedSegmentIds={selectedSegmentIds}
+              setSelectedSegmentIds={setSelectedSegmentIds}
+              staleTargetIds={visibleStaleTargetIds}
+              recommendedRegenerateIds={visibleRecommendedRegenerateIds}
+              isRunning={isRunning}
+              handleRegenerateSelected={handleRegenerateSelected}
+              canRebuildFullAudio={canRebuildFullAudio}
+              fullAudioRebuildRequired={fullAudioRebuildRequired}
+              fullAudioRebuildHint={fullAudioRebuildHint}
+              handleRebuildFullAudio={handleRebuildFullAudio}
+              staleItemBySegmentId={staleItemBySegmentId}
+              getSegmentStaleLabel={getSegmentStaleLabel}
+              segmentTimings={segmentTimings}
+              formatTimeMs={formatTimeMs}
+              currentSegmentId={highlightedSegmentId}
+              recentlyUpdatedSegmentId={recentlyUpdatedSegmentId}
+              editingSegmentId={editingSegmentId}
+              segmentDraft={segmentDraft}
+              setSegmentDraft={setSegmentDraft}
+              isScriptSaving={isScriptSaving}
+              beginEditSegment={beginEditSegment}
+              cancelEditSegment={cancelEditSegment}
+              saveEditedSegment={saveEditedSegment}
+              onSegmentCursorChange={handleSegmentCursorChange}
+              onSplitAtCursor={handleSplitAtCursor}
+              handleSingleSegmentSynthesis={handleSingleSegmentSynthesis}
+              handleDeleteSegment={handleDeleteSegment}
+              setInsertAfterSegmentId={setInsertAfterSegmentId}
+              insertAfterSegmentId={insertAfterSegmentId}
+              onLocateFullAudioSegment={handleLocateFullAudioSegment}
+              playFrom={playFrom}
+              isAutoPlay={isAutoPlay}
+              stop={stop}
+              pushToast={pushToast}
+            />
+          </div>
+        </div>
+
+        <aside className="synthesisCommandRail" aria-label="合成导出控制台">
           <SynthesisGenerateCard
             expanded={expandedSynthesisPanel === "synthesis"}
             onToggle={() => setExpandedSynthesisPanel((current) => (current === "synthesis" ? "" : "synthesis"))}
@@ -1318,166 +1578,47 @@ export default function SynthesisPage() {
             onExtractBackground={handleExtractBackground}
             onUploadPostprocessAsset={handleUploadPostprocessAsset}
             onClearPostprocessAsset={handleClearPostprocessAsset}
-          />
-        </div>
-        <SynthesisTaskStatusCard
-          API_ORIGIN={API_ORIGIN}
-          staleReport={staleReport}
-          staleSummary={staleSummary}
-          modelStatus={modelStatus}
-          status={status}
-          connectionStatus={connectionStatus}
-          progress={progress}
-          queuePosition={queuePosition}
-          failedCount={failedCount}
-          retryCount={retryCount}
-          effectiveSegmentConcurrency={effectiveSegmentConcurrency}
-          queueSnapshot={queueSnapshot}
-          runtimeStatus={systemRuntimeStatus}
-          totalSegments={totalSegments}
-          taskId={taskId}
-          lastSyncError={lastSyncError}
-          isRunning={isRunning}
-          progressPct={progressPct}
-          fullAudioUrl={fullAudioUrl}
-          rawAudioUrl={rawAudioUrl}
-          processedAudioUrl={processedAudioUrl}
-          chapterExports={chapterExports}
-          audioVariant={audioVariant}
-          onAudioVariantChange={setAudioVariant}
-          subtitleSrtUrl={subtitleSrtUrl}
-          subtitleLrcUrl={subtitleLrcUrl}
-          currentProject={currentProject}
-          importWarnings={importWarnings}
-          archiveInputRef={archiveInputRef}
-          onImportArchive={handleImportArchive}
-          onRetryFailed={handleRetryFailed}
-          onResume={handleResumeSynthesisRun}
-          onCancelTask={handleCancelSynthesis}
-          onOpenExportWizard={() => setExportWizardOpen(true)}
-        />
-      </div>
-
-      <div className="synthesisViewportWorkArea">
-        {/* Full audio player */}
-        <SynthesisFullAudioCard
-          className="synthesisFullAudioViewportCard"
-          currentProject={currentProject}
-          projectId={currentProject?.id}
-          fullAudioUrl={fullAudioUrl}
-          audioVariant={audioVariant}
-          segments={segments}
-          gapDurationMs={Number(config.gap_duration_ms || 300)}
-          useSourceTimeline={useSourceTimeline}
-          onCurrentTimeChange={setFullAudioCurrentTime}
-          seekToSeconds={fullAudioSeekSeconds}
-          seekSignal={fullAudioSeekSignal}
-          fullAudioCurrentTime={fullAudioCurrentTime}
-          arrangementDraft={arrangementDraft}
-          arrangementDirty={arrangementDirty}
-          arrangementWarnings={arrangementWarnings}
-          onArrangementDraftChange={handleArrangementDraftChange}
-          onApplyArrangementDraft={handleApplyArrangementDraft}
-          onResetArrangementDraft={handleResetArrangementDraft}
-          config={config}
-          onSetConfig={setConfig}
-          isRunning={isRunning}
-          isUploadingPostAsset={isUploadingPostAsset}
-          bgmPreviewUrl={bgmPreviewUrl}
-          ambiencePreviewUrl={ambiencePreviewUrl}
-          onUploadPostprocessAsset={handleUploadPostprocessAsset}
-          onClearPostprocessAsset={handleClearPostprocessAsset}
-          onExtractBackground={handleExtractBackground}
-        />
-
-        <div className="pageGrid sidebarLayout synthesisSegmentViewportLayout">
-          <ScriptSidebarColumn
-            characters={characters}
-            totalSegments={segments.length}
-            activeSpeakerFilter={activeSpeakerFilter}
-            onSelectSpeaker={setActiveSpeakerFilter}
-            hasUnsavedChanges={hasUnsavedChanges}
-            error={scriptError}
-            newSegment={newSegment}
-            newSegmentSpeakerOptions={newSegmentSpeakerOptions}
-            canEdit={Boolean(currentProject?.id)}
-            isSaving={isScriptSaving}
-            insertAfterLabel={insertAfterLabel}
-            onClearInsertAnchor={() => setInsertAfterSegmentId(null)}
-            onNewSegmentFieldChange={(field, value) => setNewSegment((current) => ({ ...current, [field]: value }))}
-            onAddSegment={handleAddSegment}
-            addButtonLabel="+ 添加片段"
-            actionContent={
-              <>
-                <div className="controlRow" style={{ gap: 8, flexWrap: "wrap" }}>
-                  <Button variant="ghost" icon={Undo2} onClick={handleUndo} disabled={!undoStack.length}>
-                    撤销
-                  </Button>
-                  <Button variant="ghost" icon={Redo2} onClick={handleRedo} disabled={!redoStack.length}>
-                    重做
-                  </Button>
-                </div>
-                <Button
-                  variant="primary"
-                  disabled={!currentProject?.id || isScriptSaving || !hasUnsavedChanges}
-                  onClick={handleSaveScript}
-                >
-                  {isScriptSaving ? "保存中…" : hasUnsavedChanges ? "保存剧本" : "已保存"}
-                </Button>
-                <Button variant="secondary" onClick={() => setDiffPreviewOpen(true)} disabled={!hasUnsavedChanges}>
-                  查看差异
-                </Button>
-              </>
-            }
-          />
-
-          <SynthesisTimelineCard
-            className="synthesisTimelineViewportCard"
+            selectedTrackId={selectedPostprocessTrackId}
+            onSelectTrack={setSelectedPostprocessTrackId}
             API_ORIGIN={API_ORIGIN}
-            sensors={sensors}
-            canReorderTimeline={canReorderTimeline}
-            onTimelineDragEnd={handleTimelineDragEnd}
-            segments={visibleSegments}
-            totalVisibleSegments={visibleSegments.length}
-            activeSpeakerFilter={activeSpeakerFilter}
-            activeStatusFilter={activeStatusFilter}
-            statusCounts={statusCounts}
-            onStatusFilterChange={setActiveStatusFilter}
-            shouldShowSegmentTimeline={shouldShowSegmentTimeline}
-            selectedSegmentIds={selectedSegmentIds}
-            setSelectedSegmentIds={setSelectedSegmentIds}
-            staleTargetIds={visibleStaleTargetIds}
-            recommendedRegenerateIds={visibleRecommendedRegenerateIds}
-            isRunning={isRunning}
-            handleRegenerateSelected={handleRegenerateSelected}
-            canRebuildFullAudio={canRebuildFullAudio}
-            fullAudioRebuildRequired={fullAudioRebuildRequired}
-            fullAudioRebuildHint={fullAudioRebuildHint}
-            handleRebuildFullAudio={handleRebuildFullAudio}
-            staleItemBySegmentId={staleItemBySegmentId}
-            getSegmentStaleLabel={getSegmentStaleLabel}
-            segmentTimings={segmentTimings}
-            formatTimeMs={formatTimeMs}
-            currentSegmentId={highlightedSegmentId}
-            recentlyUpdatedSegmentId={recentlyUpdatedSegmentId}
-            editingSegmentId={editingSegmentId}
-            segmentDraft={segmentDraft}
-            setSegmentDraft={setSegmentDraft}
-            isScriptSaving={isScriptSaving}
-            beginEditSegment={beginEditSegment}
-            cancelEditSegment={cancelEditSegment}
-            saveEditedSegment={saveEditedSegment}
-            handleSingleSegmentSynthesis={handleSingleSegmentSynthesis}
-            handleDeleteSegment={handleDeleteSegment}
-            setInsertAfterSegmentId={setInsertAfterSegmentId}
-            insertAfterSegmentId={insertAfterSegmentId}
-            onLocateFullAudioSegment={handleLocateFullAudioSegment}
-            playFrom={playFrom}
-            isAutoPlay={isAutoPlay}
-            stop={stop}
-            pushToast={pushToast}
           />
-        </div>
+          <SynthesisTaskStatusCard
+            API_ORIGIN={API_ORIGIN}
+            staleReport={staleReport}
+            staleSummary={staleSummary}
+            modelStatus={modelStatus}
+            status={status}
+            connectionStatus={connectionStatus}
+            progress={progress}
+            queuePosition={queuePosition}
+            failedCount={failedCount}
+            retryCount={retryCount}
+            effectiveSegmentConcurrency={effectiveSegmentConcurrency}
+            queueSnapshot={queueSnapshot}
+            runtimeStatus={systemRuntimeStatus}
+            totalSegments={totalSegments}
+            taskId={taskId}
+            lastSyncError={lastSyncError}
+            isRunning={isRunning}
+            progressPct={progressPct}
+            fullAudioUrl={fullAudioUrl}
+            rawAudioUrl={rawAudioUrl}
+            processedAudioUrl={processedAudioUrl}
+            chapterExports={chapterExports}
+            audioVariant={audioVariant}
+            onAudioVariantChange={setAudioVariant}
+            subtitleSrtUrl={subtitleSrtUrl}
+            subtitleLrcUrl={subtitleLrcUrl}
+            currentProject={currentProject}
+            importWarnings={importWarnings}
+            archiveInputRef={archiveInputRef}
+            onImportArchive={handleImportArchive}
+            onRetryFailed={handleRetryFailed}
+            onResume={handleResumeSynthesisRun}
+            onCancelTask={handleCancelSynthesis}
+            onOpenExportWizard={() => setExportWizardOpen(true)}
+          />
+        </aside>
       </div>
       <ScriptDiffPreviewDialog open={diffPreviewOpen} onOpenChange={setDiffPreviewOpen} diff={scriptDiff} />
       <ExportWizardDialog

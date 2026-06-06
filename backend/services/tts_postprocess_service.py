@@ -228,6 +228,23 @@ def _merge_optional_track(audio, *, output_dir: Path, track_config, track_name: 
         return audio
 
 
+def _iter_postprocess_tracks(config):
+    """Yield legacy and multi-track postprocess layers in mix order."""
+    legacy_ambience = getattr(config, "ambience_track", None)
+    if legacy_ambience and str(getattr(legacy_ambience, "relpath", "") or "").strip():
+        yield "音效", legacy_ambience
+    for index, track in enumerate(getattr(config, "effect_tracks", []) or [], start=1):
+        if str(getattr(track, "relpath", "") or "").strip():
+            yield str(getattr(track, "label", "") or f"音效 {index}"), track
+
+    legacy_bgm = getattr(config, "bgm_track", None)
+    if legacy_bgm and str(getattr(legacy_bgm, "relpath", "") or "").strip():
+        yield "音乐", legacy_bgm
+    for index, track in enumerate(getattr(config, "music_tracks", []) or [], start=1):
+        if str(getattr(track, "relpath", "") or "").strip():
+            yield str(getattr(track, "label", "") or f"音乐 {index}"), track
+
+
 def _apply_dynamic_ducking(*, voice, music, ducking_db: float):
     """Apply lightweight sidechain-like ducking based on speech activity.
 
@@ -281,8 +298,10 @@ def bind_postprocess_asset_to_project(
 ) -> dict:
     project = load_project(projects_dir, project_id)
     normalized_type = (asset_type or "").strip().lower()
-    if normalized_type not in {"bgm", "ambience"}:
-        raise HTTPException(status_code=400, detail="asset type 必须为 bgm 或 ambience")
+    if normalized_type not in {"bgm", "ambience", "music", "effect", "effects"}:
+        raise HTTPException(status_code=400, detail="asset type 必须为 bgm、ambience、music 或 effect")
+    if normalized_type == "effects":
+        normalized_type = "effect"
 
     assets_dir = project_postprocess_assets_dir(output_dir=output_dir, project_id=project_id)
     assets_dir.mkdir(parents=True, exist_ok=True)
@@ -294,7 +313,26 @@ def bind_postprocess_asset_to_project(
         source_path.unlink(missing_ok=True)
 
     relpath = to_output_relpath(output_dir=output_dir, path=target_path)
-    if normalized_type == "bgm":
+    created_track = None
+    if normalized_type == "music":
+        created_track = project.synthesis_config.bgm_track.model_copy(update={
+            "id": f"music-{uuid4().hex[:10]}",
+            "label": source_path.stem or "音乐",
+            "relpath": relpath,
+        })
+        project.synthesis_config.music_tracks.append(
+            created_track
+        )
+    elif normalized_type == "effect":
+        created_track = project.synthesis_config.ambience_track.model_copy(update={
+            "id": f"effect-{uuid4().hex[:10]}",
+            "label": source_path.stem or "音效",
+            "relpath": relpath,
+        })
+        project.synthesis_config.effect_tracks.append(
+            created_track
+        )
+    elif normalized_type == "bgm":
         project.synthesis_config.bgm_track.relpath = relpath
     else:
         project.synthesis_config.ambience_track.relpath = relpath
@@ -317,6 +355,8 @@ def bind_postprocess_asset_to_project(
         "project_id": project_id,
         "asset_type": normalized_type,
         "relpath": relpath,
+        "track_id": getattr(created_track, "id", ""),
+        "label": getattr(created_track, "label", ""),
     }
 
 
@@ -452,22 +492,16 @@ async def run_postprocess_task(*, task_id: str, payload: PostprocessRequest, sta
             state=state,
             task=task,
             task_id=task_id,
-            message={"type": "postprocess_stage", "stage": "mix", "message": "混入背景与环境音"},
+            message={"type": "postprocess_stage", "stage": "mix", "message": "混入音乐与音效"},
         )
-        rebuilt_audio = _merge_optional_track(
-            rebuilt_audio,
-            output_dir=state.settings.output_dir,
-            track_config=config.ambience_track,
-            track_name="环境音",
-            warnings=warnings,
-        )
-        rebuilt_audio = _merge_optional_track(
-            rebuilt_audio,
-            output_dir=state.settings.output_dir,
-            track_config=config.bgm_track,
-            track_name="背景音乐",
-            warnings=warnings,
-        )
+        for track_name, track_config in _iter_postprocess_tracks(config):
+            rebuilt_audio = _merge_optional_track(
+                rebuilt_audio,
+                output_dir=state.settings.output_dir,
+                track_config=track_config,
+                track_name=track_name,
+                warnings=warnings,
+            )
         task["progress"] = {"current": 5, "total": len(stages)}
         await emit_task_event(state=state, task=task, task_id=task_id, message={"type": "progress", "current": 5, "total": len(stages)})
 

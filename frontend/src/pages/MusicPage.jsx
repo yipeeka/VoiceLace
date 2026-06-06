@@ -850,7 +850,7 @@ export default function MusicPage({ onNavigate }) {
       });
       await refreshCurrentProject(currentProject.id);
       pushToast({
-        title: target === "bgm" ? "已绑定到背景音乐" : "已绑定到环境音",
+        title: target === "music" ? "已添加到音乐轨道" : target === "effect" ? "已添加到音效轨道" : target === "bgm" ? "已绑定到背景音乐" : "已绑定到环境音",
         tone: "success",
       });
     } catch (error) {
@@ -1581,18 +1581,18 @@ export default function MusicPage({ onNavigate }) {
                 <Button
                   variant="secondary"
                   icon={Save}
-                  disabled={attachingKey === `${currentResultAssetName}:bgm`}
-                  onClick={() => handleAttach(currentResultAssetName, "bgm")}
+                  disabled={attachingKey === `${currentResultAssetName}:music`}
+                  onClick={() => handleAttach(currentResultAssetName, "music")}
                 >
-                  绑定为 BGM
+                  设为音乐
                 </Button>
                 <Button
                   variant="secondary"
                   icon={Save}
-                  disabled={attachingKey === `${currentResultAssetName}:ambience`}
-                  onClick={() => handleAttach(currentResultAssetName, "ambience")}
+                  disabled={attachingKey === `${currentResultAssetName}:effect`}
+                  onClick={() => handleAttach(currentResultAssetName, "effect")}
                 >
-                  绑定为环境音
+                  设为音效
                 </Button>
                 <Button variant="ghost" onClick={() => onNavigate?.("synth")}>
                   前往合成页
@@ -1832,18 +1832,18 @@ export default function MusicPage({ onNavigate }) {
                           <Button
                             variant="secondary"
                             size="sm"
-                            disabled={attachingKey === `${item.name}:bgm`}
-                            onClick={() => handleAttach(item.name, "bgm")}
+                            disabled={attachingKey === `${item.name}:music`}
+                            onClick={() => handleAttach(item.name, "music")}
                           >
-                            设为 BGM
+                            设为音乐
                           </Button>
                           <Button
                             variant="secondary"
                             size="sm"
-                            disabled={attachingKey === `${item.name}:ambience`}
-                            onClick={() => handleAttach(item.name, "ambience")}
+                            disabled={attachingKey === `${item.name}:effect`}
+                            onClick={() => handleAttach(item.name, "effect")}
                           >
-                            设为环境音
+                            设为音效
                           </Button>
                         </>
                       )}

@@ -342,7 +342,7 @@ class MusicGenerateRequest(BaseModel):
 class AttachMusicAssetRequest(BaseModel):
     project_id: str
     asset_name: str = Field(min_length=1)
-    target: Literal["bgm", "ambience"] = "bgm"
+    target: Literal["bgm", "ambience", "music", "effect"] = "music"
 
 
 class RenameMusicAssetRequest(BaseModel):

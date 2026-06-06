@@ -52,14 +52,15 @@ export default function SynthesisTaskStatusCard({
     `${API_ORIGIN}/api/v1/tts/export/extended?project_id=${projectId}&kind=${encodeURIComponent(kind)}&format=${encodeURIComponent(format)}&variant=${encodeURIComponent(audioVariant || "raw")}&profile=${encodeURIComponent(profile)}`
   );
   return (
-    <GlassCard>
-      <h2 className="cardTitle">任务状态</h2>
+    <GlassCard className="synthesisConsolePanel synthesisExportDrawer">
+      <h2 className="cardTitle">状态和导出</h2>
       {staleReport && (staleReport.stale_count > 0 || staleReport.missing_count > 0) ? (
         <div className="statusBadge warning" style={{ marginBottom: 8 }}>
           共 {staleReport.total} 段，其中已修改 {staleSummary.modified} 段，配置变化 {staleSummary.config} 段，缺失{" "}
           {staleSummary.missing} 段
         </div>
       ) : null}
+      <div className="synthesisConsoleSubhead">任务状态</div>
       <div className="taskStatusGrid" aria-live="polite">
         <div className="statRow taskStatusCell">
           <span>状态</span>
@@ -114,7 +115,7 @@ export default function SynthesisTaskStatusCard({
       {(isRunning || status !== "idle") && (
         <Progress value={progressPct} color={status === "done" ? "success" : status === "error" ? "danger" : "primary"} />
       )}
-      <div className="controlRow" style={{ marginTop: 8, gap: 8, flexWrap: "wrap" }}>
+      <div className="controlRow synthesisConsoleActionRow" style={{ marginTop: 8, gap: 8, flexWrap: "wrap" }}>
         <Button variant="secondary" size="sm" disabled={!canResume} onClick={onResume}>
           继续合成
         </Button>
@@ -126,7 +127,7 @@ export default function SynthesisTaskStatusCard({
         </Button>
       </div>
       {fullAudioUrl && (
-        <div style={{ display: "flex", gap: 10, marginTop: 4, flexWrap: "wrap" }}>
+        <div className="synthesisExportContentGrid">
           <a className="downloadLink" href={fullAudioUrl} target="_blank" rel="noreferrer">
             <Download size={14} />
             下载当前音频
@@ -164,7 +165,7 @@ export default function SynthesisTaskStatusCard({
         </div>
       )}
       {hasProject ? (
-        <details className="listStack" style={{ marginTop: 8 }}>
+        <details className="listStack synthesisExportExtended" style={{ marginTop: 8 }}>
           <summary className="statRow" style={{ cursor: "pointer", listStyle: "none" }}>
             <span>扩展导出</span>
             <strong style={{ fontFamily: "monospace", fontSize: 11 }}>
@@ -186,7 +187,7 @@ export default function SynthesisTaskStatusCard({
           </div>
         </details>
       ) : null}
-      <div className="controlRow" style={{ marginTop: 8, gap: 8, flexWrap: "wrap" }}>
+      <div className="controlRow synthesisAudioVariantRow" style={{ marginTop: 8, gap: 8, flexWrap: "wrap" }}>
         <Button
           variant={audioVariant === "raw" ? "primary" : "secondary"}
           size="sm"
@@ -205,7 +206,7 @@ export default function SynthesisTaskStatusCard({
         </Button>
       </div>
       {normalizedChapterExports.length ? (
-        <div className="listStack" style={{ marginTop: 8 }}>
+        <div className="listStack synthesisChapterExportList" style={{ marginTop: 8 }}>
           {normalizedChapterExports.map((chapter) => (
             <div key={chapter.id} className="statRow" style={{ gap: 8, alignItems: "center" }}>
               <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -227,10 +228,10 @@ export default function SynthesisTaskStatusCard({
           ))}
         </div>
       ) : null}
-      <div className="controlRow" style={{ marginTop: 10 }}>
+      <div className="controlRow synthesisExportMainActions" style={{ marginTop: 10 }}>
         <Button
-          variant="secondary"
-          size="sm"
+          variant="primary"
+          size="lg"
           icon={Download}
           disabled={!hasProject}
           onClick={onOpenExportWizard}

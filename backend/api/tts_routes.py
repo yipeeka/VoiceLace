@@ -291,7 +291,7 @@ async def get_tts_queue(state=Depends(get_app_state)):
 @router.post("/projects/{project_id}/postprocess/assets")
 async def upload_postprocess_asset(
     project_id: str,
-    type: str = Query(..., description="bgm|ambience"),
+    type: str = Query(..., description="bgm|ambience|music|effect"),
     file: UploadFile = File(...),
     state=Depends(get_app_state),
 ):
@@ -312,19 +312,37 @@ async def upload_postprocess_asset(
 @router.get("/projects/{project_id}/postprocess/assets/preview")
 async def preview_postprocess_asset(
     project_id: str,
-    type: str = Query(..., description="bgm|ambience"),
+    type: str = Query(..., description="bgm|ambience|music|effect"),
+    track_id: str = Query("", description="music/effect track id"),
     state=Depends(get_app_state),
 ):
     normalized_type = (type or "").strip().lower()
-    if normalized_type not in {"bgm", "ambience"}:
-        raise HTTPException(status_code=400, detail="asset type 必须为 bgm 或 ambience")
+    if normalized_type not in {"bgm", "ambience", "music", "effect"}:
+        raise HTTPException(status_code=400, detail="asset type 必须为 bgm、ambience、music 或 effect")
 
     project = load_project(state.settings.projects_dir, project_id)
-    relpath = (
-        project.synthesis_config.bgm_track.relpath
-        if normalized_type == "bgm"
-        else project.synthesis_config.ambience_track.relpath
-    )
+    if normalized_type == "bgm":
+        relpath = project.synthesis_config.bgm_track.relpath
+    elif normalized_type == "ambience":
+        relpath = project.synthesis_config.ambience_track.relpath
+    else:
+        tracks = (
+            list(project.synthesis_config.music_tracks or [])
+            if normalized_type == "music"
+            else list(project.synthesis_config.effect_tracks or [])
+        )
+        if normalized_type == "music" and project.synthesis_config.bgm_track.relpath:
+            tracks.insert(0, project.synthesis_config.bgm_track.model_copy(update={"id": "legacy-bgm"}))
+        if normalized_type == "effect" and project.synthesis_config.ambience_track.relpath:
+            tracks.insert(0, project.synthesis_config.ambience_track.model_copy(update={"id": "legacy-ambience"}))
+        selected_track = None
+        if track_id:
+            selected_track = next((track for track in tracks if str(getattr(track, "id", "") or "") == track_id), None)
+        elif tracks:
+            selected_track = tracks[0]
+        if selected_track is None:
+            raise HTTPException(status_code=404, detail="Postprocess asset not found")
+        relpath = selected_track.relpath
     asset_path = from_output_relpath(state.settings.output_dir, relpath)
     if asset_path is None:
         raise HTTPException(status_code=404, detail="Postprocess asset not found")
