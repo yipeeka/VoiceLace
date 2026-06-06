@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import AsrRecognitionCard from "../components/speech/AsrRecognitionCard";
 import RecognitionPreviewCard from "../components/speech/RecognitionPreviewCard";
-import SpeechProjectToolbarSection from "../components/speech/SpeechProjectToolbarSection";
 import SpeechUtilityTabs from "../components/speech/SpeechUtilityTabs";
 import DubbingProjectTargetDialog from "../components/text/DubbingProjectTargetDialog";
 import { useProjectStore } from "../stores/useProjectStore";
@@ -1857,29 +1856,6 @@ export default function SpeechRecognitionPage({ onNavigate }) {
   return (
     <div className="speechPageLayout">
       <div className="speechPageColumn">
-        <SpeechProjectToolbarSection
-          archiveInputRef={archiveInputRef}
-          currentProject={currentProject}
-          currentProjectMeta={currentProjectMeta}
-          importWarnings={importWarnings}
-          isProjectOpsBusy={isProjectOpsBusy}
-          moreMenuItems={moreMenuItems}
-          newProjectName={newProjectName}
-          onCreateProject={handleCreateProject}
-          onImportArchive={handleImportArchive}
-          onOpenProjectFile={handleOpenProjectFile}
-          onOpenProjectFileClick={handleOpenProjectFileClick}
-          onProjectNameChange={setNewProjectName}
-          onProjectNameKeyDown={(event) => event.key === "Enter" && handleCreateProject()}
-          onRenameProject={handleRenameProject}
-          onRenameProjectNameChange={setRenameProjectName}
-          onRenameProjectNameKeyDown={(event) => event.key === "Enter" && handleRenameProject()}
-          onSelectProject={handleSelectProject}
-          projectFileInputRef={projectFileInputRef}
-          projectOptions={projectOptions}
-          renameProjectName={renameProjectName}
-        />
-
         <AsrRecognitionCard
           asrBackendConfigured={asrBackendConfigured}
           asrLanguage={asrLanguage}

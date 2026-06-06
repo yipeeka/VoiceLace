@@ -102,6 +102,24 @@ export default function ProductionFlowOverview({
         </div>
       </div>
 
+      <div className="flowNameRail" aria-label="全部制作步骤">
+        {FLOW_STEPS.map((step) => {
+          const completed = completedPages.includes(step.id);
+          const active = activePage === step.id;
+          return (
+            <button
+              type="button"
+              key={step.id}
+              className={`flowNameItem ${active ? "active" : ""} ${completed ? "completed" : ""}`}
+              onClick={() => onNavigate?.(step.id)}
+            >
+              <span className="flowNameDot" aria-hidden="true" />
+              {step.label}
+            </button>
+          );
+        })}
+      </div>
+
       <div className="flowCardCarousel" role="list" aria-label="制作流程卡片">
         {visibleSteps.map((step) => {
           const Icon = step.icon;
