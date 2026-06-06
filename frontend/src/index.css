@@ -3756,6 +3756,10 @@ select.textInput option {
   align-items: center;
 }
 
+.productionFlowPanel.cardsCollapsed {
+  gap: 10px;
+}
+
 .flowPanelHeader h2 {
   font-size: 15px;
 }
@@ -3770,6 +3774,10 @@ select.textInput option {
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+}
+
+.flowCollapseButton {
+  color: var(--accent-secondary);
 }
 
 .workspaceHeaderTop {
@@ -3842,6 +3850,10 @@ select.textInput option {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+}
+
+.flowCardCarousel[hidden] {
+  display: none;
 }
 
 .flowCard {

@@ -1,7 +1,9 @@
 import {
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   FileText,
   Mic,
   Music,
@@ -57,6 +59,7 @@ export default function ProductionFlowOverview({
   script,
   onNavigate,
 }) {
+  const [cardsCollapsed, setCardsCollapsed] = useState(false);
   const [startIndex, setStartIndex] = useState(() => {
     const activeIndex = Math.max(0, FLOW_STEPS.findIndex((step) => step.id === activePage));
     return Math.min(Math.max(0, activeIndex - 1), Math.max(0, FLOW_STEPS.length - 3));
@@ -70,7 +73,7 @@ export default function ProductionFlowOverview({
   const canGoNext = startIndex < FLOW_STEPS.length - 3;
 
   return (
-    <section className="productionFlowPanel" aria-labelledby="production-flow-title">
+    <section className={`productionFlowPanel ${cardsCollapsed ? "cardsCollapsed" : ""}`} aria-labelledby="production-flow-title">
       <div className="flowPanelHeader">
         <div>
           <p className="eyebrow">Flow Command Center</p>
@@ -78,27 +81,42 @@ export default function ProductionFlowOverview({
           <p className="flowPanelHint">从左侧步骤开始，按顺序完成有声书制作流程。</p>
         </div>
         <div className="flowCarouselActions">
-          <button
-            type="button"
-            className="workspaceIconButton"
-            disabled={!canGoPrev}
-            onClick={() => setStartIndex((value) => Math.max(0, value - 1))}
-            aria-label="查看上一组流程卡片"
-          >
-            <ChevronLeft size={15} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className="workspaceIconButton"
-            disabled={!canGoNext}
-            onClick={() => setStartIndex((value) => Math.min(FLOW_STEPS.length - 3, value + 1))}
-            aria-label="查看下一组流程卡片"
-          >
-            <ChevronRight size={15} aria-hidden="true" />
-          </button>
+          {!cardsCollapsed ? (
+            <>
+              <button
+                type="button"
+                className="workspaceIconButton"
+                disabled={!canGoPrev}
+                onClick={() => setStartIndex((value) => Math.max(0, value - 1))}
+                aria-label="查看上一组流程卡片"
+              >
+                <ChevronLeft size={15} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="workspaceIconButton"
+                disabled={!canGoNext}
+                onClick={() => setStartIndex((value) => Math.min(FLOW_STEPS.length - 3, value + 1))}
+                aria-label="查看下一组流程卡片"
+              >
+                <ChevronRight size={15} aria-hidden="true" />
+              </button>
+            </>
+          ) : null}
           <Button variant="ghost" size="sm" iconRight={PlayCircle} onClick={() => onNavigate?.(activeStep.id)}>
             继续当前步骤
           </Button>
+          <button
+            type="button"
+            className="workspaceIconButton flowCollapseButton"
+            onClick={() => setCardsCollapsed((value) => !value)}
+            aria-expanded={!cardsCollapsed}
+            aria-controls="production-flow-cards"
+            aria-label={cardsCollapsed ? "展开制作流程卡片" : "收起制作流程卡片"}
+            title={cardsCollapsed ? "展开流程卡片" : "收起流程卡片"}
+          >
+            {cardsCollapsed ? <ChevronDown size={15} aria-hidden="true" /> : <ChevronUp size={15} aria-hidden="true" />}
+          </button>
         </div>
       </div>
 
@@ -120,7 +138,13 @@ export default function ProductionFlowOverview({
         })}
       </div>
 
-      <div className="flowCardCarousel" role="list" aria-label="制作流程卡片">
+      <div
+        id="production-flow-cards"
+        className="flowCardCarousel"
+        role="list"
+        aria-label="制作流程卡片"
+        hidden={cardsCollapsed}
+      >
         {visibleSteps.map((step) => {
           const Icon = step.icon;
           const completed = completedPages.includes(step.id);
