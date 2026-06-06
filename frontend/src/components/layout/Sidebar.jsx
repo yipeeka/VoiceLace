@@ -3,18 +3,15 @@ import {
   BookOpen,
   ChevronLeft,
   ChevronRight,
-  FolderOpen,
   ShieldCheck,
   Mic,
   Music,
-  Save,
   Settings,
   SlidersHorizontal,
   Users,
   Volume2,
 } from "lucide-react";
 import { Tooltip } from "../ui/Tooltip";
-import { useUiStore } from "../../stores/useUiStore";
 
 const NAV_ITEMS = [
   { id: "speech",  label: "语音识别",  icon: Mic,               step: 1 },
@@ -27,10 +24,6 @@ const NAV_ITEMS = [
 ];
 
 export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCollapse, completedPages = [] }) {
-  const projectSaveAction = useUiStore((state) => state.projectSaveAction);
-  const canShowProjectSave = ["speech", "text", "script", "voice", "music", "synth"].includes(activePage);
-  const canSaveProject = typeof projectSaveAction === "function";
-
   return (
     <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
       {/* Brand */}
@@ -117,68 +110,7 @@ export default function Sidebar({ activePage, onNavigate, collapsed, onToggleCol
             button
           );
 
-          if (item.id !== "synth") {
-            return renderedButton;
-          }
-
-          return (
-            <div key={item.id} className="sidebarNavGroup">
-              {renderedButton}
-              {canShowProjectSave ? (
-                <>
-                  {collapsed ? (
-                    <>
-                      <Tooltip content={canSaveProject ? "保存项目" : "当前页面不可保存"} side="right">
-                        <button
-                          type="button"
-                          className="navItem navItemSubAction"
-                          onClick={() => projectSaveAction?.()}
-                          disabled={!canSaveProject}
-                          aria-label="保存项目"
-                          title="保存项目"
-                        >
-                          <Save className="navItemIcon" aria-hidden="true" focusable="false" size={18} />
-                        </button>
-                      </Tooltip>
-                      <Tooltip content={canSaveProject ? "另存项目" : "当前页面不可保存"} side="right">
-                        <button
-                          type="button"
-                          className="navItem navItemSubAction"
-                          onClick={() => projectSaveAction?.({ forceSaveAs: true })}
-                          disabled={!canSaveProject}
-                          aria-label="另存项目"
-                          title="另存项目"
-                        >
-                          <FolderOpen className="navItemIcon" aria-hidden="true" focusable="false" size={18} />
-                        </button>
-                      </Tooltip>
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        className="navItem navItemSubAction"
-                        onClick={() => projectSaveAction?.()}
-                        disabled={!canSaveProject}
-                      >
-                        <Save className="navItemIcon" aria-hidden="true" focusable="false" size={16} />
-                        <span className="navItemLabel">保存项目</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="navItem navItemSubAction"
-                        onClick={() => projectSaveAction?.({ forceSaveAs: true })}
-                        disabled={!canSaveProject}
-                      >
-                        <FolderOpen className="navItemIcon" aria-hidden="true" focusable="false" size={16} />
-                        <span className="navItemLabel">另存项目</span>
-                      </button>
-                    </>
-                  )}
-                </>
-              ) : null}
-            </div>
-          );
+          return renderedButton;
         })}
 
         <div className="sidebarDivider" />

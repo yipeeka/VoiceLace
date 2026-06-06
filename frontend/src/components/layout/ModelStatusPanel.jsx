@@ -1,4 +1,4 @@
-import { Brain, Database, HardDrive, Music, RefreshCw, Trash2, Volume2, Waves } from "lucide-react";
+import { Brain, ChevronLeft, ChevronRight, Database, HardDrive, Music, RefreshCw, Trash2, Volume2, Waves } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import Button from "../ui/Button";
@@ -37,6 +37,7 @@ export default function ModelStatusPanel() {
     manualUnloadAll,
   } = useSettingsStore();
   const [busyKey, setBusyKey] = useState("");
+  const [collapsed, setCollapsed] = useState(true);
 
   const models = useMemo(() => {
     const llmStatus = resolveStatus(systemStatus?.llm_status, systemStatus?.llm_loaded, systemStatus?.llm_error);
@@ -104,29 +105,52 @@ export default function ModelStatusPanel() {
     : "未检测";
 
   return (
-    <aside className="modelStatusPanel" aria-label="系统与模型状态">
+    <aside className={`modelStatusPanel ${collapsed ? "collapsed" : ""}`} aria-label="系统与模型状态">
+      {collapsed ? (
+        <button
+          type="button"
+          className="modelPanelCollapsedButton"
+          onClick={() => setCollapsed(false)}
+          aria-label="展开系统与模型状态"
+          title="展开系统与模型状态"
+        >
+          <ChevronLeft size={16} aria-hidden="true" />
+          <span>模型</span>
+        </button>
+      ) : null}
       <div className="modelPanelSection">
         <div className="modelPanelHeader">
           <div>
             <p className="eyebrow">Runtime</p>
             <h2>系统与模型状态</h2>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={RefreshCw}
-            disabled={busyKey === "refresh"}
-            onClick={async () => {
-              setBusyKey("refresh");
-              try {
-                await refreshSystemStatus();
-              } finally {
-                setBusyKey("");
-              }
-            }}
-          >
-            刷新
-          </Button>
+          <div className="modelPanelHeaderActions">
+            <button
+              type="button"
+              className="workspaceIconButton"
+              onClick={() => setCollapsed(true)}
+              aria-label="收起系统与模型状态"
+              title="收起"
+            >
+              <ChevronRight size={15} aria-hidden="true" />
+            </button>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={RefreshCw}
+              disabled={busyKey === "refresh"}
+              onClick={async () => {
+                setBusyKey("refresh");
+                try {
+                  await refreshSystemStatus();
+                } finally {
+                  setBusyKey("");
+                }
+              }}
+            >
+              刷新
+            </Button>
+          </div>
         </div>
 
         <div className="modelList">

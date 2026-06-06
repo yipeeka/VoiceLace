@@ -3628,3 +3628,155 @@ select.textInput option {
     padding: 14px;
   }
 }
+
+/* Browser annotation refinements */
+.productionFlowPanel {
+  gap: 12px;
+  padding: 12px;
+  order: 2;
+}
+
+.flowPanelHeader {
+  align-items: center;
+}
+
+.flowPanelHeader h2 {
+  font-size: 15px;
+}
+
+.flowPanelHint {
+  margin-top: 1px;
+  font-size: 12px;
+}
+
+.flowCarouselActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.flowCarouselActions .workspaceIconButton:disabled {
+  opacity: 0.36;
+  cursor: not-allowed;
+}
+
+.flowCardCarousel {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.flowCard {
+  min-width: 0;
+  min-height: 118px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 8px;
+  color: inherit;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.035);
+  cursor: pointer;
+  transition: background var(--duration-fast) ease, border-color var(--duration-fast) ease, box-shadow var(--duration-fast) ease;
+}
+
+.flowCard:hover {
+  border-color: rgba(124, 231, 255, 0.2);
+  background: rgba(255, 255, 255, 0.052);
+}
+
+.flowCard.active {
+  border-color: rgba(255, 179, 71, 0.48);
+  background: linear-gradient(135deg, rgba(255, 179, 71, 0.14), rgba(255, 179, 71, 0.04));
+  box-shadow: inset 3px 0 0 var(--accent-primary);
+}
+
+.flowCard.completed {
+  border-color: rgba(74, 222, 128, 0.16);
+}
+
+.flowCardTopline,
+.flowCardTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.flowCardTitle {
+  justify-content: flex-start;
+}
+
+.flowCardTitle > span {
+  min-width: 0;
+}
+
+.flowCard .flowArtifact,
+.flowCard .flowAction {
+  font-size: 11.5px;
+}
+
+.flowCard .flowProgressCell {
+  grid-template-columns: minmax(70px, 1fr) auto;
+}
+
+.workspaceBody:has(.modelStatusPanel.collapsed) {
+  grid-template-columns: minmax(0, 1fr) 52px;
+}
+
+.modelStatusPanel.collapsed {
+  align-items: center;
+  padding: 14px 8px;
+  overflow: hidden;
+}
+
+.modelStatusPanel.collapsed .modelPanelSection {
+  display: none;
+}
+
+.modelPanelCollapsedButton {
+  width: 36px;
+  min-height: 124px;
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  border: 1px solid rgba(124, 231, 255, 0.18);
+  border-radius: 8px;
+  color: var(--accent-secondary);
+  background: rgba(124, 231, 255, 0.06);
+  cursor: pointer;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+}
+
+.modelPanelCollapsedButton svg {
+  writing-mode: horizontal-tb;
+}
+
+.modelPanelCollapsedButton:hover {
+  background: rgba(124, 231, 255, 0.12);
+  border-color: rgba(124, 231, 255, 0.34);
+}
+
+.modelPanelHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+@media (max-width: 900px) {
+  .flowCardCarousel {
+    grid-template-columns: 1fr;
+  }
+
+  .flowCard {
+    min-height: 0;
+  }
+}

@@ -1,16 +1,17 @@
 import {
-  BookOpen,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   FileText,
   Mic,
   Music,
   PlayCircle,
   ShieldCheck,
   SlidersHorizontal,
-  Upload,
   Users,
   Volume2,
 } from "lucide-react";
+import { useMemo, useState } from "react";
 
 import Button from "../ui/Button";
 
@@ -56,8 +57,17 @@ export default function ProductionFlowOverview({
   script,
   onNavigate,
 }) {
-  const completedCount = completedPages.length;
+  const [startIndex, setStartIndex] = useState(() => {
+    const activeIndex = Math.max(0, FLOW_STEPS.findIndex((step) => step.id === activePage));
+    return Math.min(Math.max(0, activeIndex - 1), Math.max(0, FLOW_STEPS.length - 3));
+  });
+  const visibleSteps = useMemo(
+    () => FLOW_STEPS.slice(startIndex, startIndex + 3),
+    [startIndex],
+  );
   const activeStep = FLOW_STEPS.find((step) => step.id === activePage) || FLOW_STEPS[0];
+  const canGoPrev = startIndex > 0;
+  const canGoNext = startIndex < FLOW_STEPS.length - 3;
 
   return (
     <section className="productionFlowPanel" aria-labelledby="production-flow-title">
@@ -67,42 +77,58 @@ export default function ProductionFlowOverview({
           <h2 id="production-flow-title">制作流程总览</h2>
           <p className="flowPanelHint">从左侧步骤开始，按顺序完成有声书制作流程。</p>
         </div>
-        <Button variant="ghost" size="sm" iconRight={PlayCircle} onClick={() => onNavigate?.(activeStep.id)}>
-          继续当前步骤
-        </Button>
+        <div className="flowCarouselActions">
+          <button
+            type="button"
+            className="workspaceIconButton"
+            disabled={!canGoPrev}
+            onClick={() => setStartIndex((value) => Math.max(0, value - 1))}
+            aria-label="查看上一组流程卡片"
+          >
+            <ChevronLeft size={15} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="workspaceIconButton"
+            disabled={!canGoNext}
+            onClick={() => setStartIndex((value) => Math.min(FLOW_STEPS.length - 3, value + 1))}
+            aria-label="查看下一组流程卡片"
+          >
+            <ChevronRight size={15} aria-hidden="true" />
+          </button>
+          <Button variant="ghost" size="sm" iconRight={PlayCircle} onClick={() => onNavigate?.(activeStep.id)}>
+            继续当前步骤
+          </Button>
+        </div>
       </div>
 
-      <div className="flowTable" role="list">
-        <div className="flowTableHeader" aria-hidden="true">
-          <span>步骤</span>
-          <span>状态</span>
-          <span>最近文件 / 结果</span>
-          <span>进度</span>
-          <span>下一步操作</span>
-        </div>
-        {FLOW_STEPS.map((step, index) => {
+      <div className="flowCardCarousel" role="list" aria-label="制作流程卡片">
+        {visibleSteps.map((step) => {
           const Icon = step.icon;
           const completed = completedPages.includes(step.id);
           const active = activePage === step.id;
           const progress = getProgress(step.id, completed, active);
           const statusLabel = completed ? "已完成" : active ? "进行中" : "待开始";
+          const stepIndex = FLOW_STEPS.findIndex((item) => item.id === step.id);
           return (
             <button
               type="button"
               key={step.id}
-              className={`flowRow ${active ? "active" : ""} ${completed ? "completed" : ""}`}
+              className={`flowCard ${active ? "active" : ""} ${completed ? "completed" : ""}`}
               onClick={() => onNavigate?.(step.id)}
               role="listitem"
             >
-              <span className="flowStepCell">
-                <span className="flowStepNumber">{completed ? <CheckCircle2 size={15} /> : index + 1}</span>
+              <span className="flowCardTopline">
+                <span className="flowStepNumber">{completed ? <CheckCircle2 size={15} /> : stepIndex + 1}</span>
+                <span className={`flowStatusBadge ${completed ? "success" : active ? "active" : ""}`}>{statusLabel}</span>
+              </span>
+              <span className="flowCardTitle">
                 <Icon className="flowStepIcon" size={22} aria-hidden="true" />
                 <span>
                   <strong>{step.label}</strong>
                   <small>{step.description}</small>
                 </span>
               </span>
-              <span className={`flowStatusBadge ${completed ? "success" : active ? "active" : ""}`}>{statusLabel}</span>
               <span className="flowArtifact">{getArtifact(step.id, { currentProject, sourceText, script })}</span>
               <span className="flowProgressCell">
                 <span className="flowProgressTrack">
@@ -114,25 +140,6 @@ export default function ProductionFlowOverview({
             </button>
           );
         })}
-      </div>
-
-      <div className="flowBottomGrid">
-        <div className="flowDropTarget">
-          <Upload size={34} aria-hidden="true" />
-          <div>
-            <strong>导入音频开始转写</strong>
-            <span>支持 wav / flac / mp3 / m4a / aac 等格式</span>
-          </div>
-          <Button variant="primary" size="sm" onClick={() => onNavigate?.("speech")}>选择文件</Button>
-        </div>
-        <div className="flowContinueCard">
-          <BookOpen size={24} aria-hidden="true" />
-          <div>
-            <strong>{currentProject?.name || "当前项目"}</strong>
-            <span>已完成 {completedCount}/7 个步骤</span>
-          </div>
-          <Button variant="secondary" size="sm" onClick={() => onNavigate?.(activeStep.id)}>继续项目</Button>
-        </div>
       </div>
     </section>
   );
