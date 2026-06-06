@@ -2924,3 +2924,707 @@ select.textInput option {
   display: block;
   text-align: left;
 }
+
+/* ─────────────────────────────────────────────────────────────
+   FLOW COMMAND CENTER REDESIGN
+───────────────────────────────────────────────────────────── */
+.appShell {
+  background:
+    radial-gradient(circle at 16% 0%, rgba(255, 179, 71, 0.08), transparent 32%),
+    radial-gradient(circle at 84% 8%, rgba(124, 231, 255, 0.06), transparent 30%),
+    var(--bg-base);
+}
+
+.sidebar {
+  background: color-mix(in srgb, #07090c 92%, var(--accent-secondary-dim));
+  border-right-color: rgba(255, 255, 255, 0.08);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.03);
+}
+
+.sidebarBrand {
+  min-height: 84px;
+  padding: 18px 14px;
+  border-bottom-color: rgba(255, 255, 255, 0.07);
+}
+
+.sidebarLogo {
+  background: color-mix(in srgb, var(--accent-primary-dim) 46%, #071014);
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px rgba(255, 179, 71, 0.26), 0 18px 32px rgba(0, 0, 0, 0.38);
+}
+
+.sidebarBrandText .title {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.sidebarBrandText .subtitle {
+  margin-top: 1px;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--text-muted) 82%, var(--accent-secondary));
+}
+
+.sidebarNav {
+  gap: 7px;
+  padding: 14px 10px 16px;
+}
+
+.navItem {
+  min-height: 54px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: color-mix(in srgb, var(--text-secondary) 86%, white);
+}
+
+.navItem:hover {
+  background: rgba(255, 255, 255, 0.055);
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+.navItem.active {
+  color: var(--accent-primary);
+  background: linear-gradient(90deg, rgba(255, 179, 71, 0.16), rgba(255, 179, 71, 0.06));
+  border-color: rgba(255, 179, 71, 0.46);
+  box-shadow: inset 3px 0 0 var(--accent-primary);
+}
+
+.navItem.completed:not(.active) {
+  color: color-mix(in srgb, var(--text-secondary) 72%, var(--success));
+}
+
+.navItemLabel {
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.navItemStep {
+  background: transparent;
+  color: currentColor;
+  border-color: color-mix(in srgb, currentColor 44%, transparent);
+}
+
+.sidebarDivider {
+  background: rgba(255, 255, 255, 0.08);
+  margin: 8px 10px;
+}
+
+.mainArea {
+  background: rgba(8, 10, 12, 0.72);
+  min-width: 0;
+}
+
+.workspaceHeader {
+  min-height: 84px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(18, 22, 26, 0.92), rgba(11, 13, 16, 0.9)),
+    var(--bg-surface);
+  flex-shrink: 0;
+}
+
+.workspaceHeaderIdentity {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.workspaceTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.workspaceTitleRow h1 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 23px;
+  line-height: 1.15;
+  font-weight: 760;
+  letter-spacing: 0;
+  color: var(--text-primary);
+}
+
+.workspaceMetaRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex-wrap: wrap;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.workspaceMetaRow > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.workspaceMetaRow > span:not(:last-child)::after {
+  content: "";
+  width: 1px;
+  height: 12px;
+  margin-left: 6px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.workspaceMetaStatus {
+  color: var(--success);
+  font-weight: 650;
+}
+
+.workspaceHeaderActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.workspaceIconButton {
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  transition: background var(--duration-fast) ease, color var(--duration-fast) ease, border-color var(--duration-fast) ease;
+}
+
+.workspaceIconButton:hover {
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.075);
+}
+
+.workspaceModelReady {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid rgba(74, 222, 128, 0.24);
+  border-radius: 8px;
+  background: rgba(74, 222, 128, 0.08);
+  color: color-mix(in srgb, var(--success) 82%, white);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.workspaceBody {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pageContent {
+  padding: 20px 24px 22px;
+  gap: 18px;
+}
+
+.productionFlowPanel,
+.modelPanelSection {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(18, 22, 25, 0.95), rgba(13, 16, 19, 0.96)),
+    var(--bg-surface);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+.productionFlowPanel {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.flowPanelHeader,
+.modelPanelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.flowPanelHeader h2,
+.modelPanelHeader h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 17px;
+  line-height: 1.25;
+  font-weight: 760;
+  letter-spacing: 0;
+}
+
+.eyebrow {
+  margin: 0 0 3px;
+  color: var(--accent-primary);
+  font-size: 10.5px;
+  line-height: 1.2;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.flowPanelHint,
+.panelFinePrint {
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.flowTable {
+  display: grid;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.flowTableHeader,
+.flowRow {
+  display: grid;
+  grid-template-columns: minmax(230px, 1.35fr) minmax(92px, 0.52fr) minmax(170px, 0.95fr) minmax(132px, 0.72fr) minmax(120px, 0.7fr);
+  gap: 14px;
+  align-items: center;
+}
+
+.flowTableHeader {
+  min-height: 36px;
+  padding: 0 14px;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.flowRow {
+  width: 100%;
+  min-height: 74px;
+  padding: 11px 14px;
+  color: inherit;
+  text-align: left;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--duration-fast) ease, box-shadow var(--duration-fast) ease;
+}
+
+.flowRow:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.flowRow.active {
+  background: linear-gradient(90deg, rgba(255, 179, 71, 0.13), rgba(255, 179, 71, 0.035));
+  box-shadow: inset 3px 0 0 var(--accent-primary);
+}
+
+.flowStepCell {
+  display: grid;
+  grid-template-columns: 34px 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.flowStepNumber {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(124, 231, 255, 0.5);
+  color: var(--accent-secondary);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.flowRow.completed .flowStepNumber {
+  border-color: rgba(74, 222, 128, 0.46);
+  color: var(--success);
+}
+
+.flowStepIcon {
+  color: var(--accent-secondary);
+}
+
+.flowRow.active .flowStepIcon,
+.flowRow.active .flowStepNumber {
+  color: var(--accent-primary);
+  border-color: rgba(255, 179, 71, 0.7);
+}
+
+.flowStepCell strong,
+.flowContinueCard strong,
+.flowDropTarget strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 14.5px;
+  font-weight: 720;
+}
+
+.flowStepCell small,
+.flowContinueCard span,
+.flowDropTarget span {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.flowStatusBadge {
+  width: fit-content;
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.flowStatusBadge.success {
+  color: var(--success);
+  border-color: rgba(74, 222, 128, 0.28);
+  background: rgba(74, 222, 128, 0.1);
+}
+
+.flowStatusBadge.active {
+  color: var(--accent-primary);
+  border-color: rgba(255, 179, 71, 0.34);
+  background: rgba(255, 179, 71, 0.12);
+}
+
+.flowArtifact,
+.flowAction {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flowAction {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+.flowProgressCell {
+  display: grid;
+  grid-template-columns: minmax(70px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.flowProgressTrack {
+  height: 6px;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.flowProgressTrack span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+}
+
+.flowBottomGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+  gap: 14px;
+}
+
+.flowDropTarget,
+.flowContinueCard {
+  min-width: 0;
+  display: grid;
+  align-items: center;
+  gap: 14px;
+  border: 1px dashed rgba(255, 179, 71, 0.4);
+  border-radius: 8px;
+  background: rgba(255, 179, 71, 0.055);
+  padding: 16px;
+}
+
+.flowDropTarget {
+  grid-template-columns: 54px minmax(0, 1fr) auto;
+}
+
+.flowDropTarget > svg {
+  color: var(--accent-primary);
+}
+
+.flowContinueCard {
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  border-style: solid;
+  border-color: rgba(255, 179, 71, 0.25);
+}
+
+.flowContinueCard > svg {
+  color: var(--accent-primary);
+}
+
+.modelStatusPanel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 16px;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(7, 9, 11, 0.86);
+  overflow-y: auto;
+}
+
+.modelPanelSection {
+  padding: 16px;
+}
+
+.modelPanelHeader.compact {
+  align-items: center;
+}
+
+.modelList {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.modelStatusRow {
+  position: relative;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto 30px;
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  padding: 9px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.modelStatusRow.ready {
+  border-color: rgba(74, 222, 128, 0.18);
+}
+
+.modelStatusRow.error {
+  border-color: rgba(248, 113, 113, 0.25);
+}
+
+.modelStatusIcon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(124, 231, 255, 0.24);
+  border-radius: 8px;
+  color: var(--accent-secondary);
+  background: rgba(124, 231, 255, 0.08);
+}
+
+.modelStatusRow.ready .modelStatusIcon {
+  color: var(--success);
+  border-color: rgba(74, 222, 128, 0.25);
+  background: rgba(74, 222, 128, 0.08);
+}
+
+.modelStatusRow.error .modelStatusIcon {
+  color: var(--danger);
+  border-color: rgba(248, 113, 113, 0.25);
+  background: rgba(248, 113, 113, 0.08);
+}
+
+.modelStatusCopy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.modelStatusCopy strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.modelStatusCopy small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modelState {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.modelUnloadButton {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(248, 113, 113, 0.18);
+  border-radius: 7px;
+  color: var(--danger);
+  background: rgba(248, 113, 113, 0.08);
+  cursor: pointer;
+  transition: opacity var(--duration-fast) ease, background var(--duration-fast) ease;
+}
+
+.modelUnloadButton:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.16);
+}
+
+.modelUnloadButton:disabled {
+  opacity: 0.34;
+  cursor: not-allowed;
+}
+
+.modelBusyText {
+  position: absolute;
+  right: 10px;
+  bottom: 3px;
+  color: var(--warning);
+  font-size: 10.5px;
+}
+
+.modelUnloadAllButton {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.resourceRows {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.resourceRow {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.resourceRow svg {
+  color: var(--accent-secondary);
+}
+
+.resourceRow strong {
+  color: var(--text-primary);
+  font-family: "JetBrains Mono", "Cascadia Code", monospace;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.statusBar {
+  background: color-mix(in srgb, #07090c 90%, var(--accent-secondary-dim));
+  border-top-color: rgba(255, 255, 255, 0.09);
+}
+
+.statusBarItem {
+  border-right-color: rgba(255, 255, 255, 0.08);
+}
+
+@media (max-width: 1280px) {
+  .workspaceBody {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .modelStatusPanel {
+    display: none;
+  }
+
+  .flowTableHeader,
+  .flowRow {
+    grid-template-columns: minmax(230px, 1.25fr) minmax(90px, 0.45fr) minmax(140px, 0.82fr) minmax(110px, 0.58fr);
+  }
+
+  .flowTableHeader span:last-child,
+  .flowAction {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .workspaceHeader {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 14px 16px;
+  }
+
+  .workspaceHeaderActions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .flowTableHeader {
+    display: none;
+  }
+
+  .flowRow {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    min-height: 0;
+  }
+
+  .flowProgressCell {
+    grid-template-columns: minmax(120px, 1fr) auto;
+  }
+
+  .flowBottomGrid,
+  .flowDropTarget,
+  .flowContinueCard {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .workspaceHeader {
+    display: none;
+  }
+
+  .pageContent {
+    padding: var(--content-padding-mobile);
+  }
+
+  .productionFlowPanel {
+    padding: 14px;
+  }
+}

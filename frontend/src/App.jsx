@@ -2,7 +2,10 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 
 import Sidebar from "./components/layout/Sidebar";
+import ModelStatusPanel from "./components/layout/ModelStatusPanel";
+import ProductionFlowOverview from "./components/layout/ProductionFlowOverview";
 import StatusBar from "./components/layout/StatusBar";
+import WorkspaceHeader from "./components/layout/WorkspaceHeader";
 import GlobalConfirmDialog from "./components/shared/GlobalConfirmDialog";
 import ToastLayer from "./components/shared/ToastLayer";
 import { TooltipProvider } from "./components/ui/Tooltip";
@@ -205,18 +208,32 @@ export default function App() {
         />
 
         <main id="main-content" className="mainArea" tabIndex={-1}>
-          <div className="pageContent">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={activePage}
-                {...(prefersReducedMotion ? REDUCED_PAGE_TRANSITION : PAGE_TRANSITION)}
-                style={{ flex: 1 }}
-              >
-                <Suspense fallback={<div className="pageLoading" aria-live="polite">正在加载…</div>}>
-                  <PageComponent onNavigate={navigateToPage} />
-                </Suspense>
-              </motion.div>
-            </AnimatePresence>
+          <WorkspaceHeader activePage={activePage} onNavigate={navigateToPage} />
+          <div className="workspaceBody">
+            <div className="pageContent">
+              {activePage !== "settings" ? (
+                <ProductionFlowOverview
+                  activePage={activePage}
+                  completedPages={completedPages}
+                  currentProject={currentProject}
+                  sourceText={sourceText}
+                  script={script}
+                  onNavigate={navigateToPage}
+                />
+              ) : null}
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={activePage}
+                  {...(prefersReducedMotion ? REDUCED_PAGE_TRANSITION : PAGE_TRANSITION)}
+                  style={{ flex: 1, minWidth: 0 }}
+                >
+                  <Suspense fallback={<div className="pageLoading" aria-live="polite">正在加载…</div>}>
+                    <PageComponent onNavigate={navigateToPage} />
+                  </Suspense>
+                </motion.div>
+              </AnimatePresence>
+            </div>
+            <ModelStatusPanel />
           </div>
 
           <StatusBar />
