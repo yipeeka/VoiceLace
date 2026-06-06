@@ -3212,6 +3212,11 @@ select.textInput option {
   overflow: hidden;
 }
 
+.workspaceFlowStrip {
+  flex-shrink: 0;
+  padding: 12px 24px 0;
+}
+
 .pageContent {
   padding: 20px 24px 22px;
   gap: 18px;
@@ -3646,10 +3651,6 @@ select.textInput option {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .modelStatusPanel {
-    display: none;
-  }
-
   .flowTableHeader,
   .flowRow {
     grid-template-columns: minmax(230px, 1.25fr) minmax(90px, 0.45fr) minmax(140px, 0.82fr) minmax(110px, 0.58fr);
@@ -3749,7 +3750,6 @@ select.textInput option {
 .productionFlowPanel {
   gap: 12px;
   padding: 12px;
-  order: 2;
 }
 
 .flowPanelHeader {
@@ -3966,5 +3966,59 @@ select.textInput option {
   .workspaceHeaderTop {
     display: grid;
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1280px) {
+  .workspaceBody,
+  .workspaceBody:has(.modelStatusPanel.collapsed) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .modelStatusPanel {
+    position: fixed;
+    top: 138px;
+    right: 12px;
+    bottom: calc(var(--statusbar-height) + 12px);
+    z-index: 120;
+    width: min(360px, calc(100vw - var(--sidebar-width-collapsed) - 24px));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  }
+
+  .modelStatusPanel.collapsed {
+    top: 50%;
+    right: 12px;
+    bottom: auto;
+    width: auto;
+    transform: translateY(-50%);
+    box-shadow: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .workspaceFlowStrip {
+    display: none;
+  }
+
+  .modelStatusPanel {
+    top: 96px;
+    right: 8px;
+    bottom: calc(var(--statusbar-height) + 8px);
+    width: min(340px, calc(100vw - var(--sidebar-width-collapsed) - 16px));
+    padding: 12px;
+  }
+
+  .modelStatusPanel.collapsed {
+    top: 50%;
+    right: 8px;
+    padding: 0;
+  }
+
+  .modelStatusPanel:not(.collapsed) {
+    background:
+      linear-gradient(180deg, rgba(18, 22, 26, 0.98), rgba(8, 10, 12, 0.98)),
+      var(--bg-surface);
   }
 }

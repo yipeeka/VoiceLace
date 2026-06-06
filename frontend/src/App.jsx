@@ -209,6 +209,18 @@ export default function App() {
 
         <main id="main-content" className="mainArea" tabIndex={-1}>
           <WorkspaceHeader activePage={activePage} onNavigate={navigateToPage} />
+          {activePage !== "settings" ? (
+            <div className="workspaceFlowStrip">
+              <ProductionFlowOverview
+                activePage={activePage}
+                completedPages={completedPages}
+                currentProject={currentProject}
+                sourceText={sourceText}
+                script={script}
+                onNavigate={navigateToPage}
+              />
+            </div>
+          ) : null}
           <div className="workspaceBody">
             <div className="pageContent">
               <AnimatePresence mode="wait">
@@ -222,16 +234,6 @@ export default function App() {
                   </Suspense>
                 </motion.div>
               </AnimatePresence>
-              {activePage !== "settings" ? (
-                <ProductionFlowOverview
-                  activePage={activePage}
-                  completedPages={completedPages}
-                  currentProject={currentProject}
-                  sourceText={sourceText}
-                  script={script}
-                  onNavigate={navigateToPage}
-                />
-              ) : null}
             </div>
             <ModelStatusPanel />
           </div>
