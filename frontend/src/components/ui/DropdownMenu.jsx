@@ -14,6 +14,9 @@ export default function DropdownMenu({
   sideOffset = 8,
   className,
   disabled = false,
+  ariaLabel,
+  hideLabel = false,
+  showChevron = true,
 }) {
   const [open, setOpen] = useState(false);
 
@@ -31,6 +34,7 @@ export default function DropdownMenu({
         <button
           type="button"
           disabled={disabled}
+          aria-label={ariaLabel || label}
           className={cn(
             "btn",
             `btn-${variant}`,
@@ -41,8 +45,10 @@ export default function DropdownMenu({
           )}
         >
           {Icon ? <Icon aria-hidden="true" focusable="false" size={size === "sm" ? 13 : size === "lg" ? 17 : 15} /> : null}
-          <span className="dropdownMenuLabel">{label}</span>
-          <ChevronDown className="dropdownMenuChevron" aria-hidden="true" focusable="false" size={size === "sm" ? 13 : size === "lg" ? 17 : 15} />
+          {!hideLabel ? <span className="dropdownMenuLabel">{label}</span> : null}
+          {showChevron ? (
+            <ChevronDown className="dropdownMenuChevron" aria-hidden="true" focusable="false" size={size === "sm" ? 13 : size === "lg" ? 17 : 15} />
+          ) : null}
         </button>
       </Popover.Trigger>
 
@@ -69,7 +75,10 @@ export default function DropdownMenu({
                   onClick={() => handleSelect(item)}
                 >
                   {ItemIcon ? <ItemIcon aria-hidden="true" focusable="false" size={14} /> : null}
-                  <span>{item?.label}</span>
+                  <span className="dropdownMenuItemCopy">
+                    <span>{item?.label}</span>
+                    {item?.meta ? <small>{item.meta}</small> : null}
+                  </span>
                 </button>
               );
             })}

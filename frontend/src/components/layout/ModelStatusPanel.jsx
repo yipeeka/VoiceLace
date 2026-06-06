@@ -111,11 +111,11 @@ export default function ModelStatusPanel() {
           type="button"
           className="modelPanelCollapsedButton"
           onClick={() => setCollapsed(false)}
-          aria-label="展开系统与模型状态"
-          title="展开系统与模型状态"
+          aria-label="展开系统状态"
+          title="展开系统状态"
         >
           <ChevronLeft size={16} aria-hidden="true" />
-          <span>模型</span>
+          <span>系统状态</span>
         </button>
       ) : null}
       <div className="modelPanelSection">

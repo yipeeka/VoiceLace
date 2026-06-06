@@ -1,12 +1,13 @@
-import { CheckCircle2, ChevronDown, FolderOpen, Menu, Save, Settings, Star, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CheckCircle2, ChevronDown, CopyX, Download, FolderOpen, Menu, Pencil, Plus, Save, Settings, Trash2, Upload } from "lucide-react";
+import { useCallback, useMemo, useRef } from "react";
 
-import ProjectToolbarCard from "../text/ProjectToolbarCard";
 import Button from "../ui/Button";
+import DropdownMenu from "../ui/DropdownMenu";
 import { useProjectStore } from "../../stores/useProjectStore";
 import { useScriptStore } from "../../stores/useScriptStore";
 import { useSettingsStore } from "../../stores/useSettingsStore";
 import { useUiStore } from "../../stores/useUiStore";
+import { API_ORIGIN } from "../../utils/api";
 import { openProjectFileWithPicker } from "../../utils/projectFile";
 import {
   buildProjectOption,
@@ -55,8 +56,6 @@ export default function WorkspaceHeader({ activePage, onNavigate }) {
   const projectSaveAction = useUiStore((state) => state.projectSaveAction);
   const archiveInputRef = useRef(null);
   const projectFileInputRef = useRef(null);
-  const [newProjectName, setNewProjectName] = useState("");
-  const [renameProjectName, setRenameProjectName] = useState("");
   const canSaveProject = typeof projectSaveAction === "function";
   const projectName = currentProject?.name || "Demo Audiobook";
   const pageTitle = PAGE_TITLES[activePage] || "制作流程";
@@ -79,29 +78,12 @@ export default function WorkspaceHeader({ activePage, onNavigate }) {
     () => visibleProjects.map((project) => buildProjectOption(project, projectSources?.[project.id])),
     [projectSources, visibleProjects],
   );
-  const currentProjectMeta = useMemo(() => {
-    if (!currentProject?.id) {
-      return { sourceTag: "未选择", detail: "未选择项目" };
-    }
-    const detailParts = [];
-    const displayFileName = toProjectFileDisplayName(currentProjectFileName || currentProject.project_file_name);
-    if (displayFileName) {
-      detailParts.push(displayFileName);
-    }
-    detailParts.push(`#${shortProjectId(currentProject.id)}`);
-    return {
-      sourceTag: getProjectSourceTag(projectSources?.[currentProject.id]),
-      detail: detailParts.join(" · "),
-    };
-  }, [currentProject, currentProjectFileName, projectSources]);
+  const currentSourceTag = currentProject?.id ? getProjectSourceTag(projectSources?.[currentProject.id]) : "未选择";
+  const currentProjectDetail = currentProject?.id ? `#${shortProjectId(currentProject.id)}` : "未选择项目";
   const sameNameSiblingProjects = useMemo(
     () => getSameNameSiblingProjects(projects, currentProject),
     [projects, currentProject],
   );
-
-  useEffect(() => {
-    setRenameProjectName(currentProject?.name || "");
-  }, [currentProject?.id, currentProject?.name]);
 
   const hydrateProject = useCallback(async (projectId, options = {}) => {
     if (!projectId) return null;
@@ -114,21 +96,30 @@ export default function WorkspaceHeader({ activePage, onNavigate }) {
   }, [loadProjectScript, selectProject, setScript, setSourceText]);
 
   async function handleCreateProject() {
-    const name = newProjectName.trim() || `项目 ${new Date().toLocaleTimeString("zh-CN")}`;
+    const suggestedName = `项目 ${new Date().toLocaleTimeString("zh-CN")}`;
+    const enteredName = window.prompt("新项目名称", suggestedName);
+    if (enteredName === null) return;
+    const name = enteredName.trim() || suggestedName;
     await createProject(name);
-    setNewProjectName("");
     setSourceText("");
     setScript({ title: "", source_text: "", segments: [], characters: [], metadata: {} });
   }
 
-  async function handleRenameProject() {
+  async function handleRenameProject(nextProjectName) {
     if (!currentProject?.id) return;
-    const nextName = renameProjectName.trim();
+    const nextName = String(nextProjectName || "").trim();
     if (!nextName) {
       useUiStore.getState().pushToast({ title: "项目名称不能为空", tone: "warning" });
       return;
     }
     await renameProject(currentProject.id, nextName);
+  }
+
+  async function handlePromptRenameProject() {
+    if (!currentProject?.id) return;
+    const nextName = window.prompt("项目新名称", currentProject.name || "");
+    if (nextName === null) return;
+    await handleRenameProject(nextName);
   }
 
   async function handleImportArchive(event) {
@@ -200,23 +191,38 @@ export default function WorkspaceHeader({ activePage, onNavigate }) {
     useUiStore.getState().pushToast({ title: `已删除 ${sameNameSiblingProjects.length} 个同名副本`, tone: "success" });
   }, [deleteProject, sameNameSiblingProjects]);
 
+  function handleExportProjectArchive() {
+    if (!currentProject?.id) {
+      useUiStore.getState().pushToast({ title: "请先选择项目", tone: "warning" });
+      return;
+    }
+    const anchor = document.createElement("a");
+    anchor.href = `${API_ORIGIN}/api/v1/tts/export/${encodeURIComponent(currentProject.id)}/archive`;
+    anchor.download = `${projectName || "voicelace-project"}.zip`;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    useUiStore.getState().pushToast({ title: "开始导出工程 ZIP", tone: "success" });
+  }
+
+  const recentProjectItems = useMemo(() => {
+    const items = projectOptions.slice(0, 10).map((option) => ({
+      label: option.label,
+      meta: option.meta,
+      title: option.title,
+      disabled: option.value === currentProject?.id,
+      onSelect: () => hydrateProject(option.value),
+    }));
+    return items.length ? items : [{ label: "暂无最近项目", disabled: true }];
+  }, [currentProject?.id, hydrateProject, projectOptions]);
+
   const moreMenuItems = useMemo(() => [
     {
-      label: "删除当前项目",
-      icon: Trash2,
-      danger: true,
-      disabled: !currentProject?.id,
-      onSelect: handleDeleteProject,
+      label: "导入工程 ZIP",
+      icon: Upload,
+      onSelect: () => archiveInputRef.current?.click(),
     },
-    { type: "separator" },
-    {
-      label: sameNameSiblingProjects.length ? `删除同名副本（${sameNameSiblingProjects.length}）` : "删除同名副本",
-      icon: Trash2,
-      danger: true,
-      disabled: !currentProject?.id || sameNameSiblingProjects.length < 1,
-      onSelect: handleDeleteSameNameDuplicates,
-    },
-  ], [currentProject?.id, handleDeleteProject, handleDeleteSameNameDuplicates, sameNameSiblingProjects.length]);
+  ], []);
 
   return (
     <header className="workspaceHeader">
@@ -224,11 +230,45 @@ export default function WorkspaceHeader({ activePage, onNavigate }) {
         <div className="workspaceHeaderIdentity">
           <div className="workspaceTitleRow">
             <h1>{projectName}</h1>
-            <button type="button" className="workspaceIconButton" aria-label="切换项目">
-              <ChevronDown size={15} aria-hidden="true" />
+            <DropdownMenu
+              label="最近项目"
+              ariaLabel="切换项目"
+              icon={ChevronDown}
+              items={recentProjectItems}
+              size="sm"
+              className="workspaceIconButton workspaceProjectMenuTrigger"
+              hideLabel
+              showChevron={false}
+            />
+            <button
+              type="button"
+              className="workspaceIconButton"
+              onClick={handlePromptRenameProject}
+              disabled={!currentProject?.id}
+              aria-label="改名项目"
+              title="改名项目"
+            >
+              <Pencil size={15} aria-hidden="true" />
             </button>
-            <button type="button" className="workspaceIconButton" aria-label="收藏项目">
-              <Star size={15} aria-hidden="true" />
+            <button
+              type="button"
+              className="workspaceIconButton workspaceDangerIconButton"
+              onClick={handleDeleteProject}
+              disabled={!currentProject?.id}
+              aria-label="删除项目"
+              title="删除项目"
+            >
+              <Trash2 size={15} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="workspaceIconButton workspaceDangerIconButton"
+              onClick={handleDeleteSameNameDuplicates}
+              disabled={!currentProject?.id || sameNameSiblingProjects.length < 1}
+              aria-label="删除同名副本"
+              title={sameNameSiblingProjects.length ? `删除同名副本（${sameNameSiblingProjects.length}）` : "没有同名副本"}
+            >
+              <CopyX size={15} aria-hidden="true" />
             </button>
           </div>
           <div className="workspaceMetaRow">
@@ -237,7 +277,8 @@ export default function WorkspaceHeader({ activePage, onNavigate }) {
               {canSaveProject ? "可保存" : "只读状态"}
             </span>
             <span>{pageTitle}</span>
-            <span>{fileName ? `项目文件：${fileName}` : "本地项目"}</span>
+            <span>{currentSourceTag}</span>
+            <span>{fileName ? `项目文件：${fileName}` : currentProjectDetail}</span>
           </div>
         </div>
 
@@ -246,6 +287,22 @@ export default function WorkspaceHeader({ activePage, onNavigate }) {
             <span className="statusBarDot ready" />
             {allReady ? "本地模型运行正常" : `模型就绪 ${readyCount}/4`}
           </span>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={Plus}
+            onClick={handleCreateProject}
+          >
+            新项目
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={FolderOpen}
+            onClick={handleOpenProjectFileClick}
+          >
+            打开项目
+          </Button>
           <Button
             variant="secondary"
             size="sm"
@@ -264,6 +321,15 @@ export default function WorkspaceHeader({ activePage, onNavigate }) {
           >
             另存
           </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={Download}
+            disabled={!currentProject?.id}
+            onClick={handleExportProjectArchive}
+          >
+            导出
+          </Button>
           <button
             type="button"
             className="workspaceIconButton"
@@ -272,35 +338,32 @@ export default function WorkspaceHeader({ activePage, onNavigate }) {
           >
             <Settings size={17} aria-hidden="true" />
           </button>
-          <button type="button" className="workspaceIconButton" aria-label="更多操作">
-            <Menu size={17} aria-hidden="true" />
-          </button>
+          <DropdownMenu
+            label="更多操作"
+            ariaLabel="更多操作"
+            icon={Menu}
+            items={moreMenuItems}
+            size="sm"
+            className="workspaceIconButton"
+            hideLabel
+            showChevron={false}
+          />
         </div>
       </div>
-
-      <div className="workspaceProjectCommands">
-        <ProjectToolbarCard
-          currentProject={currentProject}
-          currentProjectMeta={currentProjectMeta}
-          projectOptions={projectOptions}
-          projectName={newProjectName}
-          renameProjectName={renameProjectName}
-          isParsing={false}
-          archiveInputRef={archiveInputRef}
-          projectFileInputRef={projectFileInputRef}
-          onProjectNameChange={setNewProjectName}
-          onProjectNameKeyDown={(event) => event.key === "Enter" && handleCreateProject()}
-          onRenameProjectNameChange={setRenameProjectName}
-          onRenameProjectNameKeyDown={(event) => event.key === "Enter" && handleRenameProject()}
-          onSelectProject={hydrateProject}
-          onCreateProject={handleCreateProject}
-          onRenameProject={handleRenameProject}
-          onOpenProjectFileClick={handleOpenProjectFileClick}
-          onProjectFileInputChange={handleProjectFileInput}
-          onImportArchive={handleImportArchive}
-          moreMenuItems={moreMenuItems}
-        />
-      </div>
+      <input
+        ref={archiveInputRef}
+        type="file"
+        accept=".zip,application/zip"
+        className="workspaceHiddenFileInput"
+        onChange={handleImportArchive}
+      />
+      <input
+        ref={projectFileInputRef}
+        type="file"
+        accept=".bvtproject.json,.json,application/json"
+        className="workspaceHiddenFileInput"
+        onChange={handleProjectFileInput}
+      />
     </header>
   );
 }

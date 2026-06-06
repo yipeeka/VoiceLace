@@ -932,6 +932,25 @@ pre, code {
   text-align: left;
 }
 
+.dropdownMenuItemCopy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.dropdownMenuItemCopy span,
+.dropdownMenuItemCopy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dropdownMenuItemCopy small {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .dropdownMenuItem:hover:not(:disabled) {
   background: var(--bg-elevated);
 }
@@ -3017,12 +3036,11 @@ select.textInput option {
 }
 
 .workspaceHeader {
-  min-height: 84px;
+  min-height: 66px;
   display: flex;
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
-  gap: 10px;
   padding: 12px 18px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background:
@@ -3093,54 +3111,6 @@ select.textInput option {
   flex-wrap: wrap;
 }
 
-.workspaceProjectCommands {
-  min-width: 0;
-}
-
-.workspaceProjectCommands .projectToolbar {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.88fr) minmax(430px, 1.55fr) minmax(96px, 0.26fr);
-  gap: 8px;
-  margin-bottom: 0;
-}
-
-.workspaceProjectCommands .projectToolbarGroup {
-  gap: 6px;
-  padding: 9px 10px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.035);
-}
-
-.workspaceProjectCommands .projectToolbarGroupTitle {
-  font-size: 10.5px;
-  letter-spacing: 0.06em;
-}
-
-.workspaceProjectCommands .projectToolbarGroupActions {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
-  align-items: end;
-}
-
-.workspaceProjectCommands .projectToolbarCreateRow,
-.workspaceProjectCommands .projectToolbarRenameRow,
-.workspaceProjectCommands .projectToolbarActionsPrimary {
-  min-width: 0;
-}
-
-.workspaceProjectCommands .projectToolbarActionsPrimary {
-  align-items: end;
-  justify-content: flex-end;
-}
-
-.workspaceProjectCommands .projectToolbarNameInput {
-  max-width: none;
-}
-
-.workspaceProjectCommands .projectToolbarMoreButton {
-  min-height: 34px;
-}
-
 .workspaceIconButton {
   width: 32px;
   height: 32px;
@@ -3154,10 +3124,32 @@ select.textInput option {
   transition: background var(--duration-fast) ease, color var(--duration-fast) ease, border-color var(--duration-fast) ease;
 }
 
+.workspaceIconButton.dropdownMenuTrigger {
+  min-width: 32px;
+  padding: 0;
+  justify-content: center;
+}
+
 .workspaceIconButton:hover {
   color: var(--text-primary);
   border-color: rgba(255, 255, 255, 0.18);
   background: rgba(255, 255, 255, 0.075);
+}
+
+.workspaceIconButton:disabled,
+.workspaceIconButton[disabled] {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.workspaceDangerIconButton:not(:disabled):hover {
+  color: color-mix(in srgb, var(--danger) 92%, white 8%);
+  border-color: color-mix(in srgb, var(--danger) 36%, transparent);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.workspaceHiddenFileInput {
+  display: none;
 }
 
 .workspaceModelReady {
@@ -3666,7 +3658,21 @@ select.textInput option {
 
 @media (max-width: 720px) {
   .workspaceHeader {
-    display: none;
+    display: flex;
+    padding: 10px 12px;
+  }
+
+  .workspaceTitleRow h1 {
+    font-size: 18px;
+  }
+
+  .workspaceHeaderActions .btn:not(.workspaceIconButton) {
+    flex: 1 1 auto;
+  }
+
+  .workspaceModelReady {
+    width: 100%;
+    justify-content: flex-start;
   }
 
   .pageContent {
@@ -3892,13 +3898,6 @@ select.textInput option {
 
   .flowCard {
     min-height: 0;
-  }
-}
-
-@media (max-width: 1280px) {
-  .workspaceProjectCommands .projectToolbar,
-  .workspaceProjectCommands .projectToolbarGroupActions {
-    grid-template-columns: 1fr;
   }
 }
 
