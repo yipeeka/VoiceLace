@@ -64,7 +64,7 @@
 .speechUtilityTabContent {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;
 }
 
 .speechUtilityTitle {
@@ -78,13 +78,239 @@
   line-height: 1.55;
 }
 
-.speechUtilityActions {
+.speechTranslationPanel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.speechTranslationHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+}
+
+.speechTranslationHeader > div {
+  min-width: 0;
+}
+
+.speechTranslationStatusPill {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.speechTranslationStatusPill.ready {
+  color: var(--success);
+  border-color: rgba(74, 222, 128, 0.24);
+  background: rgba(74, 222, 128, 0.08);
+}
+
+.speechTranslationStatusPill.loading {
+  color: var(--warning);
+  border-color: rgba(255, 179, 71, 0.28);
+  background: rgba(255, 179, 71, 0.09);
+}
+
+.speechTranslationStatusPill svg {
+  animation: spin 0.9s linear infinite;
+}
+
+.speechTranslationSection {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.026);
+}
+
+.speechTranslationSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.speechTranslationSectionHeader span {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.speechTranslationSectionHeader small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.speechTranslationConfigGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.speechTranslationConfigGrid .formGroup {
+  margin: 0;
+}
+
+.speechTranslationRunSection {
+  grid-template-columns: minmax(0, 0.82fr) minmax(220px, 1fr);
+  align-items: stretch;
+}
+
+.speechTranslationActionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+}
+
+.speechTranslationActionGrid .btn {
+  width: 100%;
+  min-height: 38px;
+  justify-content: center;
+}
+
+.speechTranslationActionGrid .btn:nth-child(3),
+.speechTranslationActionGrid .btn:nth-child(4),
+.speechTranslationActionGrid .btn:nth-child(5) {
+  grid-column: 1 / -1;
+}
+
+.speechTranslationStatusCard {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.018)),
+    rgba(0, 0, 0, 0.12);
+}
+
+.speechTranslationStatusCard.ready {
+  border-color: rgba(74, 222, 128, 0.18);
+}
+
+.speechTranslationStatusCard.error {
+  border-color: rgba(248, 113, 113, 0.28);
+}
+
+.speechTranslationStatusHeader,
+.speechTranslationStatusMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.speechTranslationStatusHeader {
+  justify-content: space-between;
+}
+
+.speechTranslationStatusHeader strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.speechTranslationStatusHeader span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.speechTranslationStatusMeta {
+  flex-wrap: wrap;
+}
+
+.speechTranslationStatusMeta span,
+.speechTranslationTask,
+.speechTranslationNote {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.speechTranslationStatusMeta span {
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.speechTranslationError {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.speechTranslationError svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.speechTranslationResultActions {
   gap: 8px;
   align-items: stretch;
 }
 
-.speechUtilityActions .btn {
-  min-height: 40px;
+.speechTranslationResultActions .btn {
+  min-height: 36px;
+}
+
+@media (max-width: 1320px) {
+  .speechTranslationRunSection {
+    grid-template-columns: 1fr;
+  }
+
+  .speechTranslationActionGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .speechTranslationActionGrid .btn:nth-child(3),
+  .speechTranslationActionGrid .btn:nth-child(4),
+  .speechTranslationActionGrid .btn:nth-child(5) {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .speechTranslationHeader,
+  .speechTranslationSectionHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .speechTranslationConfigGrid,
+  .speechTranslationActionGrid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .speechAsrGrid {
