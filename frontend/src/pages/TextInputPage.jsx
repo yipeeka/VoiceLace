@@ -5,7 +5,6 @@ import EmptyState from "../components/shared/EmptyState";
 import FileDropZone from "../components/shared/FileDropZone";
 import GlassCard from "../components/shared/GlassCard";
 import ProjectHistoryCard from "../components/text/ProjectHistoryCard";
-import ProjectToolbarCard from "../components/text/ProjectToolbarCard";
 import Button from "../components/ui/Button";
 import Select from "../components/ui/Select";
 import { useProjectStore } from "../stores/useProjectStore";
@@ -540,27 +539,6 @@ export default function TextInputPage({ onNavigate }) {
           </div>
         </div>
 
-        <ProjectToolbarCard
-          currentProject={currentProject}
-          currentProjectMeta={currentProjectMeta}
-          projectOptions={projectOptions}
-          projectName={projectName}
-          renameProjectName={renameProjectName}
-          isParsing={isParsing}
-          archiveInputRef={archiveInputRef}
-          projectFileInputRef={projectFileInputRef}
-          onProjectNameChange={setProjectName}
-          onProjectNameKeyDown={(event) => event.key === "Enter" && handleCreateProject()}
-          onRenameProjectNameChange={setRenameProjectName}
-          onRenameProjectNameKeyDown={(event) => event.key === "Enter" && handleRenameProject()}
-          onSelectProject={(projectId) => selectProjectAndHydrate(projectId)}
-          onCreateProject={handleCreateProject}
-          onRenameProject={handleRenameProject}
-          onOpenProjectFileClick={handleOpenProjectFileClick}
-          onProjectFileInputChange={handleOpenProjectFile}
-          onImportArchive={handleImportArchive}
-          moreMenuItems={moreMenuItems}
-        />
         {importWarnings?.length ? (
           <div className="statusBadge warning" style={{ marginBottom: 10, display: "block", textAlign: "left" }}>
             {importWarnings.map((warning, idx) => (
