@@ -284,12 +284,76 @@
   min-height: 36px;
 }
 
+.speechSubtitleConfigGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.speechSubtitleConfigGrid .formGroup {
+  margin: 0;
+}
+
+.speechSubtitleFileGroup {
+  grid-column: 1 / -1;
+}
+
+.speechSubtitleRunSection {
+  grid-template-columns: minmax(0, 0.82fr) minmax(220px, 1fr);
+  align-items: stretch;
+}
+
+.speechSubtitleActionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+}
+
+.speechSubtitleActionGrid .btn {
+  width: 100%;
+  min-height: 38px;
+  justify-content: center;
+}
+
+.speechSubtitleEmptyPreview {
+  min-height: 130px;
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 20px;
+  border: 1px dashed rgba(255, 255, 255, 0.11);
+  border-radius: 8px;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.024);
+  text-align: center;
+  font-size: 13px;
+}
+
+.speechSubtitleEmptyPreview svg {
+  color: var(--accent-secondary);
+}
+
+.speechSubtitleCueList {
+  max-height: 300px;
+  overflow: auto;
+}
+
 @media (max-width: 1320px) {
   .speechTranslationRunSection {
     grid-template-columns: 1fr;
   }
 
+  .speechSubtitleRunSection {
+    grid-template-columns: 1fr;
+  }
+
   .speechTranslationActionGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .speechSubtitleActionGrid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
@@ -308,8 +372,14 @@
   }
 
   .speechTranslationConfigGrid,
-  .speechTranslationActionGrid {
+  .speechTranslationActionGrid,
+  .speechSubtitleConfigGrid,
+  .speechSubtitleActionGrid {
     grid-template-columns: 1fr;
+  }
+
+  .speechSubtitleFileGroup {
+    grid-column: auto;
   }
 }
 
