@@ -449,10 +449,13 @@ pre, code {
   border-top: 1px solid var(--border-default);
   flex-shrink: 0;
   font-size: 12px;
-  overflow: hidden;
+  overflow: visible;
+  position: relative;
+  z-index: 80;
 }
 
 .statusBarItem {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -484,6 +487,55 @@ pre, code {
 .statusBarDot.loading  { background: var(--warning); animation: pulse 1.5s ease-in-out infinite; }
 .statusBarDot.idle     { background: var(--text-muted); }
 .statusBarDot.error    { background: var(--danger); }
+
+.statusBarModelItem {
+  cursor: default;
+}
+
+.statusBarModelPopover {
+  position: absolute;
+  left: 8px;
+  bottom: calc(100% + 8px);
+  width: 280px;
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--bg-surface) 94%, rgba(255, 255, 255, 0.04));
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity var(--duration-fast) ease, transform var(--duration-fast) ease;
+}
+
+.statusBarModelItem:hover .statusBarModelPopover,
+.statusBarModelItem:focus-visible .statusBarModelPopover {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.statusBarModelRow {
+  display: grid;
+  grid-template-columns: auto 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.statusBarModelRow strong {
+  font-size: 11.5px;
+}
+
+.statusBarModelRow small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* ─────────────────────────────────────────────────────────────
    GLASS CARD
@@ -3666,13 +3718,12 @@ select.textInput option {
     font-size: 18px;
   }
 
-  .workspaceHeaderActions .btn:not(.workspaceIconButton) {
-    flex: 1 1 auto;
+  .workspaceDesktopAction {
+    display: none;
   }
 
-  .workspaceModelReady {
-    width: 100%;
-    justify-content: flex-start;
+  .workspaceHeaderActions .btn:not(.workspaceIconButton):not(.workspaceDesktopAction) {
+    flex: 1 1 auto;
   }
 
   .pageContent {

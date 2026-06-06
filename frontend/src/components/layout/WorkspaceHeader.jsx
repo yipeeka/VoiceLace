@@ -5,7 +5,6 @@ import Button from "../ui/Button";
 import DropdownMenu from "../ui/DropdownMenu";
 import { useProjectStore } from "../../stores/useProjectStore";
 import { useScriptStore } from "../../stores/useScriptStore";
-import { useSettingsStore } from "../../stores/useSettingsStore";
 import { useUiStore } from "../../stores/useUiStore";
 import { API_ORIGIN } from "../../utils/api";
 import { openProjectFileWithPicker } from "../../utils/projectFile";
@@ -28,16 +27,6 @@ const PAGE_TITLES = {
   settings: "系统设置",
 };
 
-function getReadyCount(systemStatus) {
-  const checks = [
-    systemStatus?.llm_status ?? (systemStatus?.llm_loaded ? "ready" : "idle"),
-    systemStatus?.asr_loaded ? "ready" : "idle",
-    systemStatus?.tts_status ?? (systemStatus?.tts_loaded ? "ready" : "idle"),
-    systemStatus?.music_status ?? (systemStatus?.music_loaded ? "ready" : "idle"),
-  ];
-  return checks.filter((item) => item === "ready").length;
-}
-
 export default function WorkspaceHeader({ activePage, onNavigate }) {
   const currentProject = useProjectStore((state) => state.currentProject);
   const currentProjectFileName = useProjectStore((state) => state.currentProjectFileName);
@@ -49,7 +38,6 @@ export default function WorkspaceHeader({ activePage, onNavigate }) {
   const deleteProject = useProjectStore((state) => state.deleteProject);
   const importArchive = useProjectStore((state) => state.importArchive);
   const importProjectFile = useProjectStore((state) => state.importProjectFile);
-  const systemStatus = useSettingsStore((state) => state.systemStatus);
   const loadProjectScript = useScriptStore((state) => state.loadProjectScript);
   const setScript = useScriptStore((state) => state.setScript);
   const setSourceText = useScriptStore((state) => state.setSourceText);
@@ -60,8 +48,6 @@ export default function WorkspaceHeader({ activePage, onNavigate }) {
   const projectName = currentProject?.name || "Demo Audiobook";
   const pageTitle = PAGE_TITLES[activePage] || "制作流程";
   const fileName = toProjectFileDisplayName(currentProjectFileName || currentProject?.project_file_name);
-  const readyCount = getReadyCount(systemStatus);
-  const allReady = readyCount >= 3;
   const sortedProjects = useMemo(
     () => [...(projects || [])].sort((a, b) => Date.parse(b.updated_at || "") - Date.parse(a.updated_at || "")),
     [projects],
@@ -216,13 +202,41 @@ export default function WorkspaceHeader({ activePage, onNavigate }) {
     return items.length ? items : [{ label: "暂无最近项目", disabled: true }];
   }, [currentProject?.id, hydrateProject, projectOptions]);
 
-  const moreMenuItems = useMemo(() => [
+  const moreMenuItems = [
+    {
+      label: "新项目",
+      icon: Plus,
+      onSelect: handleCreateProject,
+    },
+    {
+      label: "打开项目",
+      icon: FolderOpen,
+      onSelect: handleOpenProjectFileClick,
+    },
+    {
+      label: "保存",
+      icon: Save,
+      disabled: !canSaveProject,
+      onSelect: () => projectSaveAction?.(),
+    },
+    {
+      label: "另存",
+      icon: FolderOpen,
+      disabled: !canSaveProject,
+      onSelect: () => projectSaveAction?.({ forceSaveAs: true }),
+    },
     {
       label: "导入工程 ZIP",
       icon: Upload,
       onSelect: () => archiveInputRef.current?.click(),
     },
-  ], []);
+    {
+      label: "导出工程 ZIP",
+      icon: Download,
+      disabled: !currentProject?.id,
+      onSelect: handleExportProjectArchive,
+    },
+  ];
 
   return (
     <header className="workspaceHeader">
@@ -283,14 +297,11 @@ export default function WorkspaceHeader({ activePage, onNavigate }) {
         </div>
 
         <div className="workspaceHeaderActions">
-          <span className={`workspaceModelReady ${allReady ? "ready" : ""}`}>
-            <span className="statusBarDot ready" />
-            {allReady ? "本地模型运行正常" : `模型就绪 ${readyCount}/4`}
-          </span>
           <Button
             variant="secondary"
             size="sm"
             icon={Plus}
+            className="workspaceDesktopAction"
             onClick={handleCreateProject}
           >
             新项目
@@ -299,6 +310,7 @@ export default function WorkspaceHeader({ activePage, onNavigate }) {
             variant="secondary"
             size="sm"
             icon={FolderOpen}
+            className="workspaceDesktopAction"
             onClick={handleOpenProjectFileClick}
           >
             打开项目
@@ -307,6 +319,7 @@ export default function WorkspaceHeader({ activePage, onNavigate }) {
             variant="secondary"
             size="sm"
             icon={Save}
+            className="workspaceDesktopAction"
             disabled={!canSaveProject}
             onClick={() => projectSaveAction?.()}
           >
@@ -316,6 +329,7 @@ export default function WorkspaceHeader({ activePage, onNavigate }) {
             variant="ghost"
             size="sm"
             icon={FolderOpen}
+            className="workspaceDesktopAction"
             disabled={!canSaveProject}
             onClick={() => projectSaveAction?.({ forceSaveAs: true })}
           >
@@ -324,7 +338,17 @@ export default function WorkspaceHeader({ activePage, onNavigate }) {
           <Button
             variant="ghost"
             size="sm"
+            icon={Upload}
+            className="workspaceDesktopAction"
+            onClick={() => archiveInputRef.current?.click()}
+          >
+            导入
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             icon={Download}
+            className="workspaceDesktopAction"
             disabled={!currentProject?.id}
             onClick={handleExportProjectArchive}
           >

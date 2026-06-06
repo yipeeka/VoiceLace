@@ -43,7 +43,9 @@ export default function StatusBar() {
   });
 
   const llmStatus = systemStatus?.llm_status ?? (systemStatus?.llm_loaded ? "ready" : "idle");
+  const asrStatus = systemStatus?.asr_status ?? (systemStatus?.asr_loaded ? "ready" : "idle");
   const ttsStatus = systemStatus?.tts_status ?? (systemStatus?.tts_loaded ? "ready" : "idle");
+  const musicStatus = systemStatus?.music_status ?? (systemStatus?.music_loaded ? "ready" : "idle");
   const gpu = systemStatus?.gpu;
   const gpuTotal = Number(gpu?.total_vram_mb || 0);
   const systemUsedVram = Number(gpu?.system_used_vram_mb ?? gpu?.used_vram_mb ?? 0);
@@ -75,18 +77,45 @@ export default function StatusBar() {
     }
   }, [ratio]);
 
-  const llmDot =
-    llmStatus === "ready" ? "ready" :
-    llmStatus === "idle"  ? "idle"  :
-    llmStatus === "error" ? "error" : "loading";
-
-  const ttsDot =
-    ttsStatus === "ready" ? "ready" :
-    ttsStatus === "idle"  ? "idle"  :
-    ttsStatus === "error" ? "error" : "loading";
-
-  const LLM_LABELS = { idle: "空闲", ready: "就绪", loading: "加载中", unloading: "卸载中", error: "错误" };
-  const TTS_LABELS = { ...LLM_LABELS };
+  const MODEL_LABELS = { idle: "空闲", ready: "就绪", loading: "加载中", unloading: "卸载中", error: "错误" };
+  const modelRows = useMemo(() => [
+    {
+      key: "llm",
+      label: "LLM",
+      detail: systemStatus?.llm_backend || systemStatus?.config?.llm_backend || "本地",
+      status: llmStatus,
+    },
+    {
+      key: "asr",
+      label: "ASR",
+      detail: systemStatus?.asr_backend || systemStatus?.config?.asr_backend || "Whisper",
+      status: asrStatus,
+    },
+    {
+      key: "tts",
+      label: "TTS",
+      detail: systemStatus?.tts_backend || "OmniVoice / VoxCPM2",
+      status: ttsStatus,
+    },
+    {
+      key: "music",
+      label: "Music",
+      detail: systemStatus?.music_backend || systemStatus?.config?.music_model_variant || "ACE-Step",
+      status: musicStatus,
+    },
+  ], [asrStatus, llmStatus, musicStatus, systemStatus, ttsStatus]);
+  const modelReadyCount = modelRows.filter((item) => item.status === "ready").length;
+  const modelSummaryTone = modelRows.some((item) => item.status === "error")
+    ? "error"
+    : modelRows.some((item) => item.status === "loading" || item.status === "unloading")
+      ? "loading"
+      : modelReadyCount > 0
+        ? "ready"
+        : "idle";
+  const getModelDot = (status) =>
+    status === "ready" ? "ready" :
+    status === "idle" ? "idle" :
+    status === "error" ? "error" : "loading";
   const parseSummary = useMemo(() => {
     if (!parseStats || typeof parseStats !== "object") {
       return "";
@@ -119,21 +148,27 @@ export default function StatusBar() {
 
   return (
     <div className="statusBar">
-      <div className="statusBarItem">
+      <div
+        className="statusBarItem statusBarModelItem"
+        tabIndex={0}
+        aria-label={`模型就绪 ${modelReadyCount}/4`}
+      >
         <Cpu size={12} style={{ color: "var(--text-muted)" }} />
-        <span>LLM</span>
-        <span className={`statusBarDot ${llmDot}`} />
+        <span>模型</span>
+        <span className={`statusBarDot ${modelSummaryTone}`} />
         <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>
-          {LLM_LABELS[llmStatus] ?? llmStatus}
+          就绪 {modelReadyCount}/4
         </span>
-      </div>
-
-      <div className="statusBarItem">
-        <span>TTS</span>
-        <span className={`statusBarDot ${ttsDot}`} />
-        <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>
-          {TTS_LABELS[ttsStatus] ?? ttsStatus}
-        </span>
+        <div className="statusBarModelPopover" role="tooltip">
+          {modelRows.map((model) => (
+            <div key={model.key} className="statusBarModelRow">
+              <span className={`statusBarDot ${getModelDot(model.status)}`} />
+              <strong>{model.label}</strong>
+              <small>{model.detail}</small>
+              <span>{MODEL_LABELS[model.status] ?? model.status}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       {gpu && (
