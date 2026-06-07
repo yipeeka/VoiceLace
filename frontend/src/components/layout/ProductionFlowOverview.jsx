@@ -13,7 +13,7 @@ import {
   Users,
   Volume2,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import Button from "../ui/Button";
 
@@ -51,6 +51,12 @@ function getProgress(stepId, completed, active) {
   return 0;
 }
 
+function getFlowWindowStartIndex(activePage) {
+  const activeIndex = Math.max(0, FLOW_STEPS.findIndex((step) => step.id === activePage));
+  const maxStartIndex = Math.max(0, FLOW_STEPS.length - 3);
+  return Math.min(Math.max(0, activeIndex - 1), maxStartIndex);
+}
+
 export default function ProductionFlowOverview({
   activePage,
   completedPages = [],
@@ -60,10 +66,7 @@ export default function ProductionFlowOverview({
   onNavigate,
 }) {
   const [cardsCollapsed, setCardsCollapsed] = useState(false);
-  const [startIndex, setStartIndex] = useState(() => {
-    const activeIndex = Math.max(0, FLOW_STEPS.findIndex((step) => step.id === activePage));
-    return Math.min(Math.max(0, activeIndex - 1), Math.max(0, FLOW_STEPS.length - 3));
-  });
+  const [startIndex, setStartIndex] = useState(() => getFlowWindowStartIndex(activePage));
   const visibleSteps = useMemo(
     () => FLOW_STEPS.slice(startIndex, startIndex + 3),
     [startIndex],
@@ -71,6 +74,10 @@ export default function ProductionFlowOverview({
   const activeStep = FLOW_STEPS.find((step) => step.id === activePage) || FLOW_STEPS[0];
   const canGoPrev = startIndex > 0;
   const canGoNext = startIndex < FLOW_STEPS.length - 3;
+
+  useEffect(() => {
+    setStartIndex(getFlowWindowStartIndex(activePage));
+  }, [activePage]);
 
   return (
     <section className={`productionFlowPanel ${cardsCollapsed ? "cardsCollapsed" : ""}`} aria-labelledby="production-flow-title">

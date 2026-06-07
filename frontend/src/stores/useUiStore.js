@@ -4,6 +4,7 @@ export const useUiStore = create((set) => ({
   toasts: [],
   projectSaveAction: null,
   confirmDialog: null,
+  promptDialog: null,
   setProjectSaveAction: (action) => set({ projectSaveAction: action }),
   clearProjectSaveAction: () => set({ projectSaveAction: null }),
   requestConfirm: (options = {}) =>
@@ -23,6 +24,26 @@ export const useUiStore = create((set) => ({
     set((state) => {
       state.confirmDialog?.resolve?.(Boolean(confirmed));
       return { confirmDialog: null };
+    }),
+  requestPrompt: (options = {}) =>
+    new Promise((resolve) => {
+      set({
+        promptDialog: {
+          title: String(options.title || "输入内容"),
+          description: String(options.description || ""),
+          label: String(options.label || ""),
+          defaultValue: String(options.defaultValue || ""),
+          placeholder: String(options.placeholder || ""),
+          confirmLabel: String(options.confirmLabel || "确认"),
+          cancelLabel: String(options.cancelLabel || "取消"),
+          resolve,
+        },
+      });
+    }),
+  resolvePrompt: (value) =>
+    set((state) => {
+      state.promptDialog?.resolve?.(value === null ? null : String(value ?? ""));
+      return { promptDialog: null };
     }),
   pushToast: ({ title, tone = "default", description, duration }) => {
     const id = crypto.randomUUID();

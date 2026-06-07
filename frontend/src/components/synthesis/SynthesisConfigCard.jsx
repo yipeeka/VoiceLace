@@ -585,6 +585,7 @@ export function SynthesisPostprocessCard({
           <div className="postprocessTrackList">
             {tracks.map((track) => (
               (() => {
+                const isActive = selectedTrackId === track.id;
                 const hasPendingOffset = Number.isFinite(Number(track.pending_offset_ms));
                 const effectiveOffsetMs = hasPendingOffset ? Number(track.pending_offset_ms) : track.offset_ms;
                 return (
@@ -597,7 +598,7 @@ export function SynthesisPostprocessCard({
                     delete trackItemRefs.current[track.id];
                   }
                 }}
-                className={`postprocessTrackItem ${selectedTrackId === track.id ? "active" : ""} ${hasPendingOffset ? "pending" : ""}`}
+                className={`postprocessTrackItem ${isActive ? "active" : "collapsed"} ${hasPendingOffset ? "pending" : ""}`}
                 onClick={() => selectTrack(track.id)}
               >
                 <div className="postprocessTrackItemHeader">
@@ -623,88 +624,95 @@ export function SynthesisPostprocessCard({
                     variant="ghost"
                     size="sm"
                     icon={Trash2}
-                    onClick={() => removeTrack(kind, track.id)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      removeTrack(kind, track.id);
+                    }}
                     disabled={isUploadingPostAsset}
                   >
                     删除
                   </Button>
                 </div>
-                <span className="muted postprocessAssetPath" title={track.relpath || "未绑定"}>
-                  {track.relpath || "未绑定"}
-                </span>
-                <Slider
-                  label="增益 (dB)"
-                  value={[track.gain_db]}
-                  onValueChange={([v]) => updateTrack(kind, track.id, { gain_db: v })}
-                  min={-30}
-                  max={12}
-                  step={1}
-                />
-                <Slider
-                  label="偏移 (ms)"
-                  value={[effectiveOffsetMs]}
-                  onValueChange={([v]) => updateTrack(kind, track.id, { offset_ms: v })}
-                  min={-30000}
-                  max={30000}
-                  step={50}
-                  unit="ms"
-                />
-                {hasPendingOffset ? (
-                  <div className="postprocessTrackPendingBar">
-                    <span>时间轴改动待应用：{effectiveOffsetMs}ms</span>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onApplyPendingTrackOffset?.(kind, track.id);
-                      }}
-                    >
-                      应用
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onClearPendingTrackOffset?.(track.id);
-                      }}
-                    >
-                      撤销
-                    </Button>
-                  </div>
-                ) : null}
-                <div className="postprocessTrackFlags">
-                  <label className="controlRow" style={{ cursor: "pointer" }}>
-                    <input
-                      type="checkbox"
-                      checked={track.loop}
-                      onChange={(event) => updateTrack(kind, track.id, { loop: event.target.checked })}
-                      style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
+                {isActive ? (
+                  <>
+                    <span className="muted postprocessAssetPath" title={track.relpath || "未绑定"}>
+                      {track.relpath || "未绑定"}
+                    </span>
+                    <Slider
+                      label="增益 (dB)"
+                      value={[track.gain_db]}
+                      onValueChange={([v]) => updateTrack(kind, track.id, { gain_db: v })}
+                      min={-30}
+                      max={12}
+                      step={1}
                     />
-                    <span>循环</span>
-                  </label>
-                  {isMusic ? (
-                    <label className="controlRow" style={{ cursor: "pointer" }}>
-                      <input
-                        type="checkbox"
-                        checked={track.ducking_enabled}
-                        onChange={(event) => updateTrack(kind, track.id, { ducking_enabled: event.target.checked })}
-                        style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
+                    <Slider
+                      label="偏移 (ms)"
+                      value={[effectiveOffsetMs]}
+                      onValueChange={([v]) => updateTrack(kind, track.id, { offset_ms: v })}
+                      min={-30000}
+                      max={30000}
+                      step={50}
+                      unit="ms"
+                    />
+                    {hasPendingOffset ? (
+                      <div className="postprocessTrackPendingBar">
+                        <span>时间轴改动待应用：{effectiveOffsetMs}ms</span>
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onApplyPendingTrackOffset?.(kind, track.id);
+                          }}
+                        >
+                          应用
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onClearPendingTrackOffset?.(track.id);
+                          }}
+                        >
+                          撤销
+                        </Button>
+                      </div>
+                    ) : null}
+                    <div className="postprocessTrackFlags">
+                      <label className="controlRow" style={{ cursor: "pointer" }}>
+                        <input
+                          type="checkbox"
+                          checked={track.loop}
+                          onChange={(event) => updateTrack(kind, track.id, { loop: event.target.checked })}
+                          style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
+                        />
+                        <span>循环</span>
+                      </label>
+                      {isMusic ? (
+                        <label className="controlRow" style={{ cursor: "pointer" }}>
+                          <input
+                            type="checkbox"
+                            checked={track.ducking_enabled}
+                            onChange={(event) => updateTrack(kind, track.id, { ducking_enabled: event.target.checked })}
+                            style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
+                          />
+                          <span>Ducking</span>
+                        </label>
+                      ) : null}
+                    </div>
+                    {isMusic && track.ducking_enabled ? (
+                      <Slider
+                        label="Ducking 抑制 (dB)"
+                        value={[track.ducking_db]}
+                        onValueChange={([v]) => updateTrack(kind, track.id, { ducking_db: v })}
+                        min={0}
+                        max={24}
+                        step={1}
                       />
-                      <span>Ducking</span>
-                    </label>
-                  ) : null}
-                </div>
-                {isMusic && track.ducking_enabled ? (
-                  <Slider
-                    label="Ducking 抑制 (dB)"
-                    value={[track.ducking_db]}
-                    onValueChange={([v]) => updateTrack(kind, track.id, { ducking_db: v })}
-                    min={0}
-                    max={24}
-                    step={1}
-                  />
+                    ) : null}
+                  </>
                 ) : null}
               </div>
                 );

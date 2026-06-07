@@ -1901,9 +1901,6 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           vocalSeparationModel={vocalSeparationModel}
           warnings={warnings}
         />
-      </div>
-
-      <div className="speechPageColumn">
         <RecognitionPreviewCard
           alignments={remappedAlignments}
           canInsert={canInsert}
@@ -1921,7 +1918,9 @@ export default function SpeechRecognitionPage({ onNavigate }) {
           speakerMap={speakerMap}
           transcript={transcript}
         />
+      </div>
 
+      <div className="speechPageColumn">
         <SpeechUtilityTabs
           canBuildDubbingProject={canBuildDubbingProject}
           canCreateSubtitleProject={canCreateSubtitleProject}

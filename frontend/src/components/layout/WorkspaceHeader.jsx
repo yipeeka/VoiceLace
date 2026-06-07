@@ -83,7 +83,14 @@ export default function WorkspaceHeader({ activePage, onNavigate }) {
 
   async function handleCreateProject() {
     const suggestedName = `项目 ${new Date().toLocaleTimeString("zh-CN")}`;
-    const enteredName = window.prompt("新项目名称", suggestedName);
+    const enteredName = await useUiStore.getState().requestPrompt({
+      title: "新建项目",
+      description: "为新项目设置一个名称。",
+      label: "项目名称",
+      defaultValue: suggestedName,
+      placeholder: suggestedName,
+      confirmLabel: "新建",
+    });
     if (enteredName === null) return;
     const name = enteredName.trim() || suggestedName;
     await createProject(name);
@@ -103,7 +110,14 @@ export default function WorkspaceHeader({ activePage, onNavigate }) {
 
   async function handlePromptRenameProject() {
     if (!currentProject?.id) return;
-    const nextName = window.prompt("项目新名称", currentProject.name || "");
+    const nextName = await useUiStore.getState().requestPrompt({
+      title: "改名项目",
+      description: "更新当前项目名称，保存后会同步到项目列表。",
+      label: "项目名称",
+      defaultValue: currentProject.name || "",
+      placeholder: "输入项目名称",
+      confirmLabel: "保存名称",
+    });
     if (nextName === null) return;
     await handleRenameProject(nextName);
   }

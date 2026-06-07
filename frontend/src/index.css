@@ -2757,6 +2757,7 @@ select.textInput option {
   max-height: calc(100vh - var(--statusbar-height) - 96px);
   overflow-y: auto;
   padding-right: 2px;
+  padding-bottom: min(40vh, 360px);
   scrollbar-width: thin;
 }
 
@@ -3169,6 +3170,27 @@ select.textInput option {
   border: 1px solid var(--border-subtle);
   border-radius: 7px;
   background: color-mix(in srgb, var(--bg-elevated) 72%, black);
+}
+
+.synthesisCommandRail .postprocessTrackItem.collapsed {
+  gap: 0;
+  padding: 7px 8px;
+}
+
+.synthesisCommandRail .postprocessTrackItem.collapsed .postprocessTrackItemHeader {
+  min-height: 30px;
+}
+
+.synthesisCommandRail .postprocessTrackItem.collapsed .postprocessTrackItemHeader .input {
+  min-height: 30px;
+  background: transparent;
+  border-color: transparent;
+  padding-inline: 2px;
+}
+
+.synthesisCommandRail .postprocessTrackItem.collapsed:hover {
+  border-color: color-mix(in srgb, var(--accent-secondary) 34%, var(--border-default));
+  background: color-mix(in srgb, var(--bg-elevated) 82%, black);
 }
 
 .synthesisCommandRail .postprocessTrackItem.active {

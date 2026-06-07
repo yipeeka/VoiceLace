@@ -7,6 +7,7 @@ import ProductionFlowOverview from "./components/layout/ProductionFlowOverview";
 import StatusBar from "./components/layout/StatusBar";
 import WorkspaceHeader from "./components/layout/WorkspaceHeader";
 import GlobalConfirmDialog from "./components/shared/GlobalConfirmDialog";
+import GlobalPromptDialog from "./components/shared/GlobalPromptDialog";
 import ToastLayer from "./components/shared/ToastLayer";
 import { TooltipProvider } from "./components/ui/Tooltip";
 import { useProjectStore } from "./stores/useProjectStore";
@@ -243,6 +244,7 @@ export default function App() {
       </div>
 
       <ToastLayer />
+      <GlobalPromptDialog />
       <GlobalConfirmDialog />
     </TooltipProvider>
   );
