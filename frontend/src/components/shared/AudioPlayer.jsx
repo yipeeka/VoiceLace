@@ -143,6 +143,7 @@ export default function AudioPlayer({
   const [duration, setDuration] = useState(0);
   const [isReady, setIsReady] = useState(false);
   const [resolvedPeaks, setResolvedPeaks] = useState(peaks || null);
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
 
   const applySeek = useCallback((seconds) => {
     const audio = audioRef.current;
@@ -336,7 +337,7 @@ export default function AudioPlayer({
   useEffect(() => {
     let canceled = false;
     async function buildDecodedPeaks() {
-      if (!audioUrl || resolvedPeaks) {
+      if (!audioUrl || resolvedPeaks || peaksUrl || peaks) {
         return;
       }
       if (decodedPeaksCache.has(audioUrl)) {
@@ -362,7 +363,38 @@ export default function AudioPlayer({
     return () => {
       canceled = true;
     };
-  }, [audioUrl, audioBlob, resolvedPeaks]);
+  }, [audioUrl, audioBlob, resolvedPeaks, peaksUrl, peaks]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return undefined;
+
+    function updateSize(rect = null) {
+      const nextWidth = Math.max(1, Math.round(Number(rect?.width || 320)));
+      const nextHeight = Math.max(1, Math.round(Number(rect?.height || height)));
+      setCanvasSize((current) => (
+        current.width === nextWidth && current.height === nextHeight
+          ? current
+          : { width: nextWidth, height: nextHeight }
+      ));
+    }
+
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver((entries) => {
+        updateSize(entries[0]?.contentRect || null);
+      });
+      observer.observe(canvas);
+      return () => observer.disconnect();
+    }
+
+    updateSize();
+    function handleResize() {
+      const rect = canvas.getBoundingClientRect();
+      updateSize(rect);
+    }
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [height]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -370,8 +402,8 @@ export default function AudioPlayer({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const cssWidth = canvas.clientWidth || 320;
-    const cssHeight = canvas.clientHeight || height;
+    const cssWidth = canvasSize.width || 320;
+    const cssHeight = canvasSize.height || height;
     const ratio = window.devicePixelRatio || 1;
     canvas.width = Math.max(1, Math.floor(cssWidth * ratio));
     canvas.height = Math.max(1, Math.floor(cssHeight * ratio));
@@ -440,7 +472,7 @@ export default function AudioPlayer({
       x += step;
     }
     drawPlayhead();
-  }, [resolvedPeaks, currentTime, duration, height, compact]);
+  }, [resolvedPeaks, currentTime, duration, height, compact, canvasSize.width, canvasSize.height]);
 
   const togglePlay = async () => {
     const audio = audioRef.current;

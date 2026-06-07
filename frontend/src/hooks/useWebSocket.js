@@ -9,6 +9,7 @@ export function useWebSocket(url, options = {}) {
     onMessage,
     onError,
     onClose,
+    trackLastMessage = true,
   } = options;
 
   const socketRef = useRef(null);
@@ -60,7 +61,9 @@ export function useWebSocket(url, options = {}) {
       };
 
       socket.onmessage = (event) => {
-        setLastMessage(event.data);
+        if (trackLastMessage) {
+          setLastMessage(event.data);
+        }
         if (onMessageRef.current) {
           onMessageRef.current(event);
         }

@@ -54,6 +54,7 @@ export default function SynthesisFullAudioCard({
   });
   const [waveformScrollRequest, setWaveformScrollRequest] = useState({ left: 0, signal: 0 });
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
+  const [timelineReady, setTimelineReady] = useState(false);
 
   useEffect(() => {
     if (!fullAudioUrl) {
@@ -73,6 +74,31 @@ export default function SynthesisFullAudioCard({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [fullAudioUrl, isPlaying]);
+
+  useEffect(() => {
+    if (!fullAudioUrl || timelineCollapsed) {
+      setTimelineReady(false);
+      return undefined;
+    }
+    let canceled = false;
+    const showTimeline = () => {
+      if (!canceled) {
+        setTimelineReady(true);
+      }
+    };
+    if (typeof window.requestIdleCallback === "function") {
+      const handle = window.requestIdleCallback(showTimeline, { timeout: 700 });
+      return () => {
+        canceled = true;
+        window.cancelIdleCallback?.(handle);
+      };
+    }
+    const handle = window.setTimeout(showTimeline, 120);
+    return () => {
+      canceled = true;
+      window.clearTimeout(handle);
+    };
+  }, [fullAudioUrl, timelineCollapsed]);
 
   if (!fullAudioUrl) {
     return null;
@@ -153,6 +179,10 @@ export default function SynthesisFullAudioCard({
             <span>时间轨已收起</span>
             <strong>点击展开</strong>
           </button>
+        ) : !timelineReady ? (
+          <div className="synthesisTimelineDeferredPlaceholder" aria-busy="true">
+            <span>时间轨准备中</span>
+          </div>
         ) : (
           <div
             className="synthesisTimelineCollapseSurface"

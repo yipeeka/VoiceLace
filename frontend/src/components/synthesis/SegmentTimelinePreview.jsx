@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 const SPEAKER_HUES = [202, 124, 277, 38, 160, 326, 52, 188, 250, 18];
 const SEGMENT_SNAP_MS = 50;
 const MIN_SEGMENT_DURATION_MS = 300;
+const waveImageCache = new Map();
 
 function formatTickTime(ms) {
   const totalSeconds = Math.max(0, Math.floor(Number(ms || 0) / 1000));
@@ -22,6 +23,26 @@ function buildWaveBars(seed, count = 32) {
     const jitter = ((seed + index * 11) % 9) / 14;
     return Math.max(18, Math.min(92, Math.round((wave * 0.64 + jitter) * 100)));
   });
+}
+
+function buildWaveImage(seed, count = 32, hue = 202) {
+  const cacheKey = `${seed}:${count}:${hue}`;
+  if (waveImageCache.has(cacheKey)) {
+    return waveImageCache.get(cacheKey);
+  }
+  const bars = buildWaveBars(seed, count);
+  const step = 4;
+  const barWidth = 2;
+  const width = Math.max(step, bars.length * step);
+  const rects = bars.map((height, index) => {
+    const h = Math.max(6, Math.min(96, Number(height) || 18));
+    const y = (100 - h) / 2;
+    return `<rect x="${index * step}" y="${y}" width="${barWidth}" height="${h}" rx="1" />`;
+  }).join("");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} 100" preserveAspectRatio="none"><g fill="hsl(${hue} 74% 74%)">${rects}</g></svg>`;
+  const value = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+  waveImageCache.set(cacheKey, value);
+  return value;
 }
 
 function basename(relpath) {
@@ -73,6 +94,7 @@ export default function SegmentTimelinePreview({
 }) {
   const scrollerRef = useRef(null);
   const isInternalScrollRef = useRef(false);
+  const lastScrollLeftRef = useRef(0);
   const dragCleanupRef = useRef(null);
   const [draggingSegmentTiming, setDraggingSegmentTiming] = useState(null);
 
@@ -132,7 +154,10 @@ export default function SegmentTimelinePreview({
   const pxPerMs = canvasWidth / timelineEndMs;
   const playheadLeft = Math.max(0, Math.min(canvasWidth, Number(currentTimeMs || 0) * pxPerMs));
   const tickStepMs = timelineEndMs <= 90_000 ? 10_000 : timelineEndMs <= 240_000 ? 30_000 : 60_000;
-  const ticks = Array.from({ length: Math.floor(timelineEndMs / tickStepMs) + 1 }, (_, index) => index * tickStepMs);
+  const ticks = useMemo(
+    () => Array.from({ length: Math.floor(timelineEndMs / tickStepMs) + 1 }, (_, index) => index * tickStepMs),
+    [tickStepMs, timelineEndMs],
+  );
   const chapterMarkers = useMemo(() => {
     const markers = Array.isArray(config?.chapter_markers) ? config.chapter_markers : [];
     return markers.map((marker, index) => {
@@ -151,19 +176,23 @@ export default function SegmentTimelinePreview({
       };
     }).filter(Boolean);
   }, [config?.chapter_markers, segmentTimings, segments]);
-  const audioTrackRows = [
+  const audioTrackRows = useMemo(() => [
     { kind: "music", label: "音乐", tracks: postprocessTracks.music },
     { kind: "effect", label: "音效", tracks: postprocessTracks.effect },
-  ];
-  const hasAudioTracks = audioTrackRows.some((row) => row.tracks.length > 0);
+  ], [postprocessTracks.effect, postprocessTracks.music]);
+  const hasAudioTracks = useMemo(
+    () => audioTrackRows.some((row) => row.tracks.length > 0),
+    [audioTrackRows],
+  );
   const canvasHeight = hasAudioTracks ? 196 : 112;
 
   useEffect(() => {
     const node = scrollerRef.current;
     if (!node) return;
     const nextLeft = Math.max(0, Number(waveformSync?.scrollLeft || 0));
-    if (Math.abs(node.scrollLeft - nextLeft) <= 1) return;
+    if (Math.abs(lastScrollLeftRef.current - nextLeft) <= 1) return;
     isInternalScrollRef.current = true;
+    lastScrollLeftRef.current = nextLeft;
     node.scrollLeft = nextLeft;
     requestAnimationFrame(() => {
       isInternalScrollRef.current = false;
@@ -172,7 +201,9 @@ export default function SegmentTimelinePreview({
 
   function handleScroll(event) {
     if (isInternalScrollRef.current) return;
-    onScrollLeftChange?.(event.currentTarget.scrollLeft);
+    const nextLeft = Number(event.currentTarget.scrollLeft || 0);
+    lastScrollLeftRef.current = nextLeft;
+    onScrollLeftChange?.(nextLeft);
   }
 
   function restoreScrollerLeft(left) {
@@ -180,9 +211,11 @@ export default function SegmentTimelinePreview({
     if (!node) return;
     const targetLeft = Math.max(0, Number(left || 0));
     isInternalScrollRef.current = true;
+    lastScrollLeftRef.current = targetLeft;
     node.scrollLeft = targetLeft;
     requestAnimationFrame(() => {
       if (scrollerRef.current) {
+        lastScrollLeftRef.current = targetLeft;
         scrollerRef.current.scrollLeft = targetLeft;
       }
       isInternalScrollRef.current = false;
@@ -346,8 +379,8 @@ export default function SegmentTimelinePreview({
               const left = hasTiming ? Math.max(0, start * pxPerMs) : 0;
               const width = hasTiming ? Math.max(18, (end - start) * pxPerMs) : Math.max(36, canvasWidth / Math.max(segments.length, 1));
               const hue = speakerHueMap[String(segment.speaker || "narrator")] || SPEAKER_HUES[index % SPEAKER_HUES.length];
-              const bars = buildWaveBars(hashString(`${segment.segment_id}:${segment.text}:${segment.speaker}`));
               const label = `${segment.speaker || "narrator"}${segment.type === "dialogue" ? "" : ` (${segment.type || ""})`}`;
+              const waveImage = buildWaveImage(hashString(`${segment.segment_id}:${segment.text}:${segment.speaker}`), 32, hue);
               return (
                 <span
                   role="button"
@@ -376,11 +409,7 @@ export default function SegmentTimelinePreview({
                     onPointerDown={(event) => handleSegmentPointerDown(event, segment, start, end, "start")}
                   />
                   <span className="segmentTimelinePreviewLabel">{label}</span>
-                  <span className="segmentTimelinePreviewWave" aria-hidden="true">
-                    {bars.map((height, barIndex) => (
-                      <i key={barIndex} style={{ height: `${height}%` }} />
-                    ))}
-                  </span>
+                  <span className="segmentTimelinePreviewWave" style={{ backgroundImage: waveImage }} aria-hidden="true" />
                   <i
                     className="segmentTimelinePreviewResizeHandle right"
                     aria-hidden="true"
@@ -409,7 +438,7 @@ export default function SegmentTimelinePreview({
                       : Math.max(4500, Math.min(18_000, timelineEndMs * 0.24));
                     const width = Math.max(52, Math.min(canvasWidth - left, fallbackDurationMs * pxPerMs));
                     const hue = row.kind === "music" ? 38 : 188;
-                    const bars = buildWaveBars(hashString(`${track.id}:${track.relpath}:${track.label}`), 28);
+                    const waveImage = buildWaveImage(hashString(`${track.id}:${track.relpath}:${track.label}`), 28, hue);
                     return (
                       <span
                         key={track.id || `${row.kind}-${index}`}
@@ -428,11 +457,7 @@ export default function SegmentTimelinePreview({
                         }}
                       >
                         <strong>{track.label}</strong>
-                        <span className="segmentTimelineAudioWave" aria-hidden="true">
-                          {bars.map((height, barIndex) => (
-                            <i key={barIndex} style={{ height: `${height}%` }} />
-                          ))}
-                        </span>
+                        <span className="segmentTimelineAudioWave" style={{ backgroundImage: waveImage }} aria-hidden="true" />
                       </span>
                     );
                   }) : <span className="segmentTimelineAudioEmpty">未添加</span>}

@@ -108,6 +108,7 @@ export default function SynthesisTimelineCard({
 }) {
   const timelineRef = useRef(null);
   const selectionAnchorSegmentIdRef = useRef(null);
+  const lastAutoScrollSegmentIdRef = useRef("");
   const [showSelectedOnly, setShowSelectedOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [showFilterPanel, setShowFilterPanel] = useState(true);
@@ -147,6 +148,14 @@ export default function SynthesisTimelineCard({
     if (!currentSegmentId || !timelineRef.current) {
       return;
     }
+    if (!lastAutoScrollSegmentIdRef.current) {
+      lastAutoScrollSegmentIdRef.current = currentSegmentId;
+      return;
+    }
+    if (lastAutoScrollSegmentIdRef.current === currentSegmentId) {
+      return;
+    }
+    lastAutoScrollSegmentIdRef.current = currentSegmentId;
     const container = timelineRef.current;
     const escapedId = typeof CSS !== "undefined" && typeof CSS.escape === "function"
       ? CSS.escape(currentSegmentId)
@@ -155,11 +164,8 @@ export default function SynthesisTimelineCard({
     if (!row) {
       return;
     }
-    const containerRect = container.getBoundingClientRect();
-    const rowRect = row.getBoundingClientRect();
-    const targetTop = rowRect.top - containerRect.top + container.scrollTop;
-    container.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
-  }, [currentSegmentId, displaySegments]);
+    row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [currentSegmentId]);
 
   useEffect(() => {
     const visibleIds = new Set((displaySegments || []).map((segment) => segment.segment_id).filter(Boolean));

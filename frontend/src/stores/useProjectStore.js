@@ -17,6 +17,8 @@ import {
 import { useUiStore } from "./useUiStore.js";
 
 let loadProjectsPromise = null;
+const loadProjectHistoryPromises = new Map();
+const loadProjectParseQcPromises = new Map();
 
 export const useProjectStore = create((set, get) => ({
   currentProject: null,
@@ -258,14 +260,40 @@ export const useProjectStore = create((set, get) => ({
     return snapshots;
   },
   loadProjectHistory: async (projectId, limit = 200) => {
-    const history = await api.get(`/projects/${projectId}/history?limit=${limit}`);
-    set({ projectHistory: history });
-    return history;
+    const key = `${projectId || ""}:${limit}`;
+    if (!projectId) {
+      throw new Error("缺少项目 ID");
+    }
+    if (loadProjectHistoryPromises.has(key)) {
+      return loadProjectHistoryPromises.get(key);
+    }
+    const promise = (async () => {
+      const history = await api.get(`/projects/${projectId}/history?limit=${limit}`);
+      set({ projectHistory: history });
+      return history;
+    })().finally(() => {
+      loadProjectHistoryPromises.delete(key);
+    });
+    loadProjectHistoryPromises.set(key, promise);
+    return promise;
   },
   loadProjectParseQc: async (projectId) => {
-    const report = await api.get(`/projects/${projectId}/parse-qc`);
-    set({ parseQcReport: report });
-    return report;
+    const key = String(projectId || "");
+    if (!key) {
+      throw new Error("缺少项目 ID");
+    }
+    if (loadProjectParseQcPromises.has(key)) {
+      return loadProjectParseQcPromises.get(key);
+    }
+    const promise = (async () => {
+      const report = await api.get(`/projects/${key}/parse-qc`);
+      set({ parseQcReport: report });
+      return report;
+    })().finally(() => {
+      loadProjectParseQcPromises.delete(key);
+    });
+    loadProjectParseQcPromises.set(key, promise);
+    return promise;
   },
   restoreProjectSnapshot: async (projectId, snapshotId) => {
     const result = await api.post(`/projects/${projectId}/snapshots/${snapshotId}/restore`, {});

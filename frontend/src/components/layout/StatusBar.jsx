@@ -7,7 +7,8 @@ import { useSettingsStore } from "../../stores/useSettingsStore";
 import { useScriptStore } from "../../stores/useScriptStore";
 
 export default function StatusBar() {
-  const { systemStatus, refreshSystemStatus } = useSettingsStore();
+  const systemStatus = useSettingsStore((state) => state.systemStatus);
+  const refreshSystemStatus = useSettingsStore((state) => state.refreshSystemStatus);
   const parseStats = useScriptStore((state) => state.parseStats);
   const wsUrl = `${getWsBaseUrl()}/ws/system/gpu-realtime`;
 
@@ -18,6 +19,7 @@ export default function StatusBar() {
   const { status: wsStatus } = useWebSocket(wsUrl, {
     maxRetries: 6,
     baseDelay: 1000,
+    trackLastMessage: false,
     onMessage: (event) => {
       try {
         const msg = JSON.parse(event.data);

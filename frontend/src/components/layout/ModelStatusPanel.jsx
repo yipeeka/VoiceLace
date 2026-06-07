@@ -27,15 +27,13 @@ function statusTone(status) {
 }
 
 export default function ModelStatusPanel() {
-  const {
-    systemStatus,
-    refreshSystemStatus,
-    manualUnloadLLM,
-    manualUnloadTTS,
-    manualUnloadASR,
-    manualUnloadMusic,
-    manualUnloadAll,
-  } = useSettingsStore();
+  const systemStatus = useSettingsStore((state) => state.systemStatus);
+  const refreshSystemStatus = useSettingsStore((state) => state.refreshSystemStatus);
+  const manualUnloadLLM = useSettingsStore((state) => state.manualUnloadLLM);
+  const manualUnloadTTS = useSettingsStore((state) => state.manualUnloadTTS);
+  const manualUnloadASR = useSettingsStore((state) => state.manualUnloadASR);
+  const manualUnloadMusic = useSettingsStore((state) => state.manualUnloadMusic);
+  const manualUnloadAll = useSettingsStore((state) => state.manualUnloadAll);
   const [busyKey, setBusyKey] = useState("");
   const [collapsed, setCollapsed] = useState(true);
 

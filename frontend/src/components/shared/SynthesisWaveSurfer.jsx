@@ -75,6 +75,7 @@ export default function SynthesisWaveSurfer({
   const readyRef = useRef(false);
   const onDurationChangeRef = useRef(onDurationChange);
   const onWaveformSyncChangeRef = useRef(onWaveformSyncChange);
+  const syncFrameRef = useRef(0);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -84,6 +85,7 @@ export default function SynthesisWaveSurfer({
   const [waveformPayload, setWaveformPayload] = useState({ data: [], duration_ms: 0, level: 1024 });
   const [waveformError, setWaveformError] = useState("");
   const [forcePlainLoad, setForcePlainLoad] = useState(false);
+  const [canInitializeWaveform, setCanInitializeWaveform] = useState(false);
 
   useEffect(() => {
     onDurationChangeRef.current = onDurationChange;
@@ -118,6 +120,14 @@ export default function SynthesisWaveSurfer({
     });
   }
 
+  function scheduleWaveformSync(ws) {
+    if (!ws || syncFrameRef.current) return;
+    syncFrameRef.current = window.requestAnimationFrame(() => {
+      syncFrameRef.current = 0;
+      emitWaveformSync(ws);
+    });
+  }
+
   useEffect(() => {
     if (typeof onCurrentTimeChange === "function") {
       onCurrentTimeChange(currentTime);
@@ -135,6 +145,32 @@ export default function SynthesisWaveSurfer({
     regionWarningLoggedRef.current = false;
     readyRef.current = false;
   }, [projectId, audioUrl]);
+
+  useEffect(() => {
+    if (!audioUrl) {
+      setCanInitializeWaveform(false);
+      return undefined;
+    }
+    setCanInitializeWaveform(false);
+    let canceled = false;
+    const initialize = () => {
+      if (!canceled) {
+        setCanInitializeWaveform(true);
+      }
+    };
+    if (typeof window.requestIdleCallback === "function") {
+      const handle = window.requestIdleCallback(initialize, { timeout: 450 });
+      return () => {
+        canceled = true;
+        window.cancelIdleCallback?.(handle);
+      };
+    }
+    const handle = window.setTimeout(initialize, 100);
+    return () => {
+      canceled = true;
+      window.clearTimeout(handle);
+    };
+  }, [audioUrl, audioVariant]);
 
   useEffect(() => {
     let canceled = false;
@@ -228,11 +264,12 @@ export default function SynthesisWaveSurfer({
   }, [waveformPayload.duration_ms]);
 
   useEffect(() => {
-    if (!containerRef.current || !audioUrl) return undefined;
+    if (!containerRef.current || !audioUrl || !canInitializeWaveform) return undefined;
 
     let ws = null;
     let regionsPlugin = null;
     let disposed = false;
+    let regionRenderHandle = null;
 
     try {
       regionsPlugin = RegionsPlugin.create();
@@ -292,10 +329,11 @@ export default function SynthesisWaveSurfer({
       setIsReady(true);
       readyRef.current = true;
       setWaveformError("");
-      requestAnimationFrame(() => emitWaveformSync(ws));
+      scheduleWaveformSync(ws);
 
       // Regions are decorative only. If region rendering fails, do not block playback.
-      regionConfig.forEach((config) => {
+      const renderRegions = () => regionConfig.forEach((config) => {
+        if (disposed) return;
         try {
           const region = regionsPlugin.addRegion(config);
           const contentEl = region.element?.querySelector?.(".wavesurfer-region-content");
@@ -316,6 +354,11 @@ export default function SynthesisWaveSurfer({
           }
         }
       });
+      if (typeof window.requestIdleCallback === "function") {
+        regionRenderHandle = window.requestIdleCallback(renderRegions, { timeout: 800 });
+      } else {
+        regionRenderHandle = window.setTimeout(renderRegions, 0);
+      }
     });
 
     ws.on("audioprocess", () => setCurrentTime(ws.getCurrentTime()));
@@ -323,10 +366,10 @@ export default function SynthesisWaveSurfer({
     ws.on("play", () => setIsPlaying(true));
     ws.on("pause", () => setIsPlaying(false));
     ws.on("finish", () => setIsPlaying(false));
-    ws.on("scroll", () => emitWaveformSync(ws));
-    ws.on("zoom", () => requestAnimationFrame(() => emitWaveformSync(ws)));
-    ws.on("redrawcomplete", () => emitWaveformSync(ws));
-    ws.on("resize", () => emitWaveformSync(ws));
+    ws.on("scroll", () => scheduleWaveformSync(ws));
+    ws.on("zoom", () => scheduleWaveformSync(ws));
+    ws.on("redrawcomplete", () => scheduleWaveformSync(ws));
+    ws.on("resize", () => scheduleWaveformSync(ws));
     ws.on("error", (err) => {
       if (disposed) return;
       const message = String(err?.message || err || "").toLowerCase();
@@ -351,6 +394,17 @@ export default function SynthesisWaveSurfer({
 
     return () => {
       disposed = true;
+      if (regionRenderHandle !== null) {
+        if (typeof window.cancelIdleCallback === "function" && typeof regionRenderHandle === "number") {
+          window.cancelIdleCallback(regionRenderHandle);
+        } else {
+          window.clearTimeout(regionRenderHandle);
+        }
+      }
+      if (syncFrameRef.current) {
+        window.cancelAnimationFrame(syncFrameRef.current);
+        syncFrameRef.current = 0;
+      }
       try {
         const destroyed = ws?.destroy();
         if (destroyed && typeof destroyed.catch === "function") {
@@ -366,13 +420,13 @@ export default function SynthesisWaveSurfer({
       setCurrentTime(0);
       setDuration(0);
     };
-  }, [audioUrl, regionConfig, height, precomputedChannelData, precomputedDurationSec, forcePlainLoad]);
+  }, [audioUrl, regionConfig, height, precomputedChannelData, precomputedDurationSec, forcePlainLoad, canInitializeWaveform]);
 
   useEffect(() => {
     if (!wavesurferRef.current || !isReady) return;
     try {
       wavesurferRef.current.zoom(mapZoomToPixelsPerSecond(zoom));
-      requestAnimationFrame(() => emitWaveformSync(wavesurferRef.current));
+      scheduleWaveformSync(wavesurferRef.current);
     } catch {
       setWaveformError("缩放失败，已保持当前波形视图。");
     }
@@ -386,7 +440,7 @@ export default function SynthesisWaveSurfer({
       if (Math.abs(currentScrollLeft - nextScrollLeft) > 1) {
         wavesurferRef.current.setScroll(nextScrollLeft);
       }
-      requestAnimationFrame(() => emitWaveformSync(wavesurferRef.current));
+      scheduleWaveformSync(wavesurferRef.current);
     } catch {
       setWaveformError("同步滚动失败，已保持当前波形视图。");
     }
@@ -514,8 +568,11 @@ export default function SynthesisWaveSurfer({
       </div>
 
       <div className="synthesisWaveformUnifiedViewport">
-        <div className="synthesisWaveformViewport">
+        <div className="synthesisWaveformViewport" style={{ minHeight: height + 24 }}>
           <div ref={containerRef} style={{ width: "100%" }} />
+          {!canInitializeWaveform ? (
+            <div className="synthesisWaveformDeferredPlaceholder" style={{ minHeight: height + 24 }} aria-hidden="true" />
+          ) : null}
         </div>
         {children ? (
           <div className="synthesisWaveformArrangementSlot">

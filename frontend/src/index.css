@@ -1452,6 +1452,8 @@ select.textInput option {
   transition: border-color var(--duration-fast) ease,
               background var(--duration-fast) ease,
               box-shadow var(--duration-fast) ease;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 58px;
 }
 
 .synthSegmentRow.done { border-left: 2px solid var(--success); }
@@ -1697,9 +1699,18 @@ select.textInput option {
 }
 
 .synthesisWaveformViewport {
+  position: relative;
   width: 100%;
   min-width: 0;
   overflow: hidden;
+}
+
+.synthesisWaveformDeferredPlaceholder {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(255,255,255,0.05), rgba(255,255,255,0.012) 45%, rgba(255,255,255,0.05)),
+    color-mix(in srgb, var(--bg-elevated) 88%, black);
 }
 
 .synthesisWaveformArrangementSlot {
@@ -1712,6 +1723,22 @@ select.textInput option {
 .synthesisTimelineCollapseSurface {
   min-width: 0;
   cursor: zoom-out;
+  contain: layout paint;
+}
+
+.synthesisTimelineDeferredPlaceholder {
+  display: flex;
+  min-height: 112px;
+  align-items: center;
+  justify-content: center;
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.12)),
+    color-mix(in srgb, var(--bg-elevated) 92%, #030609);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .synthesisTimelineCollapseSurface .segmentTimelinePreviewBlock,
@@ -1758,6 +1785,7 @@ select.textInput option {
   background:
     linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.12)),
     color-mix(in srgb, var(--bg-elevated) 92%, #030609);
+  contain: layout paint;
 }
 
 .segmentTimelinePreviewScroller {
@@ -1954,21 +1982,14 @@ select.textInput option {
   right: 8px;
   bottom: 9px;
   top: 32px;
-  display: flex;
-  align-items: center;
-  gap: 1.5px;
+  display: block;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
   color: color-mix(in srgb, hsl(var(--segment-hue), 74%, 68%) 82%, white);
+  filter: drop-shadow(0 0 5px color-mix(in srgb, currentColor 24%, transparent));
   opacity: 0.82;
   pointer-events: none;
-}
-
-.segmentTimelinePreviewWave i {
-  flex: 1 1 0;
-  min-width: 1px;
-  max-width: 4px;
-  border-radius: var(--radius-full);
-  background: currentColor;
-  box-shadow: 0 0 7px color-mix(in srgb, currentColor 32%, transparent);
 }
 
 .segmentTimelinePreviewPlayhead {
@@ -2117,19 +2138,12 @@ select.textInput option {
   right: 7px;
   bottom: 4px;
   top: 14px;
-  display: flex;
-  align-items: center;
-  gap: 1.5px;
+  display: block;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
   color: color-mix(in srgb, hsl(var(--segment-hue), 72%, 68%) 82%, white);
   opacity: 0.78;
-}
-
-.segmentTimelineAudioWave i {
-  flex: 1 1 0;
-  min-width: 1px;
-  max-width: 3px;
-  border-radius: var(--radius-full);
-  background: currentColor;
 }
 
 .segmentTimelineAudioEmpty {

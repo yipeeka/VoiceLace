@@ -4,6 +4,10 @@ import { api } from "../utils/api";
 import { formatError, getErrorMessage } from "../utils/errors";
 import { useUiStore } from "./useUiStore";
 
+const PRESET_CACHE_TTL_MS = 30_000;
+let loadPresetsPromise = null;
+let presetsLoadedAt = 0;
+
 function reorderByIds(items, orderedIds) {
   const itemMap = new Map(items.map((item) => [item.id, item]));
   const seen = new Set();
@@ -26,7 +30,7 @@ function reorderByIds(items, orderedIds) {
   return ordered;
 }
 
-export const useVoiceStore = create((set) => ({
+export const useVoiceStore = create((set, get) => ({
   presets: [],
   assignments: {},
   previewAudioUrl: null,
@@ -74,17 +78,31 @@ export const useVoiceStore = create((set) => ({
         [characterName]: presetId,
       },
     })),
-  loadPresets: async () => {
+  loadPresets: async (options = {}) => {
+    if (loadPresetsPromise) {
+      return loadPresetsPromise;
+    }
+    const force = Boolean(options?.force);
+    const cachedPresets = get().presets;
+    if (!force && cachedPresets.length && Date.now() - presetsLoadedAt < PRESET_CACHE_TTL_MS) {
+      return cachedPresets;
+    }
     set({ isLoading: true, error: "" });
-    try {
+    loadPresetsPromise = (async () => {
       const presets = await api.get("/voices/presets");
       set({ presets, isLoading: false });
+      presetsLoadedAt = Date.now();
       return presets;
+    })();
+    try {
+      return await loadPresetsPromise;
     } catch (error) {
       const message = getErrorMessage(error, "声音预设加载失败");
       set({ isLoading: false, error: message });
       useUiStore.getState().pushToast({ title: formatError("声音预设加载失败", message), tone: "error" });
       throw error;
+    } finally {
+      loadPresetsPromise = null;
     }
   },
   createPreset: async (payload) => {
@@ -92,6 +110,7 @@ export const useVoiceStore = create((set) => ({
     try {
       const preset = await api.post("/voices/presets", payload);
       set((state) => ({ presets: [...state.presets, preset], isSaving: false }));
+      presetsLoadedAt = Date.now();
       useUiStore.getState().pushToast({ title: `已创建预设：${preset.name}`, tone: "success" });
       return preset;
     } catch (error) {
@@ -109,6 +128,7 @@ export const useVoiceStore = create((set) => ({
         presets: state.presets.map((item) => (item.id === presetId ? preset : item)),
         isSaving: false,
       }));
+      presetsLoadedAt = Date.now();
       useUiStore.getState().pushToast({ title: `已更新预设：${preset.name}`, tone: "success" });
       return preset;
     } catch (error) {
@@ -137,6 +157,7 @@ export const useVoiceStore = create((set) => ({
         },
         isSaving: false,
       }));
+      presetsLoadedAt = Date.now();
       useUiStore.getState().pushToast({ title: "声音预设已删除", tone: "success" });
     } catch (error) {
       const message = getErrorMessage(error, "删除预设失败");
@@ -151,6 +172,7 @@ export const useVoiceStore = create((set) => ({
     try {
       const presets = await api.post("/voices/presets/reorder", { preset_ids: orderedIds });
       set({ presets, isSaving: false });
+      presetsLoadedAt = Date.now();
       useUiStore.getState().pushToast({ title: "预设顺序已保存", tone: "success" });
       return presets;
     } catch (error) {

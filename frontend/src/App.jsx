@@ -82,8 +82,11 @@ export default function App() {
   const activePageRef = useRef(activePage);
   const navigationTokenRef = useRef(0);
   const prefersReducedMotion = useReducedMotion();
-  const { currentProject, projects, loadProjects, selectProject } = useProjectStore();
-  const { script, sourceText } = useScriptStore();
+  const currentProject = useProjectStore((state) => state.currentProject);
+  const loadProjects = useProjectStore((state) => state.loadProjects);
+  const selectProject = useProjectStore((state) => state.selectProject);
+  const script = useScriptStore((state) => state.script);
+  const sourceText = useScriptStore((state) => state.sourceText);
 
   useEffect(() => {
     activePageRef.current = activePage;
@@ -98,6 +101,10 @@ export default function App() {
     }
 
     const token = ++navigationTokenRef.current;
+    activePageRef.current = targetPage;
+    setActivePage(targetPage);
+    writePageToLocation(targetPage, options);
+
     (async () => {
       const settings = useSettingsStore.getState();
       let autoSerial = isAutoSerialEnabled(settings.systemStatus, settings.orchestratorConfig);
@@ -108,15 +115,10 @@ export default function App() {
 
       if (autoSerial) {
         await unloadModelForPage(sourcePage).catch(() => undefined);
-        await useSettingsStore.getState().refreshSystemStatus().catch(() => undefined);
+        if (token === navigationTokenRef.current) {
+          await useSettingsStore.getState().refreshSystemStatus().catch(() => undefined);
+        }
       }
-
-      if (token !== navigationTokenRef.current) {
-        return;
-      }
-      activePageRef.current = targetPage;
-      setActivePage(targetPage);
-      writePageToLocation(targetPage, options);
     })();
   }, []);
 

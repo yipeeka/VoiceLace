@@ -15,6 +15,8 @@ const SUPPORTED_PARSE_MODES = new Set([
   "verified_five_step_pipeline",
 ]);
 
+const loadProjectScriptPromises = new Map();
+
 export const useScriptStore = create((set, get) => ({
   sourceText: "",
   llmStreamOutput: "",
@@ -48,9 +50,22 @@ export const useScriptStore = create((set, get) => ({
     set({ parseMode: normalized });
   },
   loadProjectScript: async (projectId) => {
-    const script = await api.get(`/projects/${projectId}/script`);
-    set({ script, sourceText: script.source_text || "" });
-    return script;
+    const key = String(projectId || "");
+    if (!key) {
+      throw new Error("缺少项目 ID");
+    }
+    if (loadProjectScriptPromises.has(key)) {
+      return loadProjectScriptPromises.get(key);
+    }
+    const promise = (async () => {
+      const script = await api.get(`/projects/${key}/script`);
+      set({ script, sourceText: script.source_text || "" });
+      return script;
+    })().finally(() => {
+      loadProjectScriptPromises.delete(key);
+    });
+    loadProjectScriptPromises.set(key, promise);
+    return promise;
   },
   parseText: async ({ text, projectId, prompt, parseMode }) => {
     const normalizedMode = normalizeParseMode(parseMode || get().parseMode);

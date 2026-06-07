@@ -105,6 +105,7 @@ export default function MusicPage({ onNavigate }) {
   const uploadInputRef = useRef(null);
   const autoRefreshedTaskIdRef = useRef("");
   const lastAppliedModelVariantRef = useRef("");
+  const refreshPromisesRef = useRef({});
 
   const statusMeta = MUSIC_STATUS_META[taskStatus] || MUSIC_STATUS_META.idle;
   const musicEnabled = systemStatus?.config?.music_enabled !== false;
@@ -191,40 +192,65 @@ export default function MusicPage({ onNavigate }) {
   const currentResultAssetName = inferAssetNameFromResult(taskResult);
 
   async function refreshSystemStatus() {
-    try {
-      const status = await api.get("/system/status");
-      setSystemStatus(status || null);
-    } catch {
-      setSystemStatus(null);
+    if (!refreshPromisesRef.current.systemStatus) {
+      refreshPromisesRef.current.systemStatus = (async () => {
+        try {
+          const status = await api.get("/system/status");
+          setSystemStatus(status || null);
+          return status || null;
+        } catch {
+          setSystemStatus(null);
+          return null;
+        } finally {
+          refreshPromisesRef.current.systemStatus = null;
+        }
+      })();
     }
+    return refreshPromisesRef.current.systemStatus;
   }
 
   async function refreshAssistStatus() {
-    try {
-      const status = await api.get("/music/assist/status");
-      setAssistStatus(status || null);
-    } catch {
-      setAssistStatus(null);
+    if (!refreshPromisesRef.current.assistStatus) {
+      refreshPromisesRef.current.assistStatus = (async () => {
+        try {
+          const status = await api.get("/music/assist/status");
+          setAssistStatus(status || null);
+          return status || null;
+        } catch {
+          setAssistStatus(null);
+          return null;
+        } finally {
+          refreshPromisesRef.current.assistStatus = null;
+        }
+      })();
     }
+    return refreshPromisesRef.current.assistStatus;
   }
 
   async function refreshValidation() {
-    setIsValidating(true);
-    try {
-      const report = await api.get("/music/model/validate");
-      setValidation(report || null);
-      return report || null;
-    } catch (error) {
-      setValidation({
-        valid: false,
-        exists: false,
-        missing: [],
-        message: getErrorMessage(error, "模型目录校验失败"),
-      });
-      return null;
-    } finally {
-      setIsValidating(false);
+    if (refreshPromisesRef.current.validation) {
+      return refreshPromisesRef.current.validation;
     }
+    setIsValidating(true);
+    refreshPromisesRef.current.validation = (async () => {
+      try {
+        const report = await api.get("/music/model/validate");
+        setValidation(report || null);
+        return report || null;
+      } catch (error) {
+        setValidation({
+          valid: false,
+          exists: false,
+          missing: [],
+          message: getErrorMessage(error, "模型目录校验失败"),
+        });
+        return null;
+      } finally {
+        setIsValidating(false);
+        refreshPromisesRef.current.validation = null;
+      }
+    })();
+    return refreshPromisesRef.current.validation;
   }
 
   async function handleSelectModelVariant(value) {
@@ -248,23 +274,32 @@ export default function MusicPage({ onNavigate }) {
   }
 
   async function refreshAssets() {
-    setIsLoadingAssets(true);
-    try {
-      const payload = await api.get("/music/assets");
-      const nextItems = Array.isArray(payload?.items) ? payload.items : [];
-      const nextCategories = normalizeAssetCategories(payload?.categories);
-      setAssets(nextItems);
-      setAssetCategories(nextCategories);
-      const validFilterIds = new Set([MUSIC_CATEGORY_ALL, ...nextCategories.map((item) => item.id)]);
-      setAssetCategoryFilter((prev) => (validFilterIds.has(prev) ? prev : MUSIC_CATEGORY_ALL));
-      if (!previewAssetName && nextItems.length > 0) {
-        setPreviewAssetName(nextItems[0].name);
-      }
-    } catch (error) {
-      pushToast({ title: `加载音乐资产失败：${getErrorMessage(error)}`, tone: "error" });
-    } finally {
-      setIsLoadingAssets(false);
+    if (refreshPromisesRef.current.assets) {
+      return refreshPromisesRef.current.assets;
     }
+    setIsLoadingAssets(true);
+    refreshPromisesRef.current.assets = (async () => {
+      try {
+        const payload = await api.get("/music/assets");
+        const nextItems = Array.isArray(payload?.items) ? payload.items : [];
+        const nextCategories = normalizeAssetCategories(payload?.categories);
+        setAssets(nextItems);
+        setAssetCategories(nextCategories);
+        const validFilterIds = new Set([MUSIC_CATEGORY_ALL, ...nextCategories.map((item) => item.id)]);
+        setAssetCategoryFilter((prev) => (validFilterIds.has(prev) ? prev : MUSIC_CATEGORY_ALL));
+        if (!previewAssetName && nextItems.length > 0) {
+          setPreviewAssetName(nextItems[0].name);
+        }
+        return payload;
+      } catch (error) {
+        pushToast({ title: `加载音乐资产失败：${getErrorMessage(error)}`, tone: "error" });
+        return null;
+      } finally {
+        setIsLoadingAssets(false);
+        refreshPromisesRef.current.assets = null;
+      }
+    })();
+    return refreshPromisesRef.current.assets;
   }
 
   async function handleCreateCategory() {
