@@ -10,6 +10,12 @@ function isEditableTarget(target) {
   return tagName === "input" || tagName === "textarea" || tagName === "select" || Boolean(target?.isContentEditable);
 }
 
+function isInteractiveTimelineTarget(target) {
+  return Boolean(target?.closest?.(
+    ".segmentTimelinePreviewBlock, .segmentTimelinePreviewResizeHandle, .segmentTimelineAudioBlock, button, a, input, textarea, select",
+  ));
+}
+
 export default function SynthesisFullAudioCard({
   projectId,
   fullAudioUrl,
@@ -47,6 +53,7 @@ export default function SynthesisFullAudioCard({
     pixelsPerSecond: 0,
   });
   const [waveformScrollRequest, setWaveformScrollRequest] = useState({ left: 0, signal: 0 });
+  const [timelineCollapsed, setTimelineCollapsed] = useState(false);
 
   useEffect(() => {
     if (!fullAudioUrl) {
@@ -81,10 +88,17 @@ export default function SynthesisFullAudioCard({
     setWaveformScrollRequest((current) => ({ left: nextLeft, signal: current.signal + 1 }));
   }
 
+  function handleTimelineCollapseClick(event) {
+    if (isInteractiveTimelineTarget(event.target)) {
+      return;
+    }
+    setTimelineCollapsed(true);
+  }
+
   return (
     <GlassCard className={className}>
-      <div className="sectionHeader">
-        <div className="sectionHeaderLeft">
+      <div className="sectionHeader synthesisFullAudioHeader">
+        <div className="sectionHeaderLeft synthesisFullAudioHeaderLeft">
           <h2 className="cardTitle">完整音频</h2>
           <p className="cardSubtitle">播放整轨并通过下方片段时间线定位、同步高亮。</p>
         </div>
@@ -129,43 +143,61 @@ export default function SynthesisFullAudioCard({
           </div>
         )}
       >
-        <SegmentTimelinePreview
-          segments={segments}
-          segmentTimings={segmentTimings}
-          currentTimeMs={Math.round(Number(fullAudioCurrentTime || 0) * 1000)}
-          currentSegmentId={currentSegmentId}
-          config={config}
-          selectedTrackId={selectedPostprocessTrackId}
-          pendingTrackOffsets={pendingPostprocessTrackOffsets}
-          waveformSync={waveformSync}
-          onScrollLeftChange={handleArrangementScrollLeftChange}
-          onSegmentClick={onLocateFullAudioSegment}
-          onSegmentTimingChange={onSegmentTimingChange}
-          onTrackSelect={onSelectPostprocessTrack}
-          onTrackOffsetChange={(kind, trackId, offsetMs) => {
-            if (onPreviewPostprocessTrackOffsetChange) {
-              onPreviewPostprocessTrackOffsetChange(kind, trackId, offsetMs);
-              return;
-            }
-            if (!onSetConfig) return;
-            if (trackId === "legacy-bgm") {
-              onSetConfig({ bgm_track: { ...(config.bgm_track || {}), offset_ms: offsetMs } });
-              return;
-            }
-            if (trackId === "legacy-ambience") {
-              onSetConfig({ ambience_track: { ...(config.ambience_track || {}), offset_ms: offsetMs } });
-              return;
-            }
-            const key = kind === "music" ? "music_tracks" : "effect_tracks";
-            const tracks = Array.isArray(config[key]) ? config[key] : [];
-            onSetConfig({
-              [key]: tracks.map((track, index) => {
-                const id = String(track?.id || `${kind}-${index + 1}`);
-                return id === trackId ? { ...track, offset_ms: offsetMs } : track;
-              }),
-            });
-          }}
-        />
+        {timelineCollapsed ? (
+          <button
+            type="button"
+            className="synthesisTimelineCollapsedBar"
+            onClick={() => setTimelineCollapsed(false)}
+            aria-expanded="false"
+          >
+            <span>时间轨已收起</span>
+            <strong>点击展开</strong>
+          </button>
+        ) : (
+          <div
+            className="synthesisTimelineCollapseSurface"
+            title="点击时间轨空白处收起"
+            onClick={handleTimelineCollapseClick}
+          >
+            <SegmentTimelinePreview
+              segments={segments}
+              segmentTimings={segmentTimings}
+              currentTimeMs={Math.round(Number(fullAudioCurrentTime || 0) * 1000)}
+              currentSegmentId={currentSegmentId}
+              config={config}
+              selectedTrackId={selectedPostprocessTrackId}
+              pendingTrackOffsets={pendingPostprocessTrackOffsets}
+              waveformSync={waveformSync}
+              onScrollLeftChange={handleArrangementScrollLeftChange}
+              onSegmentClick={onLocateFullAudioSegment}
+              onSegmentTimingChange={onSegmentTimingChange}
+              onTrackSelect={onSelectPostprocessTrack}
+              onTrackOffsetChange={(kind, trackId, offsetMs) => {
+                if (onPreviewPostprocessTrackOffsetChange) {
+                  onPreviewPostprocessTrackOffsetChange(kind, trackId, offsetMs);
+                  return;
+                }
+                if (!onSetConfig) return;
+                if (trackId === "legacy-bgm") {
+                  onSetConfig({ bgm_track: { ...(config.bgm_track || {}), offset_ms: offsetMs } });
+                  return;
+                }
+                if (trackId === "legacy-ambience") {
+                  onSetConfig({ ambience_track: { ...(config.ambience_track || {}), offset_ms: offsetMs } });
+                  return;
+                }
+                const key = kind === "music" ? "music_tracks" : "effect_tracks";
+                const tracks = Array.isArray(config[key]) ? config[key] : [];
+                onSetConfig({
+                  [key]: tracks.map((track, index) => {
+                    const id = String(track?.id || `${kind}-${index + 1}`);
+                    return id === trackId ? { ...track, offset_ms: offsetMs } : track;
+                  }),
+                });
+              }}
+            />
+          </div>
+        )}
       </SynthesisWaveSurfer>
     </GlassCard>
   );

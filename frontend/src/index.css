@@ -1709,6 +1709,48 @@ select.textInput option {
   background: color-mix(in srgb, var(--bg-elevated) 90%, transparent);
 }
 
+.synthesisTimelineCollapseSurface {
+  min-width: 0;
+  cursor: zoom-out;
+}
+
+.synthesisTimelineCollapseSurface .segmentTimelinePreviewBlock,
+.synthesisTimelineCollapseSurface .segmentTimelineAudioBlock {
+  cursor: grab;
+}
+
+.synthesisTimelineCollapsedBar {
+  display: flex;
+  width: 100%;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0 12px;
+  color: var(--text-muted);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.12)),
+    color-mix(in srgb, var(--bg-elevated) 92%, #030609);
+  cursor: zoom-in;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.synthesisTimelineCollapsedBar strong {
+  color: var(--accent-primary);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.synthesisTimelineCollapsedBar:hover {
+  color: var(--text-primary);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.045), rgba(0,0,0,0.1)),
+    color-mix(in srgb, var(--bg-elevated) 86%, var(--accent-primary-dim));
+}
+
 .segmentTimelinePreview {
   width: 100%;
   min-width: 0;
@@ -1760,6 +1802,50 @@ select.textInput option {
   width: 1px;
   height: 166px;
   background: color-mix(in srgb, var(--border-default) 72%, transparent);
+}
+
+.segmentTimelineChapterLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+}
+
+.segmentTimelineChapterMarker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-1px);
+}
+
+.segmentTimelineChapterMarker::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: color-mix(in srgb, var(--accent-primary) 72%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent-primary) 28%, transparent);
+}
+
+.segmentTimelineChapterMarkerLabel {
+  position: absolute;
+  top: 3px;
+  left: 5px;
+  max-width: 128px;
+  overflow: hidden;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 44%, transparent);
+  border-radius: 5px;
+  color: color-mix(in srgb, var(--accent-primary) 84%, white);
+  background: color-mix(in srgb, var(--bg-surface) 88%, black);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
+  font-size: 10.5px;
+  font-weight: 850;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .segmentTimelinePreviewLane {
@@ -2512,6 +2598,158 @@ select.textInput option {
   min-width: 0;
 }
 
+.synthesisTaskStatusStrip {
+  gap: 9px;
+  padding: 11px 13px;
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.026), rgba(0,0,0,0.1)),
+    color-mix(in srgb, var(--bg-surface) 88%, black);
+}
+
+.synthesisTaskStatusStrip.active {
+  border-color: color-mix(in srgb, var(--accent-primary) 38%, var(--border-default));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent-primary) 72%, transparent);
+}
+
+.taskStatusStripPrimary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.taskStatusStripTitle,
+.taskStatusStripMetrics,
+.taskStatusStripActions,
+.taskStatusStripDetailsGrid {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.taskStatusStripTitle {
+  color: var(--text-primary);
+  font-size: 13.5px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.taskStatusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--text-muted);
+}
+
+.taskStatusDot.running {
+  background: var(--accent-primary);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-primary) 18%, transparent);
+}
+
+.taskStatusDot.error {
+  background: var(--danger);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 18%, transparent);
+}
+
+.taskStatusStripMetrics {
+  flex-wrap: wrap;
+  overflow: hidden;
+}
+
+.taskStatusStripMetrics span,
+.taskStatusStripDetailsGrid span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.taskStatusStripMetrics strong,
+.taskStatusStripDetailsGrid strong {
+  color: var(--text-primary);
+  font-weight: 850;
+}
+
+.taskStatusStripMetrics .warning,
+.taskStatusStripWarning {
+  color: var(--warning);
+}
+
+.taskStatusStripActions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.taskStatusStripActions .btn {
+  min-height: 30px;
+}
+
+.taskStatusStripWarning {
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--warning) 32%, var(--border-subtle));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--warning-dim) 38%, transparent);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.taskStatusStripDetailsToggle {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.25;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.taskStatusStripDetailsToggle::before {
+  content: "▸";
+  margin-right: 4px;
+}
+
+.taskStatusStripDetailsToggle[aria-expanded="true"]::before {
+  content: "▾";
+}
+
+.taskStatusStripDetailsToggle:hover {
+  color: var(--text-primary);
+}
+
+.taskStatusStripDetailsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 7px 14px;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.taskStatusStripDetailsGrid span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.taskStatusStripDetailsGrid strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskStatusStripDetailWide {
+  grid-column: span 2;
+  max-width: 100%;
+}
+
 .synthesisCommandRail {
   position: sticky;
   top: 12px;
@@ -2670,6 +2908,199 @@ select.textInput option {
   accent-color: var(--accent-primary);
 }
 
+.synthesisCommandRail .consoleSection {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.synthesisCommandRail .consoleSection + .consoleSection {
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--border-default) 72%, transparent);
+}
+
+.synthesisCommandRail .consoleSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.synthesisCommandRail .consoleSectionHeader span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.synthesisCommandRail .consoleSectionHeader strong {
+  flex: 0 0 auto;
+  max-width: 48%;
+  overflow: hidden;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 30%, transparent);
+  border-radius: 6px;
+  color: color-mix(in srgb, var(--accent-primary) 86%, white);
+  background: color-mix(in srgb, var(--accent-primary-dim) 38%, transparent);
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.synthesisCommandRail .consoleSectionBody,
+.synthesisCommandRail .consoleSectionStack,
+.synthesisCommandRail .consoleFieldGrid,
+.synthesisCommandRail .consoleSwitchGrid {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.synthesisCommandRail .consoleFieldGrid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.synthesisCommandRail .consoleSwitchGrid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.synthesisCommandRail .consoleSwitchRow {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--border-default) 82%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-elevated) 74%, black);
+  cursor: pointer;
+}
+
+.synthesisCommandRail .consoleSwitchRow:hover {
+  border-color: color-mix(in srgb, var(--accent-secondary) 28%, var(--border-default));
+  background: color-mix(in srgb, var(--bg-elevated) 86%, black);
+}
+
+.synthesisCommandRail .consoleSwitchRow.disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.synthesisCommandRail .consoleSwitchRow input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+}
+
+.synthesisCommandRail .consoleSwitchCopy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.synthesisCommandRail .consoleSwitchCopy strong {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: 760;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.synthesisCommandRail .consoleSwitchCopy small,
+.synthesisCommandRail .consoleHint {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.synthesisCommandRail .consoleSpeedRow {
+  display: grid;
+  grid-template-columns: minmax(78px, 0.55fr) minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+
+.synthesisCommandRail .consoleSpeedRow .btn:last-child {
+  grid-column: 1 / -1;
+}
+
+.synthesisCommandRail .chapterMarkerRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--border-default) 78%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-elevated) 68%, black);
+}
+
+.synthesisCommandRail .chapterTitleField {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 10px;
+}
+
+.synthesisCommandRail .chapterTitleField .formLabel {
+  white-space: nowrap;
+}
+
+.synthesisCommandRail .postprocessPendingNotice {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--warning) 36%, var(--border-default));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--warning-dim) 44%, transparent);
+}
+
+.synthesisCommandRail .postprocessPendingNotice svg {
+  margin-top: 2px;
+  color: color-mix(in srgb, var(--warning) 78%, white);
+}
+
+.synthesisCommandRail .postprocessPendingNotice div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.synthesisCommandRail .postprocessPendingNotice strong {
+  color: color-mix(in srgb, var(--warning) 82%, white);
+  font-size: 12.5px;
+  font-weight: 850;
+}
+
+.synthesisCommandRail .postprocessPendingNotice span {
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.synthesisCommandRail .synthesisConsoleProjectName {
+  grid-column: 1 / -1;
+  min-width: 0;
+  margin-left: 0 !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .synthesisCommandRail .postprocessTrackActions {
   display: flex;
   align-items: center;
@@ -2808,7 +3239,7 @@ select.textInput option {
 .synthesisCommandRail .synthesisConsoleActionRow,
 .synthesisCommandRail .synthesisExportMainActions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
   align-items: stretch;
 }
 
@@ -2862,16 +3293,30 @@ select.textInput option {
   border: 1px solid var(--border-subtle);
 }
 
+.synthesisCommandRail .synthesisTaskStatusPanel,
 .synthesisCommandRail .synthesisExportDrawer {
   gap: 8px;
   padding: 12px;
 }
 
+.synthesisCommandRail .synthesisExportHeader {
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.synthesisCommandRail .synthesisExportHeader .cardSubtitle {
+  margin-top: 1px;
+}
+
+.synthesisCommandRail .synthesisTaskStatusPanel .taskStatusCell span,
+.synthesisCommandRail .synthesisTaskStatusPanel .statRow span,
 .synthesisCommandRail .synthesisExportDrawer .taskStatusCell span,
 .synthesisCommandRail .synthesisExportDrawer .statRow span {
   font-size: 11.5px;
 }
 
+.synthesisCommandRail .synthesisTaskStatusPanel .taskStatusCell strong,
+.synthesisCommandRail .synthesisTaskStatusPanel .statRow strong,
 .synthesisCommandRail .synthesisExportDrawer .taskStatusCell strong,
 .synthesisCommandRail .synthesisExportDrawer .statRow strong {
   font-size: 11.5px;
@@ -2923,6 +3368,40 @@ select.textInput option {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
+.synthesisCommandRail .synthesisChapterExportSelectAll {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  cursor: pointer;
+}
+
+.synthesisCommandRail .synthesisChapterExportRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  opacity: 0.72;
+}
+
+.synthesisCommandRail .synthesisChapterExportRow.selected {
+  opacity: 1;
+  border-color: color-mix(in srgb, var(--accent-secondary) 20%, var(--border-subtle));
+}
+
+.synthesisCommandRail .synthesisChapterExportCheck {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.synthesisCommandRail .synthesisChapterExportCheck span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .synthesisCommandRail .synthesisExportMainActions .btn:first-child {
   grid-column: 1 / -1;
   min-height: 40px;
@@ -2947,6 +3426,22 @@ select.textInput option {
   padding: 14px;
   gap: 12px;
   overflow: hidden;
+}
+
+.synthesisFullAudioHeader .synthesisFullAudioHeaderLeft {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 9px;
+}
+
+.synthesisFullAudioHeader .synthesisFullAudioHeaderLeft .cardTitle {
+  flex: 0 0 auto;
+}
+
+.synthesisFullAudioHeader .synthesisFullAudioHeaderLeft .cardSubtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .synthesisCommandTimelineCard {

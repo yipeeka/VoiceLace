@@ -133,6 +133,24 @@ export default function SegmentTimelinePreview({
   const playheadLeft = Math.max(0, Math.min(canvasWidth, Number(currentTimeMs || 0) * pxPerMs));
   const tickStepMs = timelineEndMs <= 90_000 ? 10_000 : timelineEndMs <= 240_000 ? 30_000 : 60_000;
   const ticks = Array.from({ length: Math.floor(timelineEndMs / tickStepMs) + 1 }, (_, index) => index * tickStepMs);
+  const chapterMarkers = useMemo(() => {
+    const markers = Array.isArray(config?.chapter_markers) ? config.chapter_markers : [];
+    return markers.map((marker, index) => {
+      const segmentId = String(marker?.start_segment_id || "");
+      const segmentIndex = segments.findIndex((segment) => String(segment.segment_id || "") === segmentId);
+      const timing = segmentTimings[segmentId];
+      const start = Number(timing?.start);
+      if (!segmentId || !Number.isFinite(start)) {
+        return null;
+      }
+      return {
+        id: String(marker?.id || `${segmentId}-${index}`),
+        title: String(marker?.title || `章节 ${index + 1}`),
+        start,
+        segmentIndex,
+      };
+    }).filter(Boolean);
+  }, [config?.chapter_markers, segmentTimings, segments]);
   const audioTrackRows = [
     { kind: "music", label: "音乐", tracks: postprocessTracks.music },
     { kind: "effect", label: "音效", tracks: postprocessTracks.effect },
@@ -304,6 +322,20 @@ export default function SegmentTimelinePreview({
               </span>
             ))}
           </div>
+          {chapterMarkers.length ? (
+            <div className="segmentTimelineChapterLayer" aria-label="章节标识">
+              {chapterMarkers.map((marker) => (
+                <span
+                  key={marker.id}
+                  className="segmentTimelineChapterMarker"
+                  style={{ left: `${Math.min(canvasWidth, marker.start * pxPerMs)}px` }}
+                  title={`${marker.title}${marker.segmentIndex >= 0 ? ` · #${marker.segmentIndex + 1}` : ""} · ${formatTickTime(marker.start)}`}
+                >
+                  <span className="segmentTimelineChapterMarkerLabel">{marker.title}</span>
+                </span>
+              ))}
+            </div>
+          ) : null}
           <div className="segmentTimelinePreviewLane segmentTimelinePreviewSegmentLane">
             {segments.map((segment, index) => {
               const timing = segmentTimings[segment.segment_id];

@@ -6,7 +6,7 @@ import { Redo2, Undo2 } from "lucide-react";
 import ScriptDiffPreviewDialog from "../components/script/ScriptDiffPreviewDialog";
 import Button from "../components/ui/Button";
 import { SynthesisGenerateCard, SynthesisPostprocessCard } from "../components/synthesis/SynthesisConfigCard";
-import SynthesisTaskStatusCard from "../components/synthesis/SynthesisTaskStatusCard";
+import SynthesisTaskStatusCard, { SynthesisTaskStatusStrip } from "../components/synthesis/SynthesisTaskStatusCard";
 import SynthesisFullAudioCard from "../components/synthesis/SynthesisFullAudioCard";
 import SynthesisTimelineCard from "../components/synthesis/SynthesisTimelineCard";
 import ExportWizardDialog from "../components/synthesis/ExportWizardDialog";
@@ -55,7 +55,7 @@ function formatTimeMs(ms) {
 }
 
 const STATUS_FILTERS = new Set(["all", "stale", "done", "missing", "failed"]);
-const SYNTHESIS_PANELS = new Set(["synthesis", "postprocess"]);
+const SYNTHESIS_PANELS = new Set(["synthesis", "postprocess", "export"]);
 const SEGMENT_BOUNDARY_TOLERANCE_MS = 60;
 
 function readSynthesisQueryState() {
@@ -1526,6 +1526,28 @@ export default function SynthesisPage() {
     <div className="pageGrid synthesisPageViewportLayout" style={{ gap: 20 }}>
       <div className="synthesisCommandCenter">
         <div className="synthesisCommandMain">
+          <SynthesisTaskStatusStrip
+            staleReport={staleReport}
+            staleSummary={staleSummary}
+            modelStatus={modelStatus}
+            status={status}
+            connectionStatus={connectionStatus}
+            progress={progress}
+            queuePosition={queuePosition}
+            failedCount={failedCount}
+            retryCount={retryCount}
+            effectiveSegmentConcurrency={effectiveSegmentConcurrency}
+            queueSnapshot={queueSnapshot}
+            runtimeStatus={systemRuntimeStatus}
+            totalSegments={totalSegments}
+            taskId={taskId}
+            lastSyncError={lastSyncError}
+            isRunning={isRunning}
+            progressPct={progressPct}
+            onRetryFailed={handleRetryFailed}
+            onResume={handleResumeSynthesisRun}
+            onCancelTask={handleCancelSynthesis}
+          />
           <SynthesisFullAudioCard
             className="synthesisFullAudioViewportCard"
             currentProject={currentProject}
@@ -1686,24 +1708,9 @@ export default function SynthesisPage() {
             API_ORIGIN={API_ORIGIN}
           />
           <SynthesisTaskStatusCard
+            expanded={expandedSynthesisPanel === "export"}
+            onToggle={() => setExpandedSynthesisPanel((current) => (current === "export" ? "" : "export"))}
             API_ORIGIN={API_ORIGIN}
-            staleReport={staleReport}
-            staleSummary={staleSummary}
-            modelStatus={modelStatus}
-            status={status}
-            connectionStatus={connectionStatus}
-            progress={progress}
-            queuePosition={queuePosition}
-            failedCount={failedCount}
-            retryCount={retryCount}
-            effectiveSegmentConcurrency={effectiveSegmentConcurrency}
-            queueSnapshot={queueSnapshot}
-            runtimeStatus={systemRuntimeStatus}
-            totalSegments={totalSegments}
-            taskId={taskId}
-            lastSyncError={lastSyncError}
-            isRunning={isRunning}
-            progressPct={progressPct}
             fullAudioUrl={fullAudioUrl}
             rawAudioUrl={rawAudioUrl}
             processedAudioUrl={processedAudioUrl}
@@ -1715,9 +1722,6 @@ export default function SynthesisPage() {
             importWarnings={importWarnings}
             archiveInputRef={archiveInputRef}
             onImportArchive={handleImportArchive}
-            onRetryFailed={handleRetryFailed}
-            onResume={handleResumeSynthesisRun}
-            onCancelTask={handleCancelSynthesis}
             onOpenExportWizard={() => setExportWizardOpen(true)}
           />
         </aside>

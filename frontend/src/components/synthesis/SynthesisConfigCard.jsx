@@ -1,4 +1,4 @@
-import { AudioLines, ChevronDown, ChevronUp, Pause, Play, SlidersHorizontal, Square, Trash2, Upload, Wand2 } from "lucide-react";
+import { AlertTriangle, AudioLines, ChevronDown, ChevronUp, Pause, Play, SlidersHorizontal, Square, Trash2, Upload, Wand2 } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
 import GlassCard from "../shared/GlassCard";
@@ -25,6 +25,35 @@ function CollapsibleHeader({ expanded, onToggle, title, subtitle, icon: Icon }) 
         <p className="cardSubtitle">{subtitle}</p>
       </div>
     </div>
+  );
+}
+
+function ConsoleSection({ title, meta, children, className = "" }) {
+  return (
+    <section className={`consoleSection ${className}`.trim()}>
+      <div className="consoleSectionHeader">
+        <span>{title}</span>
+        {meta ? <strong>{meta}</strong> : null}
+      </div>
+      <div className="consoleSectionBody">{children}</div>
+    </section>
+  );
+}
+
+function SwitchRow({ title, description, checked, disabled = false, onChange }) {
+  return (
+    <label className={`consoleSwitchRow ${disabled ? "disabled" : ""}`.trim()}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange?.(event.target.checked)}
+      />
+      <span className="consoleSwitchCopy">
+        <strong>{title}</strong>
+        {description ? <small>{description}</small> : null}
+      </span>
+    </label>
   );
 }
 
@@ -74,124 +103,123 @@ export function SynthesisGenerateCard({
         <div className="muted">已收起</div>
       ) : (
         <>
-          <Tabs value={ttsBackend} onValueChange={(value) => onSetConfig({ tts_backend: value })}>
-            <TabsList>
-              <TabsTrigger value="omnivoice">OmniVoice</TabsTrigger>
-              <TabsTrigger value="voxcpm2">VoxCPM2</TabsTrigger>
-            </TabsList>
+          <ConsoleSection title="模型参数" meta={ttsBackend === "omnivoice" ? "OmniVoice" : "VoxCPM2"}>
+            <Tabs value={ttsBackend} onValueChange={(value) => onSetConfig({ tts_backend: value })}>
+              <TabsList>
+                <TabsTrigger value="omnivoice">OmniVoice</TabsTrigger>
+                <TabsTrigger value="voxcpm2">VoxCPM2</TabsTrigger>
+              </TabsList>
 
-            <TabsContent value="omnivoice">
-              <Slider
-                label="推理步数 (num_step)"
-                value={[Number(omnivoiceConfig.num_step)]}
-                onValueChange={([v]) =>
-                  onSetConfig({
-                    num_step: v,
-                    denoise: omnivoiceConfig.denoise,
-                    guidance_scale: omnivoiceConfig.guidance_scale,
-                    omnivoice: { ...omnivoiceConfig, num_step: v },
-                  })
-                }
-                min={8}
-                max={100}
-                step={4}
-              />
-              <Slider
-                label="CFG 强度 (guidance_scale)"
-                value={[Number(omnivoiceConfig.guidance_scale)]}
-                onValueChange={([v]) =>
-                  onSetConfig({
-                    num_step: omnivoiceConfig.num_step,
-                    denoise: omnivoiceConfig.denoise,
-                    guidance_scale: v,
-                    omnivoice: { ...omnivoiceConfig, guidance_scale: v },
-                  })
-                }
-                min={0.5}
-                max={10}
-                step={0.1}
-              />
-              <div className="formGroup">
-                <label className="formLabel">降噪</label>
-                <label className="controlRow" style={{ cursor: "pointer", padding: "8px 12px", background: "var(--bg-elevated)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-default)" }}>
-                  <input
-                    type="checkbox"
-                    checked={Boolean(omnivoiceConfig.denoise)}
-                    onChange={(e) =>
-                      onSetConfig({
-                        num_step: omnivoiceConfig.num_step,
-                        guidance_scale: omnivoiceConfig.guidance_scale,
-                        denoise: e.target.checked,
-                        omnivoice: { ...omnivoiceConfig, denoise: e.target.checked },
-                      })
-                    }
-                    style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
+              <TabsContent value="omnivoice" className="consoleSectionStack">
+                <Slider
+                  label="推理步数 (num_step)"
+                  value={[Number(omnivoiceConfig.num_step)]}
+                  onValueChange={([v]) =>
+                    onSetConfig({
+                      num_step: v,
+                      denoise: omnivoiceConfig.denoise,
+                      guidance_scale: omnivoiceConfig.guidance_scale,
+                      omnivoice: { ...omnivoiceConfig, num_step: v },
+                    })
+                  }
+                  min={8}
+                  max={100}
+                  step={4}
+                />
+                <Slider
+                  label="CFG 强度 (guidance_scale)"
+                  value={[Number(omnivoiceConfig.guidance_scale)]}
+                  onValueChange={([v]) =>
+                    onSetConfig({
+                      num_step: omnivoiceConfig.num_step,
+                      denoise: omnivoiceConfig.denoise,
+                      guidance_scale: v,
+                      omnivoice: { ...omnivoiceConfig, guidance_scale: v },
+                    })
+                  }
+                  min={0.5}
+                  max={10}
+                  step={0.1}
+                />
+                <SwitchRow
+                  title="降噪"
+                  description="启用 denoise"
+                  checked={Boolean(omnivoiceConfig.denoise)}
+                  onChange={(checked) =>
+                    onSetConfig({
+                      num_step: omnivoiceConfig.num_step,
+                      guidance_scale: omnivoiceConfig.guidance_scale,
+                      denoise: checked,
+                      omnivoice: { ...omnivoiceConfig, denoise: checked },
+                    })
+                  }
+                />
+              </TabsContent>
+
+              <TabsContent value="voxcpm2" className="consoleSectionStack">
+                <Slider
+                  label="采样步数 (inference_timesteps)"
+                  value={[Number(voxcpm2Config.inference_timesteps)]}
+                  onValueChange={([v]) => onSetConfig({ voxcpm2: { ...voxcpm2Config, inference_timesteps: v } })}
+                  min={4}
+                  max={30}
+                  step={1}
+                />
+                <Slider
+                  label="CFG 系数 (cfg_value)"
+                  value={[Number(voxcpm2Config.cfg_value)]}
+                  onValueChange={([v]) => onSetConfig({ voxcpm2: { ...voxcpm2Config, cfg_value: v } })}
+                  min={1}
+                  max={3}
+                  step={0.1}
+                />
+                <div className="consoleSwitchGrid">
+                  <SwitchRow
+                    title="降噪"
+                    description="denoise"
+                    checked={Boolean(voxcpm2Config.denoise)}
+                    onChange={(checked) => onSetConfig({ voxcpm2: { ...voxcpm2Config, denoise: checked } })}
                   />
-                  <span style={{ fontSize: 13.5, color: "var(--text-secondary)" }}>启用 denoise</span>
-                </label>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="voxcpm2">
-              <Slider
-                label="采样步数 (inference_timesteps)"
-                value={[Number(voxcpm2Config.inference_timesteps)]}
-                onValueChange={([v]) => onSetConfig({ voxcpm2: { ...voxcpm2Config, inference_timesteps: v } })}
-                min={4}
-                max={30}
-                step={1}
-              />
-              <Slider
-                label="CFG 系数 (cfg_value)"
-                value={[Number(voxcpm2Config.cfg_value)]}
-                onValueChange={([v]) => onSetConfig({ voxcpm2: { ...voxcpm2Config, cfg_value: v } })}
-                min={1}
-                max={3}
-                step={0.1}
-              />
-              <div className="editorGrid">
-                <div className="formGroup">
-                  <label className="formLabel">降噪</label>
-                  <label className="controlRow" style={{ cursor: "pointer", padding: "8px 12px", background: "var(--bg-elevated)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-default)" }}>
-                    <input
-                      type="checkbox"
-                      checked={Boolean(voxcpm2Config.denoise)}
-                      onChange={(e) => onSetConfig({ voxcpm2: { ...voxcpm2Config, denoise: e.target.checked } })}
-                      style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
-                    />
-                    <span style={{ fontSize: 13.5, color: "var(--text-secondary)" }}>启用 denoise</span>
-                  </label>
+                  <SwitchRow
+                    title="文本归一化"
+                    description="normalize"
+                    checked={Boolean(voxcpm2Config.normalize)}
+                    onChange={(checked) => onSetConfig({ voxcpm2: { ...voxcpm2Config, normalize: checked } })}
+                  />
                 </div>
-                <div className="formGroup">
-                  <label className="formLabel">文本归一化</label>
-                  <label className="controlRow" style={{ cursor: "pointer", padding: "8px 12px", background: "var(--bg-elevated)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-default)" }}>
-                    <input
-                      type="checkbox"
-                      checked={Boolean(voxcpm2Config.normalize)}
-                      onChange={(e) => onSetConfig({ voxcpm2: { ...voxcpm2Config, normalize: e.target.checked } })}
-                      style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
-                    />
-                    <span style={{ fontSize: 13.5, color: "var(--text-secondary)" }}>normalize</span>
-                  </label>
-                </div>
-              </div>
-            </TabsContent>
-          </Tabs>
+              </TabsContent>
+            </Tabs>
+          </ConsoleSection>
 
-          <Slider
-            label="段间静音 (ms)"
-            value={[Number(config.gap_duration_ms)]}
-            onValueChange={([v]) => onSetConfig({ gap_duration_ms: v })}
-            min={0}
-            max={2000}
-            step={100}
-            unit="ms"
-          />
+          <ConsoleSection title="时序控制" meta={timelineLockActive ? "已锁定" : "自由间隔"}>
+            <Slider
+              label="段间静音 (ms)"
+              value={[Number(config.gap_duration_ms)]}
+              onValueChange={([v]) => onSetConfig({ gap_duration_ms: v })}
+              min={0}
+              max={2000}
+              step={100}
+              unit="ms"
+            />
+            {showTimelineLock ? (
+              <SwitchRow
+                title="时间轴锁定合成"
+                description={
+                  isDubbingSourceProject
+                    ? "按 source_start_ms 放置音频"
+                    : "仅配音/字幕时间轴项目可用"
+                }
+                checked={canUseTimelineLock && Boolean(config.timeline_lock_enabled)}
+                disabled={!canUseTimelineLock || isRunning}
+                onChange={(checked) => onSetConfig({ timeline_lock_enabled: checked })}
+              />
+            ) : null}
+          </ConsoleSection>
 
           {!timelineLockActive && ttsBackend !== "voxcpm2" ? (
-            <div className="formGroup">
+            <ConsoleSection title="批量语速" meta={selectedSegmentCount ? `${selectedSegmentCount} 已选` : "全部片段"}>
               <label className="formLabel" htmlFor={speedInputId}>片段 speed（批量写入 tts_overrides）</label>
-              <div className="controlRow" style={{ alignItems: "center" }}>
+              <div className="consoleSpeedRow">
                 <input
                   id={speedInputId}
                   name="segment-speed"
@@ -204,7 +232,6 @@ export function SynthesisGenerateCard({
                   step="0.05"
                   value={speedDraft}
                   onChange={(event) => setSpeedDraft(event.target.value)}
-                  style={{ maxWidth: 140 }}
                 />
                 <Button
                   variant="secondary"
@@ -221,86 +248,59 @@ export function SynthesisGenerateCard({
                   应用到选中片段{selectedSegmentCount ? ` (${selectedSegmentCount})` : ""}
                 </Button>
               </div>
-              <div className="muted">
+              <div className="consoleHint">
                 若项目已有每段 <code>duration</code>，模型通常会优先按 duration 控制时长；遇到吞音时可降低 speed 或删除过短片段的 duration 后重生成。
               </div>
-            </div>
+            </ConsoleSection>
           ) : null}
 
-          {showTimelineLock ? (
-          <div className="formGroup">
-            <label className="formLabel">时间轴锁定合成</label>
-            <label className="controlRow" style={{ cursor: canUseTimelineLock ? "pointer" : "not-allowed", padding: "8px 12px", background: "var(--bg-elevated)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-default)", opacity: canUseTimelineLock ? 1 : 0.62 }}>
-              <input
-                type="checkbox"
-                checked={canUseTimelineLock && Boolean(config.timeline_lock_enabled)}
-                disabled={!canUseTimelineLock || isRunning}
-                onChange={(e) => onSetConfig({ timeline_lock_enabled: e.target.checked })}
-                style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
-              />
-              <span style={{ fontSize: 13.5, color: "var(--text-secondary)" }}>
-                {isDubbingSourceProject
-                  ? "按片段 source_start_ms 放置音频（翻译配音项目建议开启）"
-                  : "仅配音/字幕时间轴项目可用"}
-              </span>
-            </label>
-          </div>
-          ) : null}
-
-          <div className="editorGrid">
-            <div className="formGroup">
-              <label className="formLabel">输出格式</label>
-              <Select
-                value={config.output_format}
-                onValueChange={(v) => onSetConfig({ output_format: v })}
-                options={[
-                  { value: "wav", label: "WAV" },
-                  { value: "mp3", label: "MP3" },
-                ]}
-              />
-            </div>
-            <div className="formGroup">
-              <label className="formLabel">自动重试</label>
-              <label className="controlRow" style={{ cursor: "pointer", padding: "8px 12px", background: "var(--bg-elevated)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-default)" }}>
-                <input
-                  type="checkbox"
-                  checked={Boolean(config.tts_auto_retry ?? true)}
-                  onChange={(e) => onSetConfig({ tts_auto_retry: e.target.checked })}
-                  style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
+          <ConsoleSection title="输出与容错" meta={String(config.output_format || "wav").toUpperCase()}>
+            <div className="consoleFieldGrid">
+              <div className="formGroup">
+                <label className="formLabel">输出格式</label>
+                <Select
+                  value={config.output_format}
+                  onValueChange={(v) => onSetConfig({ output_format: v })}
+                  options={[
+                    { value: "wav", label: "WAV" },
+                    { value: "mp3", label: "MP3" },
+                  ]}
                 />
-                <span style={{ fontSize: 13.5, color: "var(--text-secondary)" }}>失败段自动重试</span>
-              </label>
-            </div>
-          </div>
-
-          <div className="editorGrid">
-            <div className="formGroup">
-              <label className="formLabel">重试次数</label>
-              <Select
-                value={String(config.tts_retry_attempts ?? 2)}
-                onValueChange={(value) => onSetConfig({ tts_retry_attempts: Number(value) })}
-                options={[
-                  { value: "0", label: "0 次" },
-                  { value: "1", label: "1 次" },
-                  { value: "2", label: "2 次" },
-                  { value: "3", label: "3 次" },
-                ]}
+              </div>
+              <SwitchRow
+                title="自动重试"
+                description="失败段自动重试"
+                checked={Boolean(config.tts_auto_retry ?? true)}
+                onChange={(checked) => onSetConfig({ tts_auto_retry: checked })}
               />
+              <div className="formGroup">
+                <label className="formLabel">重试次数</label>
+                <Select
+                  value={String(config.tts_retry_attempts ?? 2)}
+                  onValueChange={(value) => onSetConfig({ tts_retry_attempts: Number(value) })}
+                  options={[
+                    { value: "0", label: "0 次" },
+                    { value: "1", label: "1 次" },
+                    { value: "2", label: "2 次" },
+                    { value: "3", label: "3 次" },
+                  ]}
+                />
+              </div>
+              <div className="formGroup">
+                <label className="formLabel">段落并发</label>
+                <Select
+                  value={String(config.tts_segment_concurrency ?? 1)}
+                  onValueChange={(value) => onSetConfig({ tts_segment_concurrency: Number(value) })}
+                  options={[
+                    { value: "1", label: "1（稳定）" },
+                    { value: "2", label: "2（实验）" },
+                  ]}
+                />
+              </div>
             </div>
-            <div className="formGroup">
-              <label className="formLabel">段落并发</label>
-              <Select
-                value={String(config.tts_segment_concurrency ?? 1)}
-                onValueChange={(value) => onSetConfig({ tts_segment_concurrency: Number(value) })}
-                options={[
-                  { value: "1", label: "1（稳定）" },
-                  { value: "2", label: "2（实验）" },
-                ]}
-              />
-            </div>
-          </div>
+          </ConsoleSection>
 
-          <div className="controlRow">
+          <div className="controlRow synthesisConsoleActionRow">
             <Button
               variant="primary"
               size="lg"
@@ -310,7 +310,7 @@ export function SynthesisGenerateCard({
               {isRunning ? "合成中…" : "▶ 合成"}
             </Button>
             {isRunning ? <Button variant="danger" icon={Square} onClick={onCancel}>取消任务</Button> : null}
-            <span className="muted" style={{ marginLeft: "auto" }}>
+            <span className="muted synthesisConsoleProjectName">
               {currentProject ? currentProject.name : "未选择项目"}
             </span>
           </div>
@@ -347,9 +347,15 @@ export function SynthesisPostprocessCard({
   const trackItemRefs = useRef({});
   const [previewPlayingTrackId, setPreviewPlayingTrackId] = useState("");
   const chapterMarkers = Array.isArray(config.chapter_markers) ? config.chapter_markers : [];
+  const processedChapters = Array.isArray(currentProject?.audio_assets?.processed?.chapters)
+    ? currentProject.audio_assets.processed.chapters
+    : [];
   const hasRawFullAudio =
     Boolean(currentProject?.audio_assets?.full_wav_relpath) ||
     Boolean(currentProject?.audio_assets?.full_mp3_relpath);
+  const hasProcessedAudio =
+    Boolean(currentProject?.audio_assets?.processed?.full_wav_relpath) ||
+    Boolean(currentProject?.audio_assets?.processed?.full_mp3_relpath);
   const hasSourceAudio =
     Boolean(currentProject?.audio_assets?.source_audio_wav_relpath) ||
     Boolean(currentProject?.audio_assets?.source_audio_mp3_relpath);
@@ -359,6 +365,26 @@ export function SynthesisPostprocessCard({
   }));
   const rawMusicTracks = Array.isArray(config.music_tracks) ? config.music_tracks : [];
   const rawEffectTracks = Array.isArray(config.effect_tracks) ? config.effect_tracks : [];
+  const currentChapterSignature = JSON.stringify(
+    chapterMarkers.map((chapter, index) => ({
+      title: String(chapter?.title || `章节 ${index + 1}`).trim(),
+      start_segment_id: String(chapter?.start_segment_id || ""),
+    })),
+  );
+  const processedChapterSignature = JSON.stringify(
+    processedChapters.map((chapter, index) => ({
+      title: String(chapter?.title || `章节 ${index + 1}`).trim(),
+      start_segment_id: String(chapter?.start_segment_id || ""),
+    })),
+  );
+  const hasPendingChapterPostprocess = hasProcessedAudio
+    ? currentChapterSignature !== processedChapterSignature
+    : chapterMarkers.length > 0;
+  const pendingChapterPostprocessText = hasPendingChapterPostprocess
+    ? hasProcessedAudio
+      ? "章节标记已变更，执行后期处理后导出中心会更新。"
+      : "章节标记尚未执行后期处理，完成后才会出现在导出中心。"
+    : "";
 
   function basename(relpath) {
     const value = String(relpath || "");
@@ -711,19 +737,13 @@ export function SynthesisPostprocessCard({
         <div className="muted">已收起</div>
       ) : (
         <>
-          <div className="editorGrid">
-            <div className="formGroup">
-              <label className="formLabel">启用后期处理</label>
-              <label className="controlRow" style={{ cursor: "pointer" }}>
-                <input
-                  type="checkbox"
-                  checked={Boolean(config.postprocess_enabled)}
-                  onChange={(e) => onSetConfig({ postprocess_enabled: e.target.checked })}
-                  style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
-                />
-                <span style={{ fontSize: 13.5, color: "var(--text-secondary)" }}>完成合成后可执行后期处理</span>
-              </label>
-            </div>
+          <ConsoleSection title="基础设置" meta={config.postprocess_enabled ? "启用" : "关闭"}>
+            <SwitchRow
+              title="启用后期处理"
+              description="完成合成后可执行"
+              checked={Boolean(config.postprocess_enabled)}
+              onChange={(checked) => onSetConfig({ postprocess_enabled: checked })}
+            />
             <div className="formGroup">
               <label className="formLabel">MP3 码率</label>
               <Select
@@ -738,87 +758,83 @@ export function SynthesisPostprocessCard({
                 ]}
               />
             </div>
-          </div>
+          </ConsoleSection>
 
-          <div className="editorGrid">
-            <div className="formGroup">
-              <label className="formLabel">响度归一化</label>
-              <label className="controlRow" style={{ cursor: "pointer" }}>
-                <input
-                  type="checkbox"
-                  checked={Boolean(config.loudness_normalize)}
-                  onChange={(e) => onSetConfig({ loudness_normalize: e.target.checked })}
-                  style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
-                />
-                <span style={{ fontSize: 13.5, color: "var(--text-secondary)" }}>目标 LUFS</span>
-              </label>
-              <Slider
-                label="目标 LUFS"
-                value={[Number(config.target_lufs ?? -16)]}
-                onValueChange={([v]) => onSetConfig({ target_lufs: v })}
-                min={-24}
-                max={-10}
-                step={1}
+          <ConsoleSection title="母带处理" meta={`${Number(config.target_lufs ?? -16)} LUFS`}>
+            <div className="consoleSwitchGrid">
+              <SwitchRow
+                title="响度归一化"
+                description="目标 LUFS"
+                checked={Boolean(config.loudness_normalize)}
+                onChange={(checked) => onSetConfig({ loudness_normalize: checked })}
+              />
+              <SwitchRow
+                title="静音裁剪"
+                description="裁剪首尾静音"
+                checked={Boolean(config.trim_silence_enabled)}
+                onChange={(checked) => onSetConfig({ trim_silence_enabled: checked })}
               />
             </div>
-
-            <div className="formGroup">
-              <label className="formLabel">静音裁剪</label>
-              <label className="controlRow" style={{ cursor: "pointer" }}>
-                <input
-                  type="checkbox"
-                  checked={Boolean(config.trim_silence_enabled)}
-                  onChange={(e) => onSetConfig({ trim_silence_enabled: e.target.checked })}
-                  style={{ accentColor: "var(--accent-primary)", width: 15, height: 15 }}
-                />
-                <span style={{ fontSize: 13.5, color: "var(--text-secondary)" }}>裁剪首尾静音</span>
-              </label>
+            <Slider
+              label="目标 LUFS"
+              value={[Number(config.target_lufs ?? -16)]}
+              onValueChange={([v]) => onSetConfig({ target_lufs: v })}
+              min={-24}
+              max={-10}
+              step={1}
+            />
+            <Slider
+              label="静音阈值 (dB)"
+              value={[Number(config.trim_threshold_db ?? -45)]}
+              onValueChange={([v]) => onSetConfig({ trim_threshold_db: v })}
+              min={-70}
+              max={-20}
+              step={1}
+            />
+            <Slider
+              label="最小静音块 (ms)"
+              value={[Number(config.trim_min_silence_ms ?? 120)]}
+              onValueChange={([v]) => onSetConfig({ trim_min_silence_ms: v })}
+              min={20}
+              max={500}
+              step={10}
+            />
+            <div className="consoleFieldGrid">
               <Slider
-                label="静音阈值 (dB)"
-                value={[Number(config.trim_threshold_db ?? -45)]}
-                onValueChange={([v]) => onSetConfig({ trim_threshold_db: v })}
-                min={-70}
-                max={-20}
-                step={1}
-              />
-              <Slider
-                label="最小静音块 (ms)"
-                value={[Number(config.trim_min_silence_ms ?? 120)]}
-                onValueChange={([v]) => onSetConfig({ trim_min_silence_ms: v })}
-                min={20}
-                max={500}
+                label="淡入 (ms)"
+                value={[Number(config.fade_in_ms ?? 40)]}
+                onValueChange={([v]) => onSetConfig({ fade_in_ms: v })}
+                min={0}
+                max={1500}
                 step={10}
+                unit="ms"
+              />
+              <Slider
+                label="淡出 (ms)"
+                value={[Number(config.fade_out_ms ?? 80)]}
+                onValueChange={([v]) => onSetConfig({ fade_out_ms: v })}
+                min={0}
+                max={2000}
+                step={10}
+                unit="ms"
               />
             </div>
-          </div>
+          </ConsoleSection>
 
-          <div className="editorGrid">
-            <Slider
-              label="淡入 (ms)"
-              value={[Number(config.fade_in_ms ?? 40)]}
-              onValueChange={([v]) => onSetConfig({ fade_in_ms: v })}
-              min={0}
-              max={1500}
-              step={10}
-              unit="ms"
-            />
-            <Slider
-              label="淡出 (ms)"
-              value={[Number(config.fade_out_ms ?? 80)]}
-              onValueChange={([v]) => onSetConfig({ fade_out_ms: v })}
-              min={0}
-              max={2000}
-              step={10}
-              unit="ms"
-            />
-          </div>
-
-          <div className="formGroup">
-            <label className="formLabel">章节标记</label>
+          <ConsoleSection title="章节标记" meta={hasPendingChapterPostprocess ? `${chapterMarkers.length} 个 · 未处理` : `${chapterMarkers.length} 个`}>
             <div className="listStack">
+              {hasPendingChapterPostprocess ? (
+                <div className="postprocessPendingNotice" role="status">
+                  <AlertTriangle aria-hidden="true" focusable="false" size={15} />
+                  <div>
+                    <strong>有未处理后期</strong>
+                    <span>{pendingChapterPostprocessText}</span>
+                  </div>
+                </div>
+              ) : null}
               {chapterMarkers.map((item) => (
-                <div key={item.id} className="editorGrid" style={{ alignItems: "end" }}>
-                  <div className="formGroup">
+                <div key={item.id} className="chapterMarkerRow">
+                  <div className="formGroup chapterTitleField">
                     <label className="formLabel" htmlFor={`chapter-title-${item.id}`}>章节名</label>
                     <input
                       id={`chapter-title-${item.id}`}
@@ -845,10 +861,9 @@ export function SynthesisPostprocessCard({
                 添加章节标记
               </Button>
             </div>
-          </div>
+          </ConsoleSection>
 
-          <div className="formGroup">
-            <label className="formLabel">音乐和音效</label>
+          <ConsoleSection title="音乐和音效" meta={`${musicTracks.length + effectTracks.length} 条轨道`}>
             <div className="postprocessTrackActions">
               <Button
                 variant="secondary"
@@ -891,9 +906,9 @@ export function SynthesisPostprocessCard({
               {renderTrackList("music", musicTracks)}
               {renderTrackList("effect", effectTracks)}
             </div>
-          </div>
+          </ConsoleSection>
 
-          <div className="controlRow">
+          <div className="controlRow synthesisConsoleActionRow">
             <Button
               variant="primary"
               size="lg"
