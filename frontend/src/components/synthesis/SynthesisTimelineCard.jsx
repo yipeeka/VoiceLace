@@ -10,6 +10,45 @@ import Button from "../ui/Button";
 import SegmentTimelineRow from "./SegmentTimelineRow";
 import { applySegmentSelectionClick } from "../../utils/scriptSidebar";
 
+const DEFAULT_VISIBLE_COLUMNS = {
+  index: true,
+  start: true,
+  duration: true,
+  speaker: true,
+  status: true,
+  text: true,
+  audio: true,
+  drift: true,
+  actions: true,
+};
+
+const DATA_COLUMNS = [
+  { key: "index", label: "#", width: "42px" },
+  { key: "start", label: "开始时间", width: "86px" },
+  { key: "duration", label: "时长", width: "64px" },
+  { key: "speaker", label: "说话人", width: "104px" },
+  { key: "status", label: "状态", width: "78px" },
+  { key: "text", label: "文本（点击编辑）", width: "minmax(240px, 1fr)" },
+  { key: "audio", label: "音频", width: "132px" },
+  { key: "drift", label: "差值", width: "52px" },
+  { key: "actions", label: "操作", width: "54px" },
+];
+
+function buildSegmentSearchBlob(segment) {
+  return [
+    segment.text,
+    segment.speaker,
+    segment.type,
+    segment.emotion,
+    segment.status,
+    segment.display_status,
+    segment.workflow_status,
+    segment.segment_id,
+    segment.index != null ? `#${Number(segment.index) + 1}` : "",
+    segment.tts_overrides ? JSON.stringify(segment.tts_overrides) : "",
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
 export default function SynthesisTimelineCard({
   API_ORIGIN,
   sensors,
@@ -70,19 +109,39 @@ export default function SynthesisTimelineCard({
   const timelineRef = useRef(null);
   const selectionAnchorSegmentIdRef = useRef(null);
   const [showSelectedOnly, setShowSelectedOnly] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showFilterPanel, setShowFilterPanel] = useState(true);
+  const [showColumnSettings, setShowColumnSettings] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState(DEFAULT_VISIBLE_COLUMNS);
   const speakerOptions = [
     { value: "narrator", label: "narrator" },
     ...Array.from(new Set((segments || []).map((segment) => (segment.speaker || "").trim()).filter(Boolean)))
       .filter((name) => name !== "narrator")
       .map((name) => ({ value: name, label: name })),
   ];
-  const displaySegments = useMemo(() => {
-    if (!showSelectedOnly || !selectedSegmentIds.length) {
+  const columnTemplate = useMemo(() => [
+    "24px",
+    "30px",
+    ...DATA_COLUMNS.filter((column) => visibleColumns[column.key]).map((column) => column.width),
+  ].join(" "), [visibleColumns]);
+  const visibleDataColumns = useMemo(
+    () => DATA_COLUMNS.filter((column) => visibleColumns[column.key]),
+    [visibleColumns],
+  );
+  const searchedSegments = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) {
       return segments;
     }
+    return segments.filter((segment) => buildSegmentSearchBlob(segment).includes(query));
+  }, [searchQuery, segments]);
+  const displaySegments = useMemo(() => {
+    if (!showSelectedOnly || !selectedSegmentIds.length) {
+      return searchedSegments;
+    }
     const selectedSet = new Set(selectedSegmentIds);
-    return segments.filter((segment) => selectedSet.has(segment.segment_id));
-  }, [segments, selectedSegmentIds, showSelectedOnly]);
+    return searchedSegments.filter((segment) => selectedSet.has(segment.segment_id));
+  }, [searchedSegments, selectedSegmentIds, showSelectedOnly]);
 
   useEffect(() => {
     if (!currentSegmentId || !timelineRef.current) {
@@ -165,14 +224,39 @@ export default function SynthesisTimelineCard({
             />
             <span>仅显示选中 ({selectedSegmentIds.length})</span>
           </label>
-          <div className="segmentSearchBox" aria-hidden="true">
+          <div className="segmentSearchBox">
             <Search size={15} />
-            <span>搜索文本、说话人、标签...</span>
+            <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="搜索文本、说话人、标签..."
+              aria-label="搜索片段"
+            />
+            {searchQuery ? (
+              <button type="button" aria-label="清空搜索" onClick={() => setSearchQuery("")}>
+                <X size={14} />
+              </button>
+            ) : null}
           </div>
-          <Button variant="ghost" size="sm" icon={SlidersHorizontal} title="筛选" aria-label="筛选" />
-          <Button variant="ghost" size="sm" icon={Settings} title="列表设置" aria-label="列表设置" />
+          <Button
+            variant={showFilterPanel ? "secondary" : "ghost"}
+            size="sm"
+            icon={SlidersHorizontal}
+            title="显示/隐藏说话人筛选"
+            aria-label="筛选"
+            onClick={() => setShowFilterPanel((value) => !value)}
+          />
+          <Button
+            variant={showColumnSettings ? "secondary" : "ghost"}
+            size="sm"
+            icon={Settings}
+            title="设置列表显示列"
+            aria-label="列表设置"
+            onClick={() => setShowColumnSettings((value) => !value)}
+          />
         </div>
 
+        {showFilterPanel ? (
         <div className="segmentSpeakerToolbar">
           <button
             type="button"
@@ -195,16 +279,38 @@ export default function SynthesisTimelineCard({
             </button>
           ))}
         </div>
+        ) : null}
+
+        {showColumnSettings ? (
+          <div className="segmentColumnSettings" role="group" aria-label="列表设置">
+            <span>显示列</span>
+            {DATA_COLUMNS.map((column) => (
+              <label key={column.key}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(visibleColumns[column.key])}
+                  disabled={column.key === "text"}
+                  onChange={(event) => setVisibleColumns((current) => ({
+                    ...current,
+                    [column.key]: event.target.checked,
+                  }))}
+                />
+                {column.label}
+              </label>
+            ))}
+          </div>
+        ) : null}
 
         <div className="segmentListCommandRow">
           <div className="controlRow">
             <span className={`statusBadge ${hasUnsavedChanges ? "warning" : "success"}`}>
               {hasUnsavedChanges ? "有未保存改动" : "已保存"}
             </span>
-            {totalVisibleSegments ? (
+            {segments.length ? (
               <span className="muted">
-                当前显示 {totalVisibleSegments} / {totalSegments || statusCounts?.all || 0} 段
+                当前显示 {displaySegments.length} / {totalSegments || statusCounts?.all || 0} 段
                 {activeSpeakerFilter !== "all" ? "（已按说话人筛选）" : ""}
+                {searchQuery.trim() ? "（已搜索）" : ""}
               </span>
             ) : null}
             {totalVisibleSegments && activeSpeakerFilter !== "all" ? (
@@ -285,21 +391,13 @@ export default function SynthesisTimelineCard({
           </Button>
         </div>
       ) : null}
-      {segments.length && shouldShowSegmentTimeline ? (
+      {displaySegments.length && shouldShowSegmentTimeline ? (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onTimelineDragEnd}>
           <SortableContext items={displaySegments.map((seg) => seg.segment_id)} strategy={verticalListSortingStrategy}>
-            <div className="synthesisTimelineHeaderRow" aria-hidden="true">
+            <div className="synthesisTimelineHeaderRow" style={{ gridTemplateColumns: columnTemplate }} aria-hidden="true">
               <span></span>
               <span></span>
-              <span>#</span>
-              <span>开始时间</span>
-              <span>时长</span>
-              <span>说话人</span>
-              <span>状态</span>
-              <span>文本（点击编辑）</span>
-              <span>音频</span>
-              <span>差值</span>
-              <span>操作</span>
+              {visibleDataColumns.map((column) => <span key={column.key}>{column.label}</span>)}
             </div>
             <div className="synthesisTimeline" ref={timelineRef}>
               {displaySegments.map((seg) => {
@@ -341,12 +439,16 @@ export default function SynthesisTimelineCard({
                     onPickInsertAfter={handlePickInsertAfter}
                     playFrom={playFrom}
                     pushToast={pushToast}
+                    visibleColumns={visibleColumns}
+                    gridTemplateColumns={columnTemplate}
                   />
                 );
               })}
             </div>
           </SortableContext>
         </DndContext>
+      ) : searchQuery.trim() ? (
+        <EmptyState title="没有匹配片段" description="换个关键词，或清空搜索后查看全部当前筛选结果。" />
       ) : activeSpeakerFilter !== "all" ? (
         <EmptyState title="该角色暂无段落" description="切换角色或点击“总计”可查看其他段落。" />
       ) : shouldShowSegmentTimeline ? (

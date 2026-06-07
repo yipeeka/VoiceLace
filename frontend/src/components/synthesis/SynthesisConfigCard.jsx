@@ -335,7 +335,10 @@ export function SynthesisPostprocessCard({
   onUploadPostprocessAsset,
   onClearPostprocessAsset,
   selectedTrackId = "",
+  pendingTrackOffsets = {},
   onSelectTrack,
+  onApplyPendingTrackOffset,
+  onClearPendingTrackOffset,
   API_ORIGIN = "",
 }) {
   const musicInputRef = useRef(null);
@@ -378,21 +381,54 @@ export function SynthesisPostprocessCard({
     };
   }
 
+  function withPendingOffset(track) {
+    const pending = pendingTrackOffsets?.[track.id];
+    if (!pending || !Number.isFinite(Number(pending.offset_ms))) {
+      return track;
+    }
+    return {
+      ...track,
+      pending_offset_ms: Number(pending.offset_ms),
+    };
+  }
+
   const musicTracks = [
     ...(config.bgm_track?.relpath ? [normalizeTrack(config.bgm_track, "music", 0, "legacy-bgm")] : []),
     ...rawMusicTracks.map((track, index) => normalizeTrack(track, "music", index)),
-  ];
+  ].map(withPendingOffset);
   const effectTracks = [
     ...(config.ambience_track?.relpath ? [normalizeTrack(config.ambience_track, "effect", 0, "legacy-ambience")] : []),
     ...rawEffectTracks.map((track, index) => normalizeTrack(track, "effect", index)),
-  ];
+  ].map(withPendingOffset);
+
+  function scrollTrackItemIntoRail(trackId) {
+    const item = trackItemRefs.current[trackId];
+    const rail = item?.closest?.(".synthesisCommandRail");
+    if (!item || !rail) {
+      return;
+    }
+    const windowScrollX = window.scrollX;
+    const windowScrollY = window.scrollY;
+    const railRect = rail.getBoundingClientRect();
+    const itemRect = item.getBoundingClientRect();
+    const topPadding = 12;
+    const nextTop = Math.max(
+      0,
+      Math.min(
+        rail.scrollHeight - rail.clientHeight,
+        rail.scrollTop + itemRect.top - railRect.top - topPadding,
+      ),
+    );
+    rail.scrollTo({ top: nextTop, behavior: "smooth" });
+    requestAnimationFrame(() => {
+      window.scrollTo(windowScrollX, windowScrollY);
+    });
+  }
 
   useEffect(() => {
-    if (!selectedTrackId) return;
-    trackItemRefs.current[selectedTrackId]?.scrollIntoView({
-      block: "nearest",
-      behavior: "smooth",
-    });
+    if (!selectedTrackId || !expanded) return undefined;
+    const timer = window.setTimeout(() => scrollTrackItemIntoRail(selectedTrackId), 0);
+    return () => window.clearTimeout(timer);
   }, [selectedTrackId, expanded]);
 
   function selectTrack(trackId) {
@@ -400,6 +436,9 @@ export function SynthesisPostprocessCard({
   }
 
   function updateTrack(kind, trackId, patch) {
+    if (Object.prototype.hasOwnProperty.call(patch, "offset_ms")) {
+      onClearPendingTrackOffset?.(trackId);
+    }
     if (trackId === "legacy-bgm") {
       onSetConfig({ bgm_track: { ...(config.bgm_track || {}), ...patch } });
       return;
@@ -519,6 +558,10 @@ export function SynthesisPostprocessCard({
         {tracks.length ? (
           <div className="postprocessTrackList">
             {tracks.map((track) => (
+              (() => {
+                const hasPendingOffset = Number.isFinite(Number(track.pending_offset_ms));
+                const effectiveOffsetMs = hasPendingOffset ? Number(track.pending_offset_ms) : track.offset_ms;
+                return (
               <div
                 key={track.id}
                 ref={(node) => {
@@ -528,7 +571,7 @@ export function SynthesisPostprocessCard({
                     delete trackItemRefs.current[track.id];
                   }
                 }}
-                className={`postprocessTrackItem ${selectedTrackId === track.id ? "active" : ""}`}
+                className={`postprocessTrackItem ${selectedTrackId === track.id ? "active" : ""} ${hasPendingOffset ? "pending" : ""}`}
                 onClick={() => selectTrack(track.id)}
               >
                 <div className="postprocessTrackItemHeader">
@@ -573,13 +616,38 @@ export function SynthesisPostprocessCard({
                 />
                 <Slider
                   label="偏移 (ms)"
-                  value={[track.offset_ms]}
+                  value={[effectiveOffsetMs]}
                   onValueChange={([v]) => updateTrack(kind, track.id, { offset_ms: v })}
                   min={-30000}
                   max={30000}
                   step={50}
                   unit="ms"
                 />
+                {hasPendingOffset ? (
+                  <div className="postprocessTrackPendingBar">
+                    <span>时间轴改动待应用：{effectiveOffsetMs}ms</span>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onApplyPendingTrackOffset?.(kind, track.id);
+                      }}
+                    >
+                      应用
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onClearPendingTrackOffset?.(track.id);
+                      }}
+                    >
+                      撤销
+                    </Button>
+                  </div>
+                ) : null}
                 <div className="postprocessTrackFlags">
                   <label className="controlRow" style={{ cursor: "pointer" }}>
                     <input
@@ -613,6 +681,8 @@ export function SynthesisPostprocessCard({
                   />
                 ) : null}
               </div>
+                );
+              })()
             ))}
           </div>
         ) : (

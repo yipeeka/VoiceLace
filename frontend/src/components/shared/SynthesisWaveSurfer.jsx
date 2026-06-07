@@ -66,6 +66,7 @@ export default function SynthesisWaveSurfer({
   onWaveformSyncChange = null,
   externalScrollLeft = 0,
   externalScrollSignal = 0,
+  toolbarActions = null,
   children = null,
 }) {
   const containerRef = useRef(null);
@@ -452,7 +453,7 @@ export default function SynthesisWaveSurfer({
 
   return (
     <div className={`synthesisWaveformShell ${children ? "hasSyncedArrangement" : ""}`}>
-      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+      <div className="synthesisWaveformControlRow">
         <button
           type="button"
           onClick={togglePlay}
@@ -487,6 +488,12 @@ export default function SynthesisWaveSurfer({
         >
           {formatTime(currentTime)} / {formatTime(duration)}
         </span>
+
+        {toolbarActions ? (
+          <div className="synthesisWaveformToolbarActions">
+            {toolbarActions}
+          </div>
+        ) : null}
 
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginLeft: "auto", width: 260, color: "var(--text-muted)" }}>
           <ZoomOut aria-hidden="true" focusable="false" size={14} />

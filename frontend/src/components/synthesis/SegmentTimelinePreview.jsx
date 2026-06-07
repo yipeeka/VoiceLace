@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const SPEAKER_HUES = [202, 124, 277, 38, 160, 326, 52, 188, 250, 18];
+const SEGMENT_SNAP_MS = 50;
+const MIN_SEGMENT_DURATION_MS = 300;
 
 function formatTickTime(ms) {
   const totalSeconds = Math.max(0, Math.floor(Number(ms || 0) / 1000));
@@ -61,15 +63,18 @@ export default function SegmentTimelinePreview({
   currentSegmentId = "",
   config = {},
   selectedTrackId = "",
+  pendingTrackOffsets = {},
   waveformSync = {},
   onScrollLeftChange,
   onSegmentClick,
+  onSegmentTimingChange,
   onTrackSelect,
   onTrackOffsetChange,
 }) {
   const scrollerRef = useRef(null);
   const isInternalScrollRef = useRef(false);
   const dragCleanupRef = useRef(null);
+  const [draggingSegmentTiming, setDraggingSegmentTiming] = useState(null);
 
   const speakerHueMap = useMemo(() => {
     const map = {};
@@ -84,7 +89,24 @@ export default function SegmentTimelinePreview({
     return map;
   }, [segments]);
 
-  const postprocessTracks = useMemo(() => collectPostprocessTracks(config), [config]);
+  const postprocessTracks = useMemo(() => {
+    const collected = collectPostprocessTracks(config);
+    const applyPending = (track) => {
+      const pending = pendingTrackOffsets?.[track.id];
+      if (!pending || !Number.isFinite(Number(pending.offset_ms))) {
+        return track;
+      }
+      return {
+        ...track,
+        offsetMs: Number(pending.offset_ms),
+        pendingOffsetMs: Number(pending.offset_ms),
+      };
+    };
+    return {
+      music: collected.music.map(applyPending),
+      effect: collected.effect.map(applyPending),
+    };
+  }, [config, pendingTrackOffsets]);
   const trackOffsetEndMs = useMemo(() => (
     [...postprocessTracks.music, ...postprocessTracks.effect].reduce((maxEnd, track) => (
       Math.max(maxEnd, Math.max(0, Number(track.offsetMs || 0)) + 10_000)
@@ -135,30 +157,63 @@ export default function SegmentTimelinePreview({
     onScrollLeftChange?.(event.currentTarget.scrollLeft);
   }
 
+  function restoreScrollerLeft(left) {
+    const node = scrollerRef.current;
+    if (!node) return;
+    const targetLeft = Math.max(0, Number(left || 0));
+    isInternalScrollRef.current = true;
+    node.scrollLeft = targetLeft;
+    requestAnimationFrame(() => {
+      if (scrollerRef.current) {
+        scrollerRef.current.scrollLeft = targetLeft;
+      }
+      isInternalScrollRef.current = false;
+    });
+  }
+
   function handleAudioTrackPointerDown(event, kind, track) {
-    if (!onTrackOffsetChange || !Number.isFinite(pxPerMs) || pxPerMs <= 0) {
-      return;
-    }
     event.preventDefault();
     event.stopPropagation();
-    onTrackSelect?.(kind, track.id);
     dragCleanupRef.current?.();
     const startX = Number(event.clientX || 0);
+    const startScrollerLeft = Number(scrollerRef.current?.scrollLeft || 0);
     const startOffsetMs = Number(track.offsetMs || 0);
     const trackId = track.id;
+    let moved = false;
+    let selected = false;
+
+    function selectWithoutMovingTimeline() {
+      if (!selected) {
+        onTrackSelect?.(kind, trackId);
+        selected = true;
+      }
+      restoreScrollerLeft(startScrollerLeft);
+    }
 
     function handlePointerMove(moveEvent) {
-      const deltaMs = (Number(moveEvent.clientX || 0) - startX) / pxPerMs;
+      if (!onTrackOffsetChange || !Number.isFinite(pxPerMs) || pxPerMs <= 0) {
+        return;
+      }
+      const deltaPx = Number(moveEvent.clientX || 0) - startX;
+      if (Math.abs(deltaPx) <= 2) {
+        return;
+      }
+      moved = true;
+      selectWithoutMovingTimeline();
+      const deltaMs = deltaPx / pxPerMs;
       const snappedMs = Math.round((startOffsetMs + deltaMs) / 50) * 50;
       const nextOffsetMs = Math.max(0, Math.min(Math.round(timelineEndMs), snappedMs));
       onTrackOffsetChange(kind, trackId, nextOffsetMs);
     }
 
-    function cleanup() {
+    function cleanup(upEvent) {
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", cleanup);
       window.removeEventListener("pointercancel", cleanup);
       dragCleanupRef.current = null;
+      if (!moved && upEvent?.type === "pointerup") {
+        selectWithoutMovingTimeline();
+      }
     }
 
     dragCleanupRef.current = cleanup;
@@ -168,6 +223,66 @@ export default function SegmentTimelinePreview({
   }
 
   useEffect(() => () => dragCleanupRef.current?.(), []);
+
+  function snapSegmentMs(value) {
+    return Math.max(0, Math.round((Number(value) || 0) / SEGMENT_SNAP_MS) * SEGMENT_SNAP_MS);
+  }
+
+  function handleSegmentPointerDown(event, segment, baseStart, baseEnd, mode) {
+    if (!Number.isFinite(pxPerMs) || pxPerMs <= 0 || !Number.isFinite(baseStart) || !Number.isFinite(baseEnd) || baseEnd <= baseStart) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    dragCleanupRef.current?.();
+    const segmentId = segment.segment_id;
+    const startX = Number(event.clientX || 0);
+    const durationMs = Math.max(MIN_SEGMENT_DURATION_MS, baseEnd - baseStart);
+    let moved = false;
+    let latestStart = baseStart;
+    let latestEnd = baseEnd;
+
+    function applyPreview(deltaPx) {
+      const deltaMs = deltaPx / pxPerMs;
+      if (mode === "start") {
+        latestStart = Math.min(baseEnd - MIN_SEGMENT_DURATION_MS, snapSegmentMs(baseStart + deltaMs));
+        latestEnd = baseEnd;
+      } else if (mode === "end") {
+        latestStart = baseStart;
+        latestEnd = Math.max(baseStart + MIN_SEGMENT_DURATION_MS, snapSegmentMs(baseEnd + deltaMs));
+      } else {
+        latestStart = snapSegmentMs(baseStart + deltaMs);
+        latestEnd = latestStart + durationMs;
+      }
+      setDraggingSegmentTiming({ segmentId, start: latestStart, end: latestEnd });
+    }
+
+    function handlePointerMove(moveEvent) {
+      const deltaPx = Number(moveEvent.clientX || 0) - startX;
+      if (Math.abs(deltaPx) > 2) {
+        moved = true;
+      }
+      applyPreview(deltaPx);
+    }
+
+    function cleanup(upEvent) {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", cleanup);
+      window.removeEventListener("pointercancel", cleanup);
+      dragCleanupRef.current = null;
+      setDraggingSegmentTiming(null);
+      if (moved) {
+        onSegmentTimingChange?.(segmentId, latestStart, latestEnd);
+      } else if (upEvent?.type === "pointerup") {
+        onSegmentClick?.(segment);
+      }
+    }
+
+    dragCleanupRef.current = cleanup;
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", cleanup);
+    window.addEventListener("pointercancel", cleanup);
+  }
 
   return (
     <div className="segmentTimelinePreview" aria-label="片段时间线预览">
@@ -192,8 +307,9 @@ export default function SegmentTimelinePreview({
           <div className="segmentTimelinePreviewLane segmentTimelinePreviewSegmentLane">
             {segments.map((segment, index) => {
               const timing = segmentTimings[segment.segment_id];
-              const start = Number(timing?.start);
-              const end = Number(timing?.end);
+              const dragTiming = draggingSegmentTiming?.segmentId === segment.segment_id ? draggingSegmentTiming : null;
+              const start = Number(dragTiming?.start ?? timing?.start);
+              const end = Number(dragTiming?.end ?? timing?.end);
               const hasTiming = Number.isFinite(start) && Number.isFinite(end) && end > start;
               const left = hasTiming ? Math.max(0, start * pxPerMs) : 0;
               const width = hasTiming ? Math.max(18, (end - start) * pxPerMs) : Math.max(36, canvasWidth / Math.max(segments.length, 1));
@@ -201,26 +317,44 @@ export default function SegmentTimelinePreview({
               const bars = buildWaveBars(hashString(`${segment.segment_id}:${segment.text}:${segment.speaker}`));
               const label = `${segment.speaker || "narrator"}${segment.type === "dialogue" ? "" : ` (${segment.type || ""})`}`;
               return (
-                <button
-                  type="button"
+                <span
+                  role="button"
+                  tabIndex={hasTiming ? 0 : -1}
                   key={segment.segment_id}
-                  className={`segmentTimelinePreviewBlock ${currentSegmentId === segment.segment_id ? "active" : ""} ${hasTiming ? "" : "muted"}`}
+                  className={`segmentTimelinePreviewBlock ${currentSegmentId === segment.segment_id ? "active" : ""} ${dragTiming ? "dragging" : ""} ${hasTiming ? "" : "muted"}`}
                   style={{
                     left,
                     width,
                     "--segment-hue": hue,
                   }}
                   title={hasTiming ? `${label} ${formatTickTime(start)} - ${formatTickTime(end)}` : `${label} 缺少时间位置`}
-                  disabled={!hasTiming}
-                  onClick={() => onSegmentClick?.(segment)}
+                  aria-disabled={!hasTiming}
+                  onPointerDown={(event) => hasTiming ? handleSegmentPointerDown(event, segment, start, end, "move") : undefined}
+                  onKeyDown={(event) => {
+                    if (!hasTiming) return;
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      onSegmentClick?.(segment);
+                    }
+                  }}
                 >
+                  <i
+                    className="segmentTimelinePreviewResizeHandle left"
+                    aria-hidden="true"
+                    onPointerDown={(event) => handleSegmentPointerDown(event, segment, start, end, "start")}
+                  />
                   <span className="segmentTimelinePreviewLabel">{label}</span>
                   <span className="segmentTimelinePreviewWave" aria-hidden="true">
                     {bars.map((height, barIndex) => (
                       <i key={barIndex} style={{ height: `${height}%` }} />
                     ))}
                   </span>
-                </button>
+                  <i
+                    className="segmentTimelinePreviewResizeHandle right"
+                    aria-hidden="true"
+                    onPointerDown={(event) => handleSegmentPointerDown(event, segment, start, end, "end")}
+                  />
+                </span>
               );
             })}
             <span className="segmentTimelinePreviewPlayhead" style={{ left: playheadLeft }} aria-hidden="true" />
@@ -235,6 +369,7 @@ export default function SegmentTimelinePreview({
                 >
                   <span className="segmentTimelineAudioLaneLabel">{row.label}</span>
                   {row.tracks.length ? row.tracks.map((track, index) => {
+                    const hasPendingOffset = Number.isFinite(Number(track.pendingOffsetMs));
                     const startMs = Math.max(0, Number(track.offsetMs || 0));
                     const left = Math.max(0, startMs * pxPerMs);
                     const fallbackDurationMs = track.loop
@@ -246,7 +381,7 @@ export default function SegmentTimelinePreview({
                     return (
                       <span
                         key={track.id || `${row.kind}-${index}`}
-                        className={`segmentTimelineAudioBlock ${track.loop ? "loop" : ""} ${selectedTrackId === track.id ? "selected" : ""}`}
+                        className={`segmentTimelineAudioBlock ${track.loop ? "loop" : ""} ${selectedTrackId === track.id ? "selected" : ""} ${hasPendingOffset ? "pending" : ""}`}
                         style={{ left, width, "--segment-hue": hue }}
                         title={`${track.label} · ${formatTickTime(startMs)} · ${track.gainDb > 0 ? "+" : ""}${track.gainDb} dB${track.loop ? " · 循环" : ""} · 拖动调整位置`}
                         role="button"

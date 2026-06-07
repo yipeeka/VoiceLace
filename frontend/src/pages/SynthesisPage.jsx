@@ -76,6 +76,7 @@ export default function SynthesisPage() {
   const queryState = useMemo(() => readSynthesisQueryState(), []);
   const {
     currentProject,
+    setCurrentProject,
     refreshCurrentProject,
     importArchive,
     importWarnings,
@@ -118,6 +119,7 @@ export default function SynthesisPage() {
   const [diffPreviewOpen, setDiffPreviewOpen] = useState(false);
   const [isUploadingPostAsset, setIsUploadingPostAsset] = useState(false);
   const [selectedPostprocessTrackId, setSelectedPostprocessTrackId] = useState("");
+  const [pendingPostprocessTrackOffsets, setPendingPostprocessTrackOffsets] = useState({});
   const [expandedSynthesisPanel, setExpandedSynthesisPanel] = useState(queryState.panel);
   const [systemRuntimeStatus, setSystemRuntimeStatus] = useState(null);
   const [exportWizardOpen, setExportWizardOpen] = useState(false);
@@ -1287,6 +1289,96 @@ export default function SynthesisPage() {
     setExpandedSynthesisPanel("postprocess");
   }
 
+  function handlePreviewPostprocessTrackOffsetChange(kind, trackId, offsetMs) {
+    if (!trackId) {
+      return;
+    }
+    const normalizedOffset = Math.round(Number(offsetMs) || 0);
+    setSelectedPostprocessTrackId(trackId);
+    setExpandedSynthesisPanel("postprocess");
+    setPendingPostprocessTrackOffsets((current) => ({
+      ...current,
+      [trackId]: {
+        kind: kind === "effect" ? "effect" : "music",
+        offset_ms: normalizedOffset,
+      },
+    }));
+  }
+
+  function clearPendingPostprocessTrackOffset(trackId) {
+    if (!trackId) {
+      return;
+    }
+    setPendingPostprocessTrackOffsets((current) => {
+      if (!current[trackId]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[trackId];
+      return next;
+    });
+  }
+
+  function applyPendingPostprocessTrackOffset(kind, trackId) {
+    const pending = pendingPostprocessTrackOffsets[trackId];
+    if (!trackId || !pending) {
+      return;
+    }
+    const normalizedKind = kind === "effect" || pending.kind === "effect" ? "effect" : "music";
+    const offsetMs = Math.round(Number(pending.offset_ms) || 0);
+    let configPatch = {};
+    if (trackId === "legacy-bgm") {
+      configPatch = { bgm_track: { ...(config.bgm_track || {}), offset_ms: offsetMs } };
+    } else if (trackId === "legacy-ambience") {
+      configPatch = { ambience_track: { ...(config.ambience_track || {}), offset_ms: offsetMs } };
+    } else {
+      const key = normalizedKind === "music" ? "music_tracks" : "effect_tracks";
+      const sourceTracks = Array.isArray(config[key]) ? config[key] : [];
+      configPatch = {
+        [key]: sourceTracks.map((track, index) => {
+          const id = String(track?.id || `${normalizedKind}-${index + 1}`);
+          return id === trackId ? { ...track, offset_ms: offsetMs } : track;
+        }),
+      };
+    }
+    setConfig(configPatch);
+    if (currentProject) {
+      setCurrentProject({
+        ...currentProject,
+        synthesis_config: {
+          ...(currentProject.synthesis_config || {}),
+          ...config,
+          ...configPatch,
+        },
+      });
+    }
+    clearPendingPostprocessTrackOffset(trackId);
+    pushToast({ title: "时间轴偏移已应用", tone: "success" });
+  }
+
+  function handlePreviewSegmentTimingChange(segmentId, startMs, endMs) {
+    const normalizedStart = Math.max(0, Math.round(Number(startMs) || 0));
+    const normalizedEnd = Math.max(normalizedStart + 300, Math.round(Number(endMs) || normalizedStart + 300));
+    applyDraftMutation((current) => ({
+      ...(current || {}),
+      segments: (current?.segments || []).map((segment, index) => {
+        const id = segment.id || segment.segment_id;
+        if (id !== segmentId) {
+          return { ...segment, index };
+        }
+        return {
+          ...segment,
+          index,
+          source_start_ms: normalizedStart,
+          source_end_ms: normalizedEnd,
+          source_duration_ms: normalizedEnd - normalizedStart,
+        };
+      }),
+    }));
+    setConfig({ timeline_lock_enabled: true });
+    setArrangementEdited(false);
+  }
+
   function handleClearPostprocessAsset(assetType) {
     if (assetType === "bgm") {
       setConfig({
@@ -1389,7 +1481,7 @@ export default function SynthesisPage() {
     }
     const forceSaveAs = Boolean(options?.forceSaveAs);
     const payload = buildProjectFilePayload({
-      project: currentProject,
+      project: { ...currentProject, synthesis_config: config },
       script: draftScript || script,
       sourceText: draftScript?.source_text || sourceText || script?.source_text || "",
     });
@@ -1415,11 +1507,13 @@ export default function SynthesisPage() {
     }
   }, [
     currentProject,
+    config,
     draftScript,
     script,
     sourceText,
     currentProjectFileHandle,
     bindCurrentProjectFile,
+    setCurrentProject,
     pushToast,
   ]);
 
@@ -1437,7 +1531,10 @@ export default function SynthesisPage() {
             currentProject={currentProject}
             projectId={currentProject?.id}
             fullAudioUrl={fullAudioUrl}
+            rawAudioUrl={rawAudioUrl}
+            processedAudioUrl={processedAudioUrl}
             audioVariant={audioVariant}
+            onAudioVariantChange={setAudioVariant}
             segments={segments}
             gapDurationMs={Number(config.gap_duration_ms || 300)}
             useSourceTimeline={useSourceTimeline}
@@ -1448,6 +1545,7 @@ export default function SynthesisPage() {
             segmentTimings={segmentTimings}
             currentSegmentId={highlightedSegmentId}
             onLocateFullAudioSegment={handleLocateFullAudioSegment}
+            onSegmentTimingChange={handlePreviewSegmentTimingChange}
             arrangementDraft={arrangementDraft}
             arrangementDirty={arrangementDirty}
             arrangementWarnings={arrangementWarnings}
@@ -1457,7 +1555,9 @@ export default function SynthesisPage() {
             config={config}
             onSetConfig={setConfig}
             selectedPostprocessTrackId={selectedPostprocessTrackId}
+            pendingPostprocessTrackOffsets={pendingPostprocessTrackOffsets}
             onSelectPostprocessTrack={handleSelectPostprocessTrack}
+            onPreviewPostprocessTrackOffsetChange={handlePreviewPostprocessTrackOffsetChange}
             isRunning={isRunning}
             isUploadingPostAsset={isUploadingPostAsset}
             bgmPreviewUrl={bgmPreviewUrl}
@@ -1579,7 +1679,10 @@ export default function SynthesisPage() {
             onUploadPostprocessAsset={handleUploadPostprocessAsset}
             onClearPostprocessAsset={handleClearPostprocessAsset}
             selectedTrackId={selectedPostprocessTrackId}
+            pendingTrackOffsets={pendingPostprocessTrackOffsets}
             onSelectTrack={setSelectedPostprocessTrackId}
+            onApplyPendingTrackOffset={applyPendingPostprocessTrackOffset}
+            onClearPendingTrackOffset={clearPendingPostprocessTrackOffset}
             API_ORIGIN={API_ORIGIN}
           />
           <SynthesisTaskStatusCard
@@ -1606,7 +1709,6 @@ export default function SynthesisPage() {
             processedAudioUrl={processedAudioUrl}
             chapterExports={chapterExports}
             audioVariant={audioVariant}
-            onAudioVariantChange={setAudioVariant}
             subtitleSrtUrl={subtitleSrtUrl}
             subtitleLrcUrl={subtitleLrcUrl}
             currentProject={currentProject}

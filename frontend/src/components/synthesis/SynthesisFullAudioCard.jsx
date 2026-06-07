@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import Button from "../ui/Button";
 import GlassCard from "../shared/GlassCard";
 import SynthesisWaveSurfer from "../shared/SynthesisWaveSurfer";
 import SegmentTimelinePreview from "./SegmentTimelinePreview";
@@ -12,7 +13,10 @@ function isEditableTarget(target) {
 export default function SynthesisFullAudioCard({
   projectId,
   fullAudioUrl,
+  rawAudioUrl = "",
+  processedAudioUrl = "",
   audioVariant = "raw",
+  onAudioVariantChange,
   segments,
   gapDurationMs,
   useSourceTimeline = false,
@@ -24,10 +28,13 @@ export default function SynthesisFullAudioCard({
   segmentTimings = {},
   currentSegmentId = "",
   onLocateFullAudioSegment,
+  onSegmentTimingChange,
   config = {},
   onSetConfig,
   selectedPostprocessTrackId = "",
+  pendingPostprocessTrackOffsets = {},
   onSelectPostprocessTrack,
+  onPreviewPostprocessTrackOffsetChange,
   className = "",
 }) {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -64,6 +71,10 @@ export default function SynthesisFullAudioCard({
     return null;
   }
 
+  function handleVariantChange(variant) {
+    onAudioVariantChange?.(variant);
+  }
+
   function handleArrangementScrollLeftChange(scrollLeft) {
     const nextLeft = Math.max(0, Number(scrollLeft || 0));
     setWaveformSync((current) => ({ ...current, scrollLeft: nextLeft }));
@@ -97,6 +108,26 @@ export default function SynthesisFullAudioCard({
         onWaveformSyncChange={setWaveformSync}
         externalScrollLeft={waveformScrollRequest.left}
         externalScrollSignal={waveformScrollRequest.signal}
+        toolbarActions={(
+          <div className="synthesisWaveformVariantActions" aria-label="音频版本播放">
+            <Button
+              variant={audioVariant === "raw" ? "primary" : "secondary"}
+              size="sm"
+              disabled={!rawAudioUrl}
+              onClick={() => handleVariantChange("raw")}
+            >
+              原始
+            </Button>
+            <Button
+              variant={audioVariant === "processed" ? "primary" : "secondary"}
+              size="sm"
+              disabled={!processedAudioUrl}
+              onClick={() => handleVariantChange("processed")}
+            >
+              后期
+            </Button>
+          </div>
+        )}
       >
         <SegmentTimelinePreview
           segments={segments}
@@ -105,11 +136,17 @@ export default function SynthesisFullAudioCard({
           currentSegmentId={currentSegmentId}
           config={config}
           selectedTrackId={selectedPostprocessTrackId}
+          pendingTrackOffsets={pendingPostprocessTrackOffsets}
           waveformSync={waveformSync}
           onScrollLeftChange={handleArrangementScrollLeftChange}
           onSegmentClick={onLocateFullAudioSegment}
+          onSegmentTimingChange={onSegmentTimingChange}
           onTrackSelect={onSelectPostprocessTrack}
           onTrackOffsetChange={(kind, trackId, offsetMs) => {
+            if (onPreviewPostprocessTrackOffsetChange) {
+              onPreviewPostprocessTrackOffsetChange(kind, trackId, offsetMs);
+              return;
+            }
             if (!onSetConfig) return;
             if (trackId === "legacy-bgm") {
               onSetConfig({ bgm_track: { ...(config.bgm_track || {}), offset_ms: offsetMs } });

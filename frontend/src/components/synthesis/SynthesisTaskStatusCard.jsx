@@ -28,7 +28,6 @@ export default function SynthesisTaskStatusCard({
   processedAudioUrl,
   chapterExports = [],
   audioVariant = "raw",
-  onAudioVariantChange,
   subtitleSrtUrl,
   subtitleLrcUrl,
   currentProject,
@@ -187,24 +186,6 @@ export default function SynthesisTaskStatusCard({
           </div>
         </details>
       ) : null}
-      <div className="controlRow synthesisAudioVariantRow" style={{ marginTop: 8, gap: 8, flexWrap: "wrap" }}>
-        <Button
-          variant={audioVariant === "raw" ? "primary" : "secondary"}
-          size="sm"
-          disabled={!rawAudioUrl}
-          onClick={() => onAudioVariantChange?.("raw")}
-        >
-          播放原始
-        </Button>
-        <Button
-          variant={audioVariant === "processed" ? "primary" : "secondary"}
-          size="sm"
-          disabled={!processedAudioUrl}
-          onClick={() => onAudioVariantChange?.("processed")}
-        >
-          播放后期处理
-        </Button>
-      </div>
       {normalizedChapterExports.length ? (
         <div className="listStack synthesisChapterExportList" style={{ marginTop: 8 }}>
           {normalizedChapterExports.map((chapter) => (

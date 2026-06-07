@@ -77,6 +77,8 @@ export default function SegmentTimelineRow({
   onPickInsertAfter,
   playFrom,
   pushToast,
+  visibleColumns = {},
+  gridTemplateColumns,
 }) {
   const [actionsOpen, setActionsOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -156,6 +158,7 @@ export default function SegmentTimelineRow({
           transform: CSS.Transform.toString(transform),
           transition,
           opacity: isDragging ? 0.6 : 1,
+          ...(gridTemplateColumns ? { gridTemplateColumns } : {}),
           ...(isInsertAnchor ? { borderColor: "var(--accent-secondary)" } : {}),
           ...(isEditing ? { alignItems: "flex-start", flexWrap: "wrap" } : {}),
         }}
@@ -182,17 +185,22 @@ export default function SegmentTimelineRow({
           )}
         />
       </label>
-      <span className="synthSegmentIndex">#{(seg.index ?? 0) + 1}</span>
-      {startTimeText ? (
-        <span className="synthSegmentStartCell">{startTimeText}</span>
-      ) : (
-        <span className="synthSegmentStartCell muted">--</span>
-      )}
-      {durationText ? (
-        <span className="synthSegmentDurationCell">{durationText}</span>
-      ) : (
-        <span className="synthSegmentDurationCell muted">--</span>
-      )}
+      {visibleColumns.index !== false ? <span className="synthSegmentIndex">#{(seg.index ?? 0) + 1}</span> : null}
+      {visibleColumns.start !== false ? (
+        startTimeText ? (
+          <span className="synthSegmentStartCell">{startTimeText}</span>
+        ) : (
+          <span className="synthSegmentStartCell muted">--</span>
+        )
+      ) : null}
+      {visibleColumns.duration !== false ? (
+        durationText ? (
+          <span className="synthSegmentDurationCell">{durationText}</span>
+        ) : (
+          <span className="synthSegmentDurationCell muted">--</span>
+        )
+      ) : null}
+      {visibleColumns.speaker !== false ? (
       <div className="synthSegmentMeta" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
         <div className="synthSegmentSpeakerStack">
           <div className="synthSegmentSpeakerRow">
@@ -200,6 +208,8 @@ export default function SegmentTimelineRow({
           </div>
         </div>
       </div>
+      ) : null}
+      {visibleColumns.status !== false ? (
       <div className="synthSegmentStateBadges">
           <span className={`statusBadge ${segStatus === "done" ? "success" : segStatus === "failed" || segStatus === "error" || segStatus === "missing" ? "danger" : "warning"}`}>
             {primaryStatusLabel}
@@ -215,6 +225,7 @@ export default function SegmentTimelineRow({
             </span>
           ) : null}
       </div>
+      ) : null}
 
       {isEditing ? (
         <div className="synthSegmentEditorPanel">
@@ -251,7 +262,7 @@ export default function SegmentTimelineRow({
             </Button>
           </div>
         </div>
-      ) : (
+      ) : visibleColumns.text !== false ? (
         <div className="synthSegmentTextCell">
           <p
             className="synthProgressBar synthSegmentText"
@@ -266,20 +277,22 @@ export default function SegmentTimelineRow({
             </div>
           ) : null}
         </div>
-      )}
+      ) : null}
 
-      {canPlaySegment && (
+      {visibleColumns.audio !== false && canPlaySegment && (
         <div className="synthSegmentAudioCell">
           <AudioPlayer audioUrl={`${API_ORIGIN}${seg.audio_url}`} peaks={seg.peaks} peaksUrl={seg.peaks_url} height={32} compact showTime={false} />
         </div>
       )}
-      {!canPlaySegment && <div className="synthSegmentAudioCell synthSegmentAudioEmpty">--</div>}
+      {visibleColumns.audio !== false && !canPlaySegment && <div className="synthSegmentAudioCell synthSegmentAudioEmpty">--</div>}
+      {visibleColumns.drift !== false ? (
       <span className={`synthSegmentDrift ${durationMismatch?.isMismatch ? "warn" : "ok"}`}>
         {durationMismatch?.isMismatch
           ? `${durationMismatch.direction === "target_shorter" ? "+" : "-"}${Math.round(Number(durationMismatch.diffSec || 0) * 1000)}ms`
           : segStatus === "done" ? "0ms" : "--"}
       </span>
-      {isEditing ? null : (
+      ) : null}
+      {isEditing || visibleColumns.actions === false ? null : (
         <div className="synthSegmentActions" ref={actionsRef}>
           <Button
             variant="ghost"
