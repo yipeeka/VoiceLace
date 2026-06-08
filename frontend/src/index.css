@@ -1485,6 +1485,7 @@ select.textInput option {
 .synthSegmentRow.actionsOpen,
 .synthSegmentRow:has(.synthSegmentActionIcons.open) {
   z-index: 20;
+  content-visibility: visible;
 }
 
 .synthSegmentIndex {
@@ -1587,8 +1588,9 @@ select.textInput option {
 .synthSegmentActionIcons {
   display: inline-flex;
   position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
+  right: calc(100% + 6px);
+  top: 50%;
+  z-index: 80;
   align-items: center;
   gap: 4px;
   padding: 4px;
@@ -1598,6 +1600,7 @@ select.textInput option {
   box-shadow: var(--shadow-sm);
   opacity: 0;
   pointer-events: none;
+  transform: translateY(-50%);
   transition: opacity var(--duration-fast) ease,
               border-color var(--duration-fast) ease;
 }
@@ -3481,12 +3484,22 @@ select.textInput option {
 }
 
 .synthesisCommandTimelineCard {
+  --synthesis-timeline-table-min-width: 960px;
   padding: 14px;
   overflow-x: hidden;
   overflow-y: visible;
 }
 
+.synthesisTimelineTableScroll {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: visible;
+  scrollbar-width: thin;
+}
+
 .synthesisCommandTimelineCard .synthesisTimeline {
+  min-width: max(100%, var(--synthesis-timeline-table-min-width));
   max-height: min(66vh, 720px);
   gap: 0;
   padding-right: 0;
@@ -3699,6 +3712,7 @@ select.textInput option {
   display: grid;
   grid-template-columns: 24px 30px 42px 86px 64px 104px 78px minmax(240px, 1fr) 132px 52px 54px;
   align-items: center;
+  min-width: max(100%, var(--synthesis-timeline-table-min-width, 960px));
   min-height: 42px;
   padding: 0 8px;
   border: 1px solid var(--border-subtle);
@@ -3715,6 +3729,7 @@ select.textInput option {
   display: grid;
   grid-template-columns: 24px 30px 42px 86px 64px 104px 78px minmax(240px, 1fr) 132px 52px 54px;
   gap: 0;
+  min-width: max(100%, var(--synthesis-timeline-table-min-width));
   min-height: 58px;
   padding: 0 8px;
   border-width: 0 0 1px 0;
@@ -3940,17 +3955,21 @@ select.textInput option {
 }
 
 @media (max-width: 1120px) {
+  .synthesisCommandTimelineCard {
+    --synthesis-timeline-table-min-width: 860px;
+  }
+
   .synthesisTimelineHeaderRow {
-    display: none;
+    display: grid;
   }
 
   .synthesisCommandTimelineCard .synthSegmentRow {
-    grid-template-columns: 28px 34px 58px minmax(0, 1fr) auto;
-    min-height: 68px;
-    padding: 8px;
-    border: 1px solid var(--border-subtle);
-    border-radius: 8px;
-    margin-bottom: 6px;
+    grid-template-columns: 22px 28px 38px 76px 56px 88px 70px minmax(210px, 1fr) 108px 44px 46px;
+    min-height: 58px;
+    padding: 0 8px;
+    border-width: 0 0 1px 0;
+    border-radius: 0;
+    margin-bottom: 0;
   }
 
   .synthesisCommandTimelineCard .synthSegmentStartCell,
@@ -3958,7 +3977,7 @@ select.textInput option {
   .synthesisCommandTimelineCard .synthSegmentStateBadges,
   .synthesisCommandTimelineCard .synthSegmentAudioCell,
   .synthesisCommandTimelineCard .synthSegmentDrift {
-    display: none;
+    display: flex;
   }
 }
 

@@ -293,7 +293,12 @@ export default function SegmentTimelineRow({
       </span>
       ) : null}
       {isEditing || visibleColumns.actions === false ? null : (
-        <div className="synthSegmentActions" ref={actionsRef}>
+        <div
+          className="synthSegmentActions"
+          ref={actionsRef}
+          onClick={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
           <Button
             variant="ghost"
             size="sm"
@@ -303,7 +308,10 @@ export default function SegmentTimelineRow({
             aria-label="更多操作"
             aria-haspopup="menu"
             aria-expanded={actionsOpen}
-            onClick={() => setActionsOpen((open) => !open)}
+            onClick={(event) => {
+              event.stopPropagation();
+              setActionsOpen((open) => !open);
+            }}
           />
           <div className={`synthSegmentActionIcons ${actionsOpen ? "open" : ""}`} role="menu">
             {canPlaySegment && (

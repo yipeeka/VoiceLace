@@ -400,56 +400,58 @@ export default function SynthesisTimelineCard({
       {displaySegments.length && shouldShowSegmentTimeline ? (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onTimelineDragEnd}>
           <SortableContext items={displaySegments.map((seg) => seg.segment_id)} strategy={verticalListSortingStrategy}>
-            <div className="synthesisTimelineHeaderRow" style={{ gridTemplateColumns: columnTemplate }} aria-hidden="true">
-              <span></span>
-              <span></span>
-              {visibleDataColumns.map((column) => <span key={column.key}>{column.label}</span>)}
-            </div>
-            <div className="synthesisTimeline" ref={timelineRef}>
-              {displaySegments.map((seg) => {
-                const selected = selectedSegmentIds.includes(seg.segment_id);
-                const staleItem = staleItemBySegmentId[seg.segment_id];
-                const staleLabel = getSegmentStaleLabel(staleItem);
-                const isEditing = editingSegmentId === seg.segment_id;
-                return (
-                  <SegmentTimelineRow
-                    key={seg.segment_id}
-                    API_ORIGIN={API_ORIGIN}
-                    seg={seg}
-                    canReorder={canReorderTimeline}
-                    isRunning={isRunning}
-                    selected={selected}
-                    onToggleSelected={(checked, shiftKey) => handleToggleSegmentSelected(seg.segment_id, checked, shiftKey)}
-                    staleItem={staleItem}
-                    staleLabel={staleLabel}
-                    segmentTiming={segmentTimings[seg.segment_id]}
-                    formatTimeMs={formatTimeMs}
-                    currentSegmentId={currentSegmentId}
-                    recentlyUpdatedSegmentId={recentlyUpdatedSegmentId}
-                    isEditing={isEditing}
-                    isInsertAnchor={insertAfterSegmentId === seg.segment_id}
-                    segmentDraft={segmentDraft}
-                    speakerOptions={speakerOptions}
-                    setSegmentDraft={setSegmentDraft}
-                    isScriptSaving={isScriptSaving}
-                    beginEditSegment={beginEditSegment}
-                    cancelEditSegment={cancelEditSegment}
-                    saveEditedSegment={saveEditedSegment}
-                    onSegmentCursorChange={onSegmentCursorChange}
-                    onSplitAtCursor={onSplitAtCursor}
-                    handleSingleSegmentSynthesis={handleSingleSegmentSynthesis}
-                    handleDeleteSegment={handleDeleteSegment}
-                    setInsertAfterSegmentId={setInsertAfterSegmentId}
-                    onLocateFullAudioSegment={onLocateFullAudioSegment}
-                    insertPickMode={insertPickMode}
-                    onPickInsertAfter={handlePickInsertAfter}
-                    playFrom={playFrom}
-                    pushToast={pushToast}
-                    visibleColumns={visibleColumns}
-                    gridTemplateColumns={columnTemplate}
-                  />
-                );
-              })}
+            <div className="synthesisTimelineTableScroll">
+              <div className="synthesisTimelineHeaderRow" style={{ gridTemplateColumns: columnTemplate }} aria-hidden="true">
+                <span></span>
+                <span></span>
+                {visibleDataColumns.map((column) => <span key={column.key}>{column.label}</span>)}
+              </div>
+              <div className="synthesisTimeline" ref={timelineRef}>
+                {displaySegments.map((seg) => {
+                  const selected = selectedSegmentIds.includes(seg.segment_id);
+                  const staleItem = staleItemBySegmentId[seg.segment_id];
+                  const staleLabel = getSegmentStaleLabel(staleItem);
+                  const isEditing = editingSegmentId === seg.segment_id;
+                  return (
+                    <SegmentTimelineRow
+                      key={seg.segment_id}
+                      API_ORIGIN={API_ORIGIN}
+                      seg={seg}
+                      canReorder={canReorderTimeline}
+                      isRunning={isRunning}
+                      selected={selected}
+                      onToggleSelected={(checked, shiftKey) => handleToggleSegmentSelected(seg.segment_id, checked, shiftKey)}
+                      staleItem={staleItem}
+                      staleLabel={staleLabel}
+                      segmentTiming={segmentTimings[seg.segment_id]}
+                      formatTimeMs={formatTimeMs}
+                      currentSegmentId={currentSegmentId}
+                      recentlyUpdatedSegmentId={recentlyUpdatedSegmentId}
+                      isEditing={isEditing}
+                      isInsertAnchor={insertAfterSegmentId === seg.segment_id}
+                      segmentDraft={segmentDraft}
+                      speakerOptions={speakerOptions}
+                      setSegmentDraft={setSegmentDraft}
+                      isScriptSaving={isScriptSaving}
+                      beginEditSegment={beginEditSegment}
+                      cancelEditSegment={cancelEditSegment}
+                      saveEditedSegment={saveEditedSegment}
+                      onSegmentCursorChange={onSegmentCursorChange}
+                      onSplitAtCursor={onSplitAtCursor}
+                      handleSingleSegmentSynthesis={handleSingleSegmentSynthesis}
+                      handleDeleteSegment={handleDeleteSegment}
+                      setInsertAfterSegmentId={setInsertAfterSegmentId}
+                      onLocateFullAudioSegment={onLocateFullAudioSegment}
+                      insertPickMode={insertPickMode}
+                      onPickInsertAfter={handlePickInsertAfter}
+                      playFrom={playFrom}
+                      pushToast={pushToast}
+                      visibleColumns={visibleColumns}
+                      gridTemplateColumns={columnTemplate}
+                    />
+                  );
+                })}
+              </div>
             </div>
           </SortableContext>
         </DndContext>
