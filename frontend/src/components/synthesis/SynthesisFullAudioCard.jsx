@@ -21,6 +21,8 @@ export default function SynthesisFullAudioCard({
   fullAudioUrl,
   rawAudioUrl = "",
   processedAudioUrl = "",
+  sourceAudioUrl = "",
+  sourceAudioStartMs = 0,
   audioVariant = "raw",
   onAudioVariantChange,
   segments,
@@ -33,7 +35,12 @@ export default function SynthesisFullAudioCard({
   fullAudioCurrentTime = 0,
   segmentTimings = {},
   currentSegmentId = "",
+  singlePlayingSegmentId = "",
+  isSinglePlaying = false,
+  isAutoPlay = false,
   onLocateFullAudioSegment,
+  onPlaySegmentAudio,
+  onStopAutoPlay,
   onSegmentTimingChange,
   config = {},
   onSetConfig,
@@ -51,10 +58,20 @@ export default function SynthesisFullAudioCard({
     scrollWidth: 0,
     clientWidth: 0,
     pixelsPerSecond: 0,
+    signal: 0,
   });
   const [waveformScrollRequest, setWaveformScrollRequest] = useState({ left: 0, signal: 0 });
+  const [waveformZoom, setWaveformZoom] = useState(0);
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
   const [timelineReady, setTimelineReady] = useState(false);
+  const [showSourceAudio, setShowSourceAudio] = useState(false);
+  const hasSourceAudio = Boolean(sourceAudioUrl);
+
+  useEffect(() => {
+    if (!hasSourceAudio) {
+      setShowSourceAudio(false);
+    }
+  }, [hasSourceAudio]);
 
   useEffect(() => {
     if (!fullAudioUrl) {
@@ -134,6 +151,7 @@ export default function SynthesisFullAudioCard({
         projectId={projectId}
         audioUrl={fullAudioUrl}
         audioVariant={audioVariant}
+        audioLabel="完整音频"
         segments={segments}
         gapDurationMs={gapDurationMs}
         useSourceTimeline={useSourceTimeline}
@@ -145,9 +163,16 @@ export default function SynthesisFullAudioCard({
         seekSignal={seekSignal}
         playOnSeek={playOnSeek}
         onPlayStateChange={setIsPlaying}
-        onWaveformSyncChange={setWaveformSync}
+        onWaveformSyncChange={(nextSync) => {
+          setWaveformSync((current) => ({
+            ...nextSync,
+            signal: current.signal + 1,
+          }));
+        }}
         externalScrollLeft={waveformScrollRequest.left}
         externalScrollSignal={waveformScrollRequest.signal}
+        zoomValue={waveformZoom}
+        onZoomChange={setWaveformZoom}
         toolbarActions={(
           <div className="synthesisWaveformVariantActions" aria-label="音频版本播放">
             <Button
@@ -166,8 +191,49 @@ export default function SynthesisFullAudioCard({
             >
               后期
             </Button>
+            <Button
+              variant={showSourceAudio ? "primary" : "secondary"}
+              size="sm"
+              disabled={!hasSourceAudio}
+              onClick={() => setShowSourceAudio((current) => !current)}
+            >
+              原音频
+            </Button>
+            {isAutoPlay ? (
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={onStopAutoPlay}
+              >
+                停止连播
+              </Button>
+            ) : null}
           </div>
         )}
+        inlineAfterWaveform={showSourceAudio && sourceAudioUrl ? (
+          <div className="synthesisSourceAudioInline">
+            <span className="synthesisSourceAudioInlineLabel">原音频</span>
+            <SynthesisWaveSurfer
+              projectId=""
+              audioUrl={sourceAudioUrl}
+              audioVariant="source"
+              audioLabel="原音频"
+              segments={segments}
+              gapDurationMs={gapDurationMs}
+              useSourceTimeline
+              timelineOffsetMs={sourceAudioStartMs}
+              height={34}
+              externalScrollLeft={waveformSync.scrollLeft}
+              externalScrollSignal={waveformSync.signal}
+              zoomValue={waveformZoom}
+              onZoomChange={setWaveformZoom}
+              showControlRow={false}
+              showTimeline={false}
+              showRegions={false}
+              overlayPlayback
+            />
+          </div>
+        ) : null}
       >
         {timelineCollapsed ? (
           <button
@@ -194,12 +260,15 @@ export default function SynthesisFullAudioCard({
               segmentTimings={segmentTimings}
               currentTimeMs={Math.round(Number(fullAudioCurrentTime || 0) * 1000)}
               currentSegmentId={currentSegmentId}
+              singlePlayingSegmentId={singlePlayingSegmentId}
+              isSinglePlaying={isSinglePlaying}
               config={config}
               selectedTrackId={selectedPostprocessTrackId}
               pendingTrackOffsets={pendingPostprocessTrackOffsets}
               waveformSync={waveformSync}
               onScrollLeftChange={handleArrangementScrollLeftChange}
               onSegmentClick={onLocateFullAudioSegment}
+              onSegmentAudioPlay={onPlaySegmentAudio}
               onSegmentTimingChange={onSegmentTimingChange}
               onTrackSelect={onSelectPostprocessTrack}
               onTrackOffsetChange={(kind, trackId, offsetMs) => {

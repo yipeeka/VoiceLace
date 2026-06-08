@@ -1677,6 +1677,7 @@ select.textInput option {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex-wrap: wrap;
 }
 
 .synthesisWaveformVariantActions .btn {
@@ -1706,6 +1707,84 @@ select.textInput option {
   width: 100%;
   min-width: 0;
   overflow: hidden;
+}
+
+.synthesisWaveformShell.noControlRow {
+  gap: 0;
+}
+
+.synthesisWaveformShell.noControlRow .synthesisWaveformUnifiedViewport {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.synthesisWaveformShell.noControlRow .synthesisWaveformViewport {
+  background: transparent;
+}
+
+.synthesisWaveformShell.overlayPlayback .synthesisWaveformViewport {
+  position: relative;
+}
+
+.synthesisWaveformOverlayPlay {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  z-index: 4;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--text-inverse);
+  background: var(--accent-primary);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(-50%) scale(0.96);
+  transition: opacity var(--duration-fast) ease, transform var(--duration-fast) ease;
+}
+
+.synthesisWaveformShell.overlayPlayback:hover .synthesisWaveformOverlayPlay,
+.synthesisWaveformOverlayPlay:focus-visible {
+  opacity: 1;
+  transform: translateY(-50%) scale(1);
+}
+
+.synthesisWaveformOverlayPlay:disabled {
+  color: var(--text-muted);
+  background: var(--bg-soft);
+  cursor: default;
+}
+
+.synthesisSourceAudioInline {
+  position: relative;
+  border-top: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--accent-primary) 8%, transparent);
+}
+
+.synthesisSourceAudioInlineLabel {
+  position: absolute;
+  left: 10px;
+  top: 6px;
+  z-index: 3;
+  max-width: 72px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  color: var(--accent-primary);
+  background: color-mix(in srgb, var(--bg-elevated) 90%, black);
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 28%, var(--border-subtle));
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.synthesisSourceAudioInline .synthesisWaveformViewport {
+  min-height: 34px !important;
 }
 
 .synthesisWaveformDeferredPlaceholder {
@@ -1993,6 +2072,47 @@ select.textInput option {
   filter: drop-shadow(0 0 5px color-mix(in srgb, currentColor 24%, transparent));
   opacity: 0.82;
   pointer-events: none;
+}
+
+.segmentTimelineBlockPlayButton {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 11px);
+  z-index: 5;
+  width: 30px;
+  height: 30px;
+  border: 1px solid color-mix(in srgb, hsl(var(--segment-hue), 80%, 70%) 68%, white);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: white;
+  background:
+    radial-gradient(circle at 35% 28%, rgba(255,255,255,0.34), transparent 36%),
+    hsl(var(--segment-hue), 78%, 48%);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, hsl(var(--segment-hue), 82%, 64%) 42%, transparent),
+    0 8px 18px rgba(0,0,0,0.34),
+    0 0 18px color-mix(in srgb, hsl(var(--segment-hue), 80%, 58%) 36%, transparent);
+  cursor: pointer;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.92);
+  transition:
+    opacity var(--duration-fast) ease,
+    transform var(--duration-fast) ease,
+    filter var(--duration-fast) ease;
+}
+
+.segmentTimelineBlockPlayButton:hover {
+  filter: brightness(1.08) saturate(1.1);
+}
+
+.segmentTimelineBlockPlayButton:focus-visible,
+.segmentTimelineBlockPlayButton.playing,
+.segmentTimelinePreviewBlock:hover .segmentTimelineBlockPlayButton,
+.segmentTimelinePreviewBlock:focus-within .segmentTimelineBlockPlayButton {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
 }
 
 .segmentTimelinePreviewPlayhead {

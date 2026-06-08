@@ -51,9 +51,11 @@ export default function SynthesisWaveSurfer({
   projectId,
   audioUrl,
   audioVariant = "raw",
+  audioLabel = "完整音频",
   segments = [],
   gapDurationMs = 300,
   useSourceTimeline = false,
+  timelineOffsetMs = 0,
   height = 100,
   onCurrentTimeChange = null,
   autoPlaySignal = 0,
@@ -66,7 +68,14 @@ export default function SynthesisWaveSurfer({
   onWaveformSyncChange = null,
   externalScrollLeft = 0,
   externalScrollSignal = 0,
+  zoomValue = null,
+  onZoomChange = null,
+  showControlRow = true,
+  showTimeline = true,
+  showRegions = true,
+  overlayPlayback = false,
   toolbarActions = null,
+  inlineAfterWaveform = null,
   children = null,
 }) {
   const containerRef = useRef(null);
@@ -81,7 +90,7 @@ export default function SynthesisWaveSurfer({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isReady, setIsReady] = useState(false);
-  const [zoom, setZoom] = useState(0);
+  const [internalZoom, setInternalZoom] = useState(0);
   const [waveformPayload, setWaveformPayload] = useState({ data: [], duration_ms: 0, level: 1024 });
   const [waveformError, setWaveformError] = useState("");
   const [forcePlainLoad, setForcePlainLoad] = useState(false);
@@ -138,6 +147,8 @@ export default function SynthesisWaveSurfer({
     onPlayStateChange?.(isPlaying);
   }, [isPlaying, onPlayStateChange]);
 
+  const controlledZoom = Number(zoomValue);
+  const zoom = Number.isFinite(controlledZoom) ? controlledZoom : internalZoom;
   const requestedLevel = useMemo(() => pickWaveformLevel(zoom), [zoom]);
 
   useEffect(() => {
@@ -176,9 +187,9 @@ export default function SynthesisWaveSurfer({
     let canceled = false;
 
     async function loadWaveformPeaks() {
-      if (!projectId || !audioUrl) {
-        setWaveformPayload({ data: [], duration_ms: 0, level: requestedLevel });
-        return;
+    if (!projectId || !audioUrl) {
+      setWaveformPayload({ data: [], duration_ms: 0, level: requestedLevel });
+      return;
       }
       try {
         const payload = await api.get(`/tts/projects/${projectId}/waveform?level=${requestedLevel}&variant=${audioVariant}`);
@@ -216,6 +227,9 @@ export default function SynthesisWaveSurfer({
     const speakerColors = {};
     let colorIndex = 0;
 
+    if (!showRegions) {
+      return [];
+    }
     return segments.map((seg, idx) => {
       const dur = (seg.duration_ms || 2000) / 1000;
       const sourceStartMs = Number(seg.source_start_ms);
@@ -229,10 +243,12 @@ export default function SynthesisWaveSurfer({
       let start = cursor;
       let end = start + dur;
       if (hasSourceTiming) {
-        start = sourceStartMs / 1000;
-        end = sourceEndMs / 1000;
+        const offsetSeconds = Math.max(0, Number(timelineOffsetMs || 0)) / 1000;
+        start = Math.max(0, sourceStartMs / 1000 - offsetSeconds);
+        end = Math.max(start, sourceEndMs / 1000 - offsetSeconds);
       } else if (useSourceTimeline && Number.isFinite(sourceStartMs) && sourceStartMs >= 0) {
-        start = sourceStartMs / 1000;
+        const offsetSeconds = Math.max(0, Number(timelineOffsetMs || 0)) / 1000;
+        start = Math.max(0, sourceStartMs / 1000 - offsetSeconds);
         end = start + dur;
       }
       if (!speakerColors[seg.speaker]) {
@@ -252,7 +268,7 @@ export default function SynthesisWaveSurfer({
       cursor = useSourceTimeline ? Math.max(cursor, end) : end + gapDurationMs / 1000;
       return config;
     });
-  }, [segments, gapDurationMs, useSourceTimeline]);
+  }, [gapDurationMs, segments, showRegions, timelineOffsetMs, useSourceTimeline]);
 
   const precomputedChannelData = useMemo(
     () => buildChannelDataFromMinMax(waveformPayload.data),
@@ -273,6 +289,22 @@ export default function SynthesisWaveSurfer({
 
     try {
       regionsPlugin = RegionsPlugin.create();
+      const plugins = [regionsPlugin];
+      if (showTimeline) {
+        plugins.unshift(TimelinePlugin.create({
+          height: 24,
+          timeInterval: 5,
+          primaryLabelInterval: 10,
+          style: {
+            fontSize: "10px",
+            color: "var(--text-muted)",
+            fontFamily: "monospace",
+            borderTop: "1px solid var(--border-default)",
+            background: "var(--bg-default)",
+            paddingTop: "2px",
+          },
+        }));
+      }
       ws = WaveSurfer.create({
         container: containerRef.current,
         waveColor: "rgba(161, 161, 170, 0.4)",
@@ -284,22 +316,7 @@ export default function SynthesisWaveSurfer({
         barGap: 0,
         barRadius: 2,
         normalize: true,
-        plugins: [
-          TimelinePlugin.create({
-            height: 24,
-            timeInterval: 5,
-            primaryLabelInterval: 10,
-            style: {
-              fontSize: "10px",
-              color: "var(--text-muted)",
-              fontFamily: "monospace",
-              borderTop: "1px solid var(--border-default)",
-              background: "var(--bg-default)",
-              paddingTop: "2px",
-            },
-          }),
-          regionsPlugin,
-        ],
+        plugins,
       });
 
       const loadPromise = !forcePlainLoad && precomputedChannelData && precomputedDurationSec
@@ -420,7 +437,7 @@ export default function SynthesisWaveSurfer({
       setCurrentTime(0);
       setDuration(0);
     };
-  }, [audioUrl, regionConfig, height, precomputedChannelData, precomputedDurationSec, forcePlainLoad, canInitializeWaveform]);
+  }, [audioUrl, regionConfig, height, precomputedChannelData, precomputedDurationSec, forcePlainLoad, canInitializeWaveform, showTimeline]);
 
   useEffect(() => {
     if (!wavesurferRef.current || !isReady) return;
@@ -456,6 +473,14 @@ export default function SynthesisWaveSurfer({
       setWaveformError("音频尚未就绪，请稍后重试。");
     }
   };
+
+  function handleZoomChange([nextValue]) {
+    const nextZoom = Math.max(0, Math.min(100, Number(nextValue || 0)));
+    if (!Number.isFinite(controlledZoom)) {
+      setInternalZoom(nextZoom);
+    }
+    onZoomChange?.(nextZoom);
+  }
 
   useEffect(() => {
     if (!autoPlaySignal || !wavesurferRef.current || !isReady) {
@@ -504,15 +529,17 @@ export default function SynthesisWaveSurfer({
   }, [seekSignal, seekToSeconds, playOnSeek, isReady, duration]);
 
   if (!audioUrl) return null;
+  const viewportMinHeight = height + (showTimeline ? 24 : 0);
 
   return (
-    <div className={`synthesisWaveformShell ${children ? "hasSyncedArrangement" : ""}`}>
-      <div className="synthesisWaveformControlRow">
+    <div className={`synthesisWaveformShell ${children ? "hasSyncedArrangement" : ""} ${showControlRow ? "" : "noControlRow"} ${overlayPlayback ? "overlayPlayback" : ""}`.trim()}>
+      {showControlRow ? (
+        <div className="synthesisWaveformControlRow">
         <button
           type="button"
           onClick={togglePlay}
           disabled={!isReady}
-          aria-label={isPlaying ? "暂停完整音频" : "播放完整音频"}
+          aria-label={isPlaying ? `暂停${audioLabel}` : `播放${audioLabel}`}
           style={{
             width: 38,
             height: 38,
@@ -553,9 +580,9 @@ export default function SynthesisWaveSurfer({
           <ZoomOut aria-hidden="true" focusable="false" size={14} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <Slider
-              ariaLabel="完整波形缩放"
+              ariaLabel={`${audioLabel}波形缩放`}
               value={[zoom]}
-              onValueChange={([v]) => setZoom(v)}
+              onValueChange={handleZoomChange}
               min={0}
               max={100}
               step={0.5}
@@ -565,15 +592,28 @@ export default function SynthesisWaveSurfer({
           </div>
           <ZoomIn aria-hidden="true" focusable="false" size={14} />
         </div>
-      </div>
+        </div>
+      ) : null}
 
       <div className="synthesisWaveformUnifiedViewport">
-        <div className="synthesisWaveformViewport" style={{ minHeight: height + 24 }}>
+        <div className="synthesisWaveformViewport" style={{ minHeight: viewportMinHeight }}>
           <div ref={containerRef} style={{ width: "100%" }} />
+          {overlayPlayback ? (
+            <button
+              type="button"
+              className="synthesisWaveformOverlayPlay"
+              onClick={togglePlay}
+              disabled={!isReady}
+              aria-label={isPlaying ? `暂停${audioLabel}` : `播放${audioLabel}`}
+            >
+              {isPlaying ? <Pause aria-hidden="true" focusable="false" size={15} /> : <Play aria-hidden="true" focusable="false" size={15} style={{ marginLeft: 1 }} />}
+            </button>
+          ) : null}
           {!canInitializeWaveform ? (
-            <div className="synthesisWaveformDeferredPlaceholder" style={{ minHeight: height + 24 }} aria-hidden="true" />
+            <div className="synthesisWaveformDeferredPlaceholder" style={{ minHeight: viewportMinHeight }} aria-hidden="true" />
           ) : null}
         </div>
+        {inlineAfterWaveform}
         {children ? (
           <div className="synthesisWaveformArrangementSlot">
             {children}

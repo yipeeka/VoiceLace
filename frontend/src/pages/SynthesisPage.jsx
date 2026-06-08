@@ -16,7 +16,7 @@ import { useProjectStore } from "../stores/useProjectStore";
 import { useScriptStore } from "../stores/useScriptStore";
 import { useSynthesisStore } from "../stores/useSynthesisStore";
 import { useUiStore } from "../stores/useUiStore";
-import { API_ORIGIN, api } from "../utils/api";
+import { API_BASE_URL, API_ORIGIN, api } from "../utils/api";
 import {
   areArrangementDraftsEqual,
   buildArrangementDraft,
@@ -243,6 +243,29 @@ export default function SynthesisPage() {
     },
     [config?.timeline_lock_enabled, hasEditableSourceTimeline, isDubbingSourceProject],
   );
+  const sourceAudioAsset = currentProject?.audio_assets || {};
+  const sourceAudioRelpath = String(sourceAudioAsset?.source_audio_mp3_relpath || "");
+  const sourceAudioName = String(sourceAudioAsset?.source_audio_name || "");
+  const sourceAudioStartMs = Number.isFinite(Number(sourceAudioAsset?.source_audio_start_ms))
+    ? Number(sourceAudioAsset.source_audio_start_ms)
+    : 0;
+  const sourceAudioEndMs = Number.isFinite(Number(sourceAudioAsset?.source_audio_end_ms))
+    ? Number(sourceAudioAsset.source_audio_end_ms)
+    : 0;
+  const sourceAudioDurationMs = Number.isFinite(Number(sourceAudioAsset?.source_audio_duration_ms))
+    ? Number(sourceAudioAsset.source_audio_duration_ms)
+    : 0;
+  const sourceAudioVersion = encodeURIComponent([
+    sourceAudioRelpath,
+    sourceAudioName,
+    sourceAudioStartMs,
+    sourceAudioEndMs,
+    sourceAudioDurationMs,
+    currentProject?.updated_at || "",
+  ].join("|"));
+  const sourceAudioUrl = currentProject?.id && sourceAudioRelpath
+    ? `${API_BASE_URL}/projects/${currentProject.id}/source-audio?asset=${encodeURIComponent(sourceAudioRelpath)}&v=${sourceAudioVersion}`
+    : "";
 
   useEffect(() => {
     const projectId = currentProject?.id || null;
@@ -739,7 +762,7 @@ export default function SynthesisPage() {
     });
   }, [arrangementEdited, defaultArrangementDraft]);
 
-  const { isAutoPlay, currentSegmentId, playFrom, stop } = usePlaybackQueue(visibleSegments);
+  const { isAutoPlay, currentSegmentId, singlePlayingSegmentId, isSinglePlaying, playFrom, playSingle, stop } = usePlaybackQueue(visibleSegments);
   const fullAudioCurrentSegmentId = useMemo(() => {
     const currentMs = Math.max(0, Math.round(Number(fullAudioCurrentTime || 0) * 1000));
     const boundarySegment = segments.find((segment) => {
@@ -1555,6 +1578,8 @@ export default function SynthesisPage() {
             fullAudioUrl={fullAudioUrl}
             rawAudioUrl={rawAudioUrl}
             processedAudioUrl={processedAudioUrl}
+            sourceAudioUrl={sourceAudioUrl}
+            sourceAudioStartMs={sourceAudioStartMs}
             audioVariant={audioVariant}
             onAudioVariantChange={setAudioVariant}
             segments={segments}
@@ -1566,7 +1591,12 @@ export default function SynthesisPage() {
             fullAudioCurrentTime={fullAudioCurrentTime}
             segmentTimings={segmentTimings}
             currentSegmentId={highlightedSegmentId}
+            singlePlayingSegmentId={singlePlayingSegmentId}
+            isSinglePlaying={isSinglePlaying}
+            isAutoPlay={isAutoPlay}
             onLocateFullAudioSegment={handleLocateFullAudioSegment}
+            onPlaySegmentAudio={(segment) => playSingle(segment.audio_url, segment.segment_id)}
+            onStopAutoPlay={stop}
             onSegmentTimingChange={handlePreviewSegmentTimingChange}
             arrangementDraft={arrangementDraft}
             arrangementDirty={arrangementDirty}

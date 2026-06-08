@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Pause, Play } from "lucide-react";
 
 const SPEAKER_HUES = [202, 124, 277, 38, 160, 326, 52, 188, 250, 18];
 const SEGMENT_SNAP_MS = 50;
@@ -82,12 +83,15 @@ export default function SegmentTimelinePreview({
   segmentTimings = {},
   currentTimeMs = 0,
   currentSegmentId = "",
+  singlePlayingSegmentId = "",
+  isSinglePlaying = false,
   config = {},
   selectedTrackId = "",
   pendingTrackOffsets = {},
   waveformSync = {},
   onScrollLeftChange,
   onSegmentClick,
+  onSegmentAudioPlay,
   onSegmentTimingChange,
   onTrackSelect,
   onTrackOffsetChange,
@@ -381,6 +385,8 @@ export default function SegmentTimelinePreview({
               const hue = speakerHueMap[String(segment.speaker || "narrator")] || SPEAKER_HUES[index % SPEAKER_HUES.length];
               const label = `${segment.speaker || "narrator"}${segment.type === "dialogue" ? "" : ` (${segment.type || ""})`}`;
               const waveImage = buildWaveImage(hashString(`${segment.segment_id}:${segment.text}:${segment.speaker}`), 32, hue);
+              const canPlayAudio = Boolean(segment.audio_url) && typeof onSegmentAudioPlay === "function";
+              const isSingleSegmentPlaying = isSinglePlaying && String(singlePlayingSegmentId || "") === String(segment.segment_id || "");
               return (
                 <span
                   role="button"
@@ -410,6 +416,29 @@ export default function SegmentTimelinePreview({
                   />
                   <span className="segmentTimelinePreviewLabel">{label}</span>
                   <span className="segmentTimelinePreviewWave" style={{ backgroundImage: waveImage }} aria-hidden="true" />
+                  {canPlayAudio ? (
+                    <button
+                      type="button"
+                      className={`segmentTimelineBlockPlayButton ${isSingleSegmentPlaying ? "playing" : ""}`}
+                      aria-label={`${isSingleSegmentPlaying ? "暂停" : "播放"} ${label} 音频`}
+                      title={isSingleSegmentPlaying ? "暂停该段音频" : "播放该段音频"}
+                      onPointerDown={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                      }}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onSegmentAudioPlay(segment);
+                      }}
+                    >
+                      {isSingleSegmentPlaying ? (
+                        <Pause aria-hidden="true" focusable="false" size={13} />
+                      ) : (
+                        <Play aria-hidden="true" focusable="false" size={13} />
+                      )}
+                    </button>
+                  ) : null}
                   <i
                     className="segmentTimelinePreviewResizeHandle right"
                     aria-hidden="true"
